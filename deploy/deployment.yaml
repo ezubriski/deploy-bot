@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deploy-bot
+  namespace: deploy-bot
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: deploy-bot
+  template:
+    metadata:
+      labels:
+        app: deploy-bot
+    spec:
+      serviceAccountName: deploy-bot
+      containers:
+        - name: deploy-bot
+          image: deploy-bot:latest
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: CONFIG_PATH
+              value: /etc/deploy-bot/config.json
+            - name: AWS_SECRET_NAME
+              value: deploy-bot/secrets
+          volumeMounts:
+            - name: config
+              mountPath: /etc/deploy-bot
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: deploy-bot-config
