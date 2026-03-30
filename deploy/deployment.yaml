@@ -14,6 +14,12 @@ spec:
         app: deploy-bot-receiver
     spec:
       serviceAccountName: deploy-bot
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: receiver
           image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/deploy-bot:latest
@@ -23,6 +29,11 @@ spec:
               value: /etc/deploy-bot/config.json
             - name: AWS_SECRET_NAME
               value: deploy-bot/secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: config
               mountPath: /etc/deploy-bot
@@ -64,6 +75,12 @@ spec:
         app: deploy-bot-worker
     spec:
       serviceAccountName: deploy-bot
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
           image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/deploy-bot:latest
@@ -73,6 +90,11 @@ spec:
               value: /etc/deploy-bot/config.json
             - name: AWS_SECRET_NAME
               value: deploy-bot/secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: config
               mountPath: /etc/deploy-bot

@@ -1,0 +1,34 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: deploy-bot
+  namespace: deploy-bot
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: deploy-bot.internal.example.com
+      http:
+        paths:
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: deploy-bot-worker
+                port:
+                  name: metrics
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: deploy-bot-worker
+                port:
+                  name: metrics
+          - path: /readyz
+            pathType: Prefix
+            backend:
+              service:
+                name: deploy-bot-worker
+                port:
+                  name: metrics

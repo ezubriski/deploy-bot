@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: deploy-bot-receiver
+  namespace: deploy-bot
+spec:
+  type: ClusterIP
+  selector:
+    app: deploy-bot-receiver
+  ports:
+    - name: health
+      port: 8080
+      targetPort: health
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: deploy-bot-worker
+  namespace: deploy-bot
+  labels:
+    app: deploy-bot-worker
+spec:
+  type: ClusterIP
+  selector:
+    app: deploy-bot-worker
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics
