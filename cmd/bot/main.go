@@ -49,6 +49,9 @@ func main() {
 	if err != nil {
 		log.Fatal("load secrets", zap.Error(err))
 	}
+	if err := secrets.Validate(); err != nil {
+		log.Fatal("invalid secrets", zap.Error(err))
+	}
 
 	// Redis store
 	redisStore := store.New(secrets.RedisAddr)
