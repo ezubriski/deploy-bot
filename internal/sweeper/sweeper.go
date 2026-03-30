@@ -16,7 +16,6 @@ import (
 )
 
 
-const sweepInterval = 5 * time.Minute
 
 type Sweeper struct {
 	store   *store.Store
@@ -68,23 +67,9 @@ func (s *Sweeper) RecoverStuck(ctx context.Context) {
 	}
 }
 
-// Start runs the sweeper loop every 5 minutes.
-func (s *Sweeper) Start(ctx context.Context) {
-	go func() {
-		ticker := time.NewTicker(sweepInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				s.sweep(ctx)
-			}
-		}
-	}()
-}
-
-func (s *Sweeper) sweep(ctx context.Context) {
+// RunOnce performs a single sweep pass: expires stale deploys, notifies
+// requesters/approvers, and refreshes the pending gauge.
+func (s *Sweeper) RunOnce(ctx context.Context) {
 	expired, err := s.store.GetExpired(ctx)
 	if err != nil {
 		s.log.Error("sweeper: get expired", zap.Error(err))

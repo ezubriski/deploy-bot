@@ -1,12 +1,17 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 )
 
 type Config struct {
@@ -114,6 +119,29 @@ func (c *Config) LockTTL() (time.Duration, error) {
 		return 5 * time.Minute, nil
 	}
 	return time.ParseDuration(c.Deployment.LockTTL)
+}
+
+// LoadSecrets fetches and parses the bot secrets from AWS Secrets Manager.
+func LoadSecrets(ctx context.Context, secretName string) (*Secrets, error) {
+	if secretName == "" {
+		return nil, fmt.Errorf("secret name is empty")
+	}
+	cfg, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load aws config: %w", err)
+	}
+	client := secretsmanager.NewFromConfig(cfg)
+	out, err := client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
+		SecretId: aws.String(secretName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get secret: %w", err)
+	}
+	var secrets Secrets
+	if err := json.Unmarshal([]byte(aws.ToString(out.SecretString)), &secrets); err != nil {
+		return nil, fmt.Errorf("parse secrets: %w", err)
+	}
+	return &secrets, nil
 }
 
 func (c *Config) AppByName(name string) (*AppConfig, bool) {

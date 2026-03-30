@@ -13,6 +13,7 @@ import (
 const (
 	keyPrefix     = "pending:"
 	lockPrefix    = "lock:"
+	sysLockPrefix = "syslock:"
 	historyKey    = "history"
 	historyMaxLen = 100
 )
@@ -30,6 +31,12 @@ func New(addr string) *Store {
 
 func (s *Store) Ping(ctx context.Context) error {
 	return s.rdb.Ping(ctx).Err()
+}
+
+// Redis returns the underlying Redis client, used by components that need
+// direct access (e.g. the queue worker).
+func (s *Store) Redis() *redis.Client {
+	return s.rdb
 }
 
 func key(prNumber int) string {
@@ -184,6 +191,17 @@ func (s *Store) AcquireLock(ctx context.Context, app, holder string, ttl time.Du
 // ReleaseLock deletes the per-app deploy lock.
 func (s *Store) ReleaseLock(ctx context.Context, app string) error {
 	return s.rdb.Del(ctx, lockPrefix+app).Err()
+}
+
+// TryLock acquires a named system lock (distinct from per-app deploy locks).
+// Returns true if the lock was acquired. Used for single-instance coordination
+// of background processes (e.g. the sweeper) without leader election.
+func (s *Store) TryLock(ctx context.Context, name string, ttl time.Duration) (bool, error) {
+	ok, err := s.rdb.SetNX(ctx, sysLockPrefix+name, "1", ttl).Result()
+	if err != nil {
+		return false, fmt.Errorf("trylock %s: %w", name, err)
+	}
+	return ok, nil
 }
 
 // PRNumberFromKey extracts the PR number from a Redis key like "pending:123".

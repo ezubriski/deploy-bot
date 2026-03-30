@@ -2,36 +2,34 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+	"fmt"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/slack-go/slack"
-	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
 
 	"github.com/yourorg/deploy-bot/internal/audit"
 	"github.com/yourorg/deploy-bot/internal/bot"
 	"github.com/yourorg/deploy-bot/internal/config"
 	"github.com/yourorg/deploy-bot/internal/ecr"
-	"github.com/yourorg/deploy-bot/internal/election"
 	githubPkg "github.com/yourorg/deploy-bot/internal/github"
 	"github.com/yourorg/deploy-bot/internal/health"
 	"github.com/yourorg/deploy-bot/internal/metrics"
+	"github.com/yourorg/deploy-bot/internal/queue"
 	"github.com/yourorg/deploy-bot/internal/store"
 	"github.com/yourorg/deploy-bot/internal/sweeper"
 	"github.com/yourorg/deploy-bot/internal/validator"
 )
 
-const metricsAddr = ":9090"
+const (
+	metricsAddr    = ":9090"
+	sweepLockTTL   = 6 * time.Minute // slightly longer than sweepInterval
+)
 
 func main() {
 	log, err := zap.NewProduction()
@@ -41,12 +39,9 @@ func main() {
 	}
 	defer log.Sync()
 
-	// Root context cancelled on SIGTERM or SIGINT. This propagates to the
-	// leader election loop and through leaderCtx to all leader-only components.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	// Load config and wrap in a Holder for hot-reload support.
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "/etc/deploy-bot/config.json"
@@ -57,8 +52,7 @@ func main() {
 	}
 	cfgHolder := config.NewHolder(initialCfg, configPath)
 
-	// Load secrets from AWS Secrets Manager
-	secrets, err := loadSecrets(ctx, os.Getenv("AWS_SECRET_NAME"))
+	secrets, err := config.LoadSecrets(ctx, os.Getenv("AWS_SECRET_NAME"))
 	if err != nil {
 		log.Fatal("load secrets", zap.Error(err))
 	}
@@ -66,8 +60,6 @@ func main() {
 		log.Fatal("invalid secrets", zap.Error(err))
 	}
 
-	// Metrics and health endpoints — start immediately so both leader and
-	// follower pods are always scrapeable and probeable.
 	m := metrics.NewDefault()
 	hh := &health.Handler{}
 	go func() {
@@ -81,115 +73,74 @@ func main() {
 		}
 	}()
 
-	// Redis store
 	redisStore := store.New(secrets.RedisAddr)
 	if err := redisStore.Ping(ctx); err != nil {
 		log.Fatal("redis ping", zap.Error(err))
 	}
 
-	// GitHub client
 	ghClient := githubPkg.NewClient(secrets.GitHubToken, cfgHolder.Load().GitHub.Org, cfgHolder.Load().GitHub.Repo)
 
-	// Slack client
 	slackClient := slack.New(secrets.SlackBotToken,
 		slack.OptionAppLevelToken(secrets.SlackAppToken),
 	)
-	sm := socketmode.New(slackClient,
-		socketmode.OptionDebug(false),
-	)
 
-	// ECR cache
 	ecrCache, err := ecr.NewCache(ctx, cfgHolder.Load(), m, log)
 	if err != nil {
 		log.Fatal("init ecr cache", zap.Error(err))
 	}
 
-	// Audit logger
 	auditLog, err := audit.NewLogger(ctx, cfgHolder.Load(), log)
 	if err != nil {
 		log.Fatal("init audit logger", zap.Error(err))
 	}
 
-	// Validator
 	val := validator.New(secrets.GitHubToken, slackClient, cfgHolder.Load(), log)
 
-	// Bot and Sweeper receive the Holder so they pick up config changes live.
-	b := bot.New(slackClient, sm, redisStore, ghClient, ecrCache, val, auditLog, m, cfgHolder, log)
+	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m, cfgHolder, log)
 	sw := sweeper.New(redisStore, ghClient, slackClient, auditLog, m, cfgHolder, log)
 
-	// Watch the config file for changes (SIGHUP or mtime), adding any new
-	// apps to the ECR cache on each successful reload.
 	config.Watch(ctx, cfgHolder, 30*time.Second, func(newCfg *config.Config) {
 		if err := ecrCache.AddApps(newCfg.Apps); err != nil {
 			log.Warn("ecr cache: failed to register new apps after reload", zap.Error(err))
 		}
 	}, log)
 
-	// Kubernetes identity for leader election
-	podName := os.Getenv("POD_NAME")
-	if podName == "" {
-		podName = "deploy-bot-local"
-	}
-	podNamespace := os.Getenv("POD_NAMESPACE")
-	if podNamespace == "" {
-		podNamespace = "default"
-	}
+	// Populate ECR cache; mark ready once done.
+	ecrCache.Populate(ctx)
+	hh.SetCacheReady()
+	ecrCache.StartRefresh(ctx)
 
-	callbacks := election.Callbacks{
-		OnStartedLeading: func(leaderCtx context.Context) {
-			log.Info("became leader", zap.String("pod", podName))
-			hh.SetLeader(true)
+	// Recover any deploys stuck in merging state from a previous crash.
+	sw.RecoverStuck(ctx)
 
-			// Populate ECR cache, fail open; mark ready only after populate.
-			ecrCache.Populate(leaderCtx)
-			hh.SetCacheReady()
+	// Start the sweeper with a Redis lock so only one worker pod runs it.
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				acquired, err := redisStore.TryLock(ctx, "sweeper", sweepLockTTL)
+				if err != nil {
+					log.Error("sweeper lock", zap.Error(err))
+					continue
+				}
+				if acquired {
+					sw.RunOnce(ctx)
+				}
+			}
+		}
+	}()
 
-			ecrCache.StartRefresh(leaderCtx)
-
-			// Recover stuck deploys
-			sw.RecoverStuck(leaderCtx)
-			sw.Start(leaderCtx)
-
-			// Start the bot's event loop in the background.
-			b.Run()
-
-			// Block until the leader context is cancelled (signal or lease loss),
-			// then drain in-flight handlers before returning to the election loop.
-			<-leaderCtx.Done()
-			hh.SetLeader(false)
-			log.Info("leader context cancelled, initiating graceful shutdown",
-				zap.String("reason", context.Cause(leaderCtx).Error()))
-			b.Shutdown(context.Background())
-		},
+	// Initialise the consumer group before starting the worker loop.
+	qw := queue.NewWorker(redisStore.Redis(), log)
+	if err := qw.Init(ctx); err != nil {
+		log.Fatal("init queue consumer group", zap.Error(err))
 	}
 
-	log.Info("starting leader election", zap.String("pod", podName), zap.String("namespace", podNamespace))
-	if err := election.Run(ctx, podName, podNamespace, callbacks, log); err != nil {
-		log.Fatal("leader election", zap.Error(err))
-	}
-}
-
-func loadSecrets(ctx context.Context, secretName string) (*config.Secrets, error) {
-	if secretName == "" {
-		return nil, fmt.Errorf("AWS_SECRET_NAME not set")
-	}
-
-	cfg, err := awsconfig.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("load aws config: %w", err)
-	}
-
-	client := secretsmanager.NewFromConfig(cfg)
-	out, err := client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
-		SecretId: aws.String(secretName),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get secret: %w", err)
-	}
-
-	var secrets config.Secrets
-	if err := json.Unmarshal([]byte(aws.ToString(out.SecretString)), &secrets); err != nil {
-		return nil, fmt.Errorf("parse secrets: %w", err)
-	}
-	return &secrets, nil
+	log.Info("worker starting")
+	qw.Run(ctx, b.HandleEvent)
+	log.Info("worker stopped")
 }

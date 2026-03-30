@@ -15,14 +15,12 @@ import (
 	"github.com/yourorg/deploy-bot/internal/store"
 )
 
-func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Client) {
+func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 	cmd, ok := evt.Data.(slack.SlashCommand)
 	if !ok {
 		return
 	}
-	client.Ack(*evt.Request)
 
-	ctx := context.Background()
 	parts := strings.Fields(cmd.Text)
 
 	switch {

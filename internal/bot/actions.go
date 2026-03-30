@@ -15,7 +15,7 @@ import (
 	"github.com/yourorg/deploy-bot/internal/store"
 )
 
-func (b *Bot) handleInteraction(evt *socketmode.Event, client *socketmode.Client) {
+func (b *Bot) handleInteraction(ctx context.Context, evt socketmode.Event) {
 	callback, ok := evt.Data.(slack.InteractionCallback)
 	if !ok {
 		return
@@ -23,28 +23,24 @@ func (b *Bot) handleInteraction(evt *socketmode.Event, client *socketmode.Client
 
 	switch callback.Type {
 	case slack.InteractionTypeBlockActions:
-		client.Ack(*evt.Request)
-		b.handleBlockAction(context.Background(), callback, client)
+		b.handleBlockAction(ctx, callback)
 	case slack.InteractionTypeViewSubmission:
-		// Ack is deferred to submission handlers so they can return validation errors.
-		b.handleViewSubmission(context.Background(), evt, callback, client)
-	default:
-		client.Ack(*evt.Request)
+		b.handleViewSubmission(ctx, callback)
 	}
 }
 
-func (b *Bot) handleBlockAction(ctx context.Context, callback slack.InteractionCallback, client *socketmode.Client) {
+func (b *Bot) handleBlockAction(ctx context.Context, callback slack.InteractionCallback) {
 	for _, action := range callback.ActionCallback.BlockActions {
 		switch action.ActionID {
 		case actionApprove:
-			b.handleApprove(ctx, callback, action, client)
+			b.handleApprove(ctx, callback, action)
 		case actionReject:
-			b.handleRejectButton(ctx, callback, action, client)
+			b.handleRejectButton(ctx, callback, action)
 		}
 	}
 }
 
-func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallback, action *slack.BlockAction, client *socketmode.Client) {
+func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallback, action *slack.BlockAction) {
 	prNumber, err := strconv.Atoi(action.Value)
 	if err != nil {
 		b.log.Error("invalid PR number in approve action", zap.String("value", action.Value))
@@ -121,7 +117,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
 }
 
-func (b *Bot) handleRejectButton(ctx context.Context, callback slack.InteractionCallback, action *slack.BlockAction, client *socketmode.Client) {
+func (b *Bot) handleRejectButton(ctx context.Context, callback slack.InteractionCallback, action *slack.BlockAction) {
 	prNumber, err := strconv.Atoi(action.Value)
 	if err != nil {
 		return
@@ -140,19 +136,16 @@ func (b *Bot) handleRejectButton(ctx context.Context, callback slack.Interaction
 	}
 }
 
-func (b *Bot) handleViewSubmission(ctx context.Context, evt *socketmode.Event, callback slack.InteractionCallback, client *socketmode.Client) {
+func (b *Bot) handleViewSubmission(ctx context.Context, callback slack.InteractionCallback) {
 	switch callback.View.CallbackID {
 	case modalCallbackDeploy:
-		b.handleDeploySubmit(ctx, evt, callback, client)
+		b.handleDeploySubmit(ctx, callback)
 	case modalCallbackReject:
-		client.Ack(*evt.Request)
 		b.handleRejectSubmit(ctx, callback)
-	default:
-		client.Ack(*evt.Request)
 	}
 }
 
-func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, callback slack.InteractionCallback, client *socketmode.Client) {
+func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.InteractionCallback) {
 	values := callback.View.State.Values
 
 	appVal := values[blockApp][actionApp].SelectedOption.Value
@@ -169,40 +162,31 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, cal
 
 	requesterID := callback.User.ID
 
-	// Validate approver is on the team
+	// Validate approver is on the team. On failure, DM the user since the
+	// modal has already been closed by the time this runs asynchronously.
 	isMember, _, err := b.validator.IsApprover(ctx, approverID)
 	if err != nil || !isMember {
 		msg := "Selected approver is not a member of the approver team."
 		if err != nil {
 			msg = fmt.Sprintf("Failed to validate approver: %v", err)
 		}
-		client.Ack(*evt.Request, map[string]interface{}{
-			"response_action": "errors",
-			"errors":          map[string]string{blockApprover: msg},
-		})
+		b.dmUser(ctx, requesterID, msg)
 		return
 	}
 
 	// Validate tag
 	valid, err := b.ecrCache.ValidateTag(ctx, appVal, tag)
 	if err != nil || !valid {
-		errMsg := fmt.Sprintf("Tag `%s` is not valid for app %s.", tag, appVal)
-		client.Ack(*evt.Request, map[string]interface{}{
-			"response_action": "errors",
-			"errors":          map[string]string{blockTagManual: errMsg},
-		})
+		b.dmUser(ctx, requesterID, fmt.Sprintf("Tag `%s` is not valid for app %s. Please try again.", tag, appVal))
 		return
 	}
 
-	// Acquire per-app deploy lock — prevent concurrent deploys of the same app.
+	// Acquire per-app deploy lock
 	lockTTL, _ := b.cfg.Load().LockTTL()
 	acquired, err := b.store.AcquireLock(ctx, appVal, requesterID, lockTTL)
 	if err != nil {
 		b.log.Error("acquire deploy lock", zap.String("app", appVal), zap.Error(err))
-		client.Ack(*evt.Request, map[string]interface{}{
-			"response_action": "errors",
-			"errors":          map[string]string{blockApp: "Failed to check deploy lock. Please try again."},
-		})
+		b.dmUser(ctx, requesterID, "Failed to check deploy lock. Please try again.")
 		return
 	}
 	if !acquired {
@@ -210,25 +194,21 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, cal
 		if existing, _ := b.store.GetByApp(ctx, appVal); existing != nil {
 			msg = fmt.Sprintf("A deployment of *%s* is already in progress: <%s|PR #%d>", appVal, existing.PRURL, existing.PRNumber)
 		}
-		client.Ack(*evt.Request, map[string]interface{}{
-			"response_action": "errors",
-			"errors":          map[string]string{blockApp: msg},
-		})
+		b.dmUser(ctx, requesterID, msg)
 		return
 	}
-
-	// All validation passed — ack and proceed
-	client.Ack(*evt.Request)
 
 	appCfg, ok := b.cfg.Load().AppByName(appVal)
 	if !ok {
 		b.log.Error("app not found", zap.String("app", appVal))
+		_ = b.store.ReleaseLock(ctx, appVal)
 		return
 	}
 
 	baseBranch, err := b.gh.GetDefaultBranch(ctx)
 	if err != nil {
 		b.log.Error("get default branch", zap.Error(err))
+		_ = b.store.ReleaseLock(ctx, appVal)
 		return
 	}
 
@@ -248,9 +228,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, cal
 	if err != nil {
 		b.log.Error("create deploy PR", zap.Error(err))
 		_ = b.store.ReleaseLock(ctx, appVal)
-		_, _, _ = b.slack.PostMessageContext(ctx, requesterID,
-			slack.MsgOptionText(fmt.Sprintf("Failed to create deployment PR: %v", err), false),
-		)
+		b.dmUser(ctx, requesterID, fmt.Sprintf("Failed to create deployment PR: %v", err))
 		return
 	}
 
@@ -327,7 +305,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 
 	isMember, ghLogin, err := b.validator.IsApprover(ctx, approverID)
 	if err != nil || !isMember {
-		b.replyEphemeral(ctx, "", approverID, "You are not a member of the approver team.")
+		b.dmUser(ctx, approverID, "You are not a member of the approver team.")
 		return
 	}
 
@@ -402,5 +380,14 @@ func (b *Bot) replyEphemeral(ctx context.Context, channelID, userID, text string
 	_, err := b.slack.PostEphemeralContext(ctx, channelID, userID, slack.MsgOptionText(text, false))
 	if err != nil {
 		b.log.Error("post ephemeral", zap.Error(err))
+	}
+}
+
+// dmUser sends a direct message to a Slack user ID. Used for async error
+// feedback where no channel context is available (e.g. modal submissions).
+func (b *Bot) dmUser(ctx context.Context, userID, text string) {
+	_, _, err := b.slack.PostMessageContext(ctx, userID, slack.MsgOptionText(text, false))
+	if err != nil {
+		b.log.Error("dm user", zap.String("user", userID), zap.Error(err))
 	}
 }

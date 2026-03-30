@@ -8,61 +8,28 @@ import (
 
 func TestLiveness_AlwaysOK(t *testing.T) {
 	h := &Handler{}
+	assertStatus(t, h.Liveness, http.StatusOK)
 
-	for _, desc := range []string{"follower", "leader", "leader+cache"} {
-		t.Run(desc, func(t *testing.T) {
-			if desc == "leader" || desc == "leader+cache" {
-				h.SetLeader(true)
-			}
-			if desc == "leader+cache" {
-				h.SetCacheReady()
-			}
-			assertStatus(t, h.Liveness, http.StatusOK)
-		})
-	}
-}
-
-func TestReadiness_FollowerNotReady(t *testing.T) {
-	h := &Handler{} // leader=false, cache=false
-	assertStatus(t, h.Readiness, http.StatusServiceUnavailable)
-}
-
-func TestReadiness_LeaderButNoCacheNotReady(t *testing.T) {
-	h := &Handler{}
-	h.SetLeader(true)
-	assertStatus(t, h.Readiness, http.StatusServiceUnavailable)
-}
-
-func TestReadiness_CacheReadyButNotLeaderNotReady(t *testing.T) {
-	h := &Handler{}
 	h.SetCacheReady()
+	assertStatus(t, h.Liveness, http.StatusOK)
+}
+
+func TestReadiness_NotReadyUntilCachePopulated(t *testing.T) {
+	h := &Handler{}
 	assertStatus(t, h.Readiness, http.StatusServiceUnavailable)
 }
 
-func TestReadiness_LeaderAndCacheReady(t *testing.T) {
+func TestReadiness_ReadyAfterCachePopulated(t *testing.T) {
 	h := &Handler{}
-	h.SetLeader(true)
 	h.SetCacheReady()
 	assertStatus(t, h.Readiness, http.StatusOK)
 }
 
-func TestReadiness_LosesLeadership(t *testing.T) {
+func TestReadiness_CacheReadyIsOnceOnly(t *testing.T) {
 	h := &Handler{}
-	h.SetLeader(true)
 	h.SetCacheReady()
-	assertStatus(t, h.Readiness, http.StatusOK)
-
-	h.SetLeader(false)
-	assertStatus(t, h.Readiness, http.StatusServiceUnavailable)
-}
-
-func TestReadiness_RegainsLeadership(t *testing.T) {
-	h := &Handler{}
-	h.SetLeader(true)
+	// Calling again is a no-op; readiness should still hold.
 	h.SetCacheReady()
-	h.SetLeader(false)
-	h.SetLeader(true)
-	// Cache was already set — should be ready again immediately.
 	assertStatus(t, h.Readiness, http.StatusOK)
 }
 
