@@ -24,6 +24,7 @@ import (
 	"github.com/yourorg/deploy-bot/internal/ecr"
 	"github.com/yourorg/deploy-bot/internal/election"
 	githubPkg "github.com/yourorg/deploy-bot/internal/github"
+	"github.com/yourorg/deploy-bot/internal/health"
 	"github.com/yourorg/deploy-bot/internal/metrics"
 	"github.com/yourorg/deploy-bot/internal/store"
 	"github.com/yourorg/deploy-bot/internal/sweeper"
@@ -65,14 +66,18 @@ func main() {
 		log.Fatal("invalid secrets", zap.Error(err))
 	}
 
-	// Metrics — start HTTP server on :9090 immediately so it's always scrapeable.
+	// Metrics and health endpoints — start immediately so both leader and
+	// follower pods are always scrapeable and probeable.
 	m := metrics.NewDefault()
+	hh := &health.Handler{}
 	go func() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
-		log.Info("metrics server listening", zap.String("addr", metricsAddr))
+		mux.HandleFunc("/healthz", hh.Liveness)
+		mux.HandleFunc("/readyz", hh.Readiness)
+		log.Info("metrics/health server listening", zap.String("addr", metricsAddr))
 		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
-			log.Error("metrics server error", zap.Error(err))
+			log.Error("metrics/health server error", zap.Error(err))
 		}
 	}()
 
@@ -133,9 +138,12 @@ func main() {
 	callbacks := election.Callbacks{
 		OnStartedLeading: func(leaderCtx context.Context) {
 			log.Info("became leader", zap.String("pod", podName))
+			hh.SetLeader(true)
 
-			// Populate ECR cache, fail open
+			// Populate ECR cache, fail open; mark ready only after populate.
 			ecrCache.Populate(leaderCtx)
+			hh.SetCacheReady()
+
 			ecrCache.StartRefresh(leaderCtx)
 
 			// Recover stuck deploys
@@ -148,6 +156,7 @@ func main() {
 			// Block until the leader context is cancelled (signal or lease loss),
 			// then drain in-flight handlers before returning to the election loop.
 			<-leaderCtx.Done()
+			hh.SetLeader(false)
 			log.Info("leader context cancelled, initiating graceful shutdown",
 				zap.String("reason", context.Cause(leaderCtx).Error()))
 			b.Shutdown(context.Background())
