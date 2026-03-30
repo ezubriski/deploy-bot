@@ -1,4 +1,4 @@
-module github.com/yourorg/deploy-bot
+module github.com/ezubriski/deploy-bot
 
 go 1.22
 

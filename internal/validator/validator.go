@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 
-	"github.com/yourorg/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/config"
 )
 
 type Validator struct {

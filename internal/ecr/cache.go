@@ -17,8 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"go.uber.org/zap"
 
-	"github.com/yourorg/deploy-bot/internal/config"
-	"github.com/yourorg/deploy-bot/internal/metrics"
+	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/metrics"
 )
 
 const (

@@ -7,13 +7,13 @@ import (
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
 
-	"github.com/yourorg/deploy-bot/internal/audit"
-	"github.com/yourorg/deploy-bot/internal/config"
-	"github.com/yourorg/deploy-bot/internal/ecr"
-	githubPkg "github.com/yourorg/deploy-bot/internal/github"
-	"github.com/yourorg/deploy-bot/internal/metrics"
-	"github.com/yourorg/deploy-bot/internal/store"
-	"github.com/yourorg/deploy-bot/internal/validator"
+	"github.com/ezubriski/deploy-bot/internal/audit"
+	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/ecr"
+	githubPkg "github.com/ezubriski/deploy-bot/internal/github"
+	"github.com/ezubriski/deploy-bot/internal/metrics"
+	"github.com/ezubriski/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/validator"
 )
 
 type Bot struct {

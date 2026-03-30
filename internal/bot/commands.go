@@ -11,8 +11,8 @@ import (
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
 
-	"github.com/yourorg/deploy-bot/internal/audit"
-	"github.com/yourorg/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/audit"
+	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
 func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {

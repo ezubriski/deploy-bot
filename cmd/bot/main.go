@@ -13,17 +13,17 @@ import (
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
 
-	"github.com/yourorg/deploy-bot/internal/audit"
-	"github.com/yourorg/deploy-bot/internal/bot"
-	"github.com/yourorg/deploy-bot/internal/config"
-	"github.com/yourorg/deploy-bot/internal/ecr"
-	githubPkg "github.com/yourorg/deploy-bot/internal/github"
-	"github.com/yourorg/deploy-bot/internal/health"
-	"github.com/yourorg/deploy-bot/internal/metrics"
-	"github.com/yourorg/deploy-bot/internal/queue"
-	"github.com/yourorg/deploy-bot/internal/store"
-	"github.com/yourorg/deploy-bot/internal/sweeper"
-	"github.com/yourorg/deploy-bot/internal/validator"
+	"github.com/ezubriski/deploy-bot/internal/audit"
+	"github.com/ezubriski/deploy-bot/internal/bot"
+	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/ecr"
+	githubPkg "github.com/ezubriski/deploy-bot/internal/github"
+	"github.com/ezubriski/deploy-bot/internal/health"
+	"github.com/ezubriski/deploy-bot/internal/metrics"
+	"github.com/ezubriski/deploy-bot/internal/queue"
+	"github.com/ezubriski/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/sweeper"
+	"github.com/ezubriski/deploy-bot/internal/validator"
 )
 
 const (

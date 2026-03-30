@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/slack-go/slack"
-	"github.com/yourorg/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
 // findRollbackTag tests

@@ -13,11 +13,11 @@ import (
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
 
-	"github.com/yourorg/deploy-bot/internal/approvers"
-	"github.com/yourorg/deploy-bot/internal/bot"
-	"github.com/yourorg/deploy-bot/internal/config"
-	"github.com/yourorg/deploy-bot/internal/queue"
-	"github.com/yourorg/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/approvers"
+	"github.com/ezubriski/deploy-bot/internal/bot"
+	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/queue"
+	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
 const approverRefreshInterval = 5 * time.Minute
