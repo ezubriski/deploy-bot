@@ -73,6 +73,10 @@ spec:
     metadata:
       labels:
         app: deploy-bot-worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: deploy-bot
       securityContext:

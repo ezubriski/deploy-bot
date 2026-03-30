@@ -142,6 +142,60 @@ make clean        # remove ./bin
 
 Override the image tag: `make docker-push TAG=v1.2.3`
 
+## Monitoring
+
+Worker pods expose Prometheus metrics on port `9090` at `/metrics` and are annotated for auto-discovery:
+
+```yaml
+prometheus.io/scrape: "true"
+prometheus.io/port:   "9090"
+prometheus.io/path:   "/metrics"
+```
+
+If your Prometheus is configured with Kubernetes pod auto-discovery, add a scrape job that honours these annotations:
+
+```yaml
+scrape_configs:
+  - job_name: deploy-bot
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [deploy-bot]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: "true"
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: replace
+        target_label: app
+```
+
+If you are running the Prometheus Operator, use a `ServiceMonitor` instead:
+
+```yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: deploy-bot-worker
+  namespace: deploy-bot
+spec:
+  selector:
+    matchLabels:
+      app: deploy-bot-worker
+  endpoints:
+    - port: metrics
+      path: /metrics
+```
+
 ## CI
 
 GitHub Actions builds and pushes to ECR on every push to `main` (tagged with the short SHA and `latest`) and on version tags (`v*`, tagged with the version). Requires `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` repository secrets scoped to the `deploy-bot` ECR repository.
