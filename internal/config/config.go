@@ -31,7 +31,22 @@ type GitHubConfig struct {
 }
 
 type SlackConfig struct {
-	DeployChannel string `json:"deploy_channel"`
+	DeployChannel   string   `json:"deploy_channel"`
+	AllowedChannels []string `json:"allowed_channels,omitempty"`
+}
+
+// IsChannelAllowed returns true if the channel is permitted to use the bot.
+// If AllowedChannels is empty, all channels are allowed.
+func (s *SlackConfig) IsChannelAllowed(channelID string) bool {
+	if len(s.AllowedChannels) == 0 {
+		return true
+	}
+	for _, id := range s.AllowedChannels {
+		if id == channelID {
+			return true
+		}
+	}
+	return false
 }
 
 type DeploymentConfig struct {

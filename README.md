@@ -31,7 +31,7 @@ Two processes share a single container image:
 - Kubernetes cluster (EKS recommended)
 - AWS — Secrets Manager, ECR (for app images), S3 (audit log), STS (cross-account roles)
 - ElastiCache for Redis — Multi-AZ with automatic failover and AOF persistence enabled
-- GitHub App or PAT with repo and team read permissions
+- GitHub fine-grained PAT with repository (contents, pull requests) and organisation (members read) permissions
 - Slack App in Socket Mode with the following bot scopes:
   `commands`, `chat:write`, `users:read`, `users:read.email`, `im:write`
 
@@ -59,7 +59,7 @@ aws secretsmanager create-secret \
 |---|---|---|
 | `slack_bot_token` | Yes | Slack App → OAuth & Permissions → Bot User OAuth Token (`xoxb-`) |
 | `slack_app_token` | Yes | Slack App → Basic Information → App-Level Tokens (`xapp-`) — needs `connections:write` scope |
-| `github_token` | Yes | GitHub → Settings → Developer settings → Personal access tokens, or your GitHub App private key exchange |
+| `github_token` | Yes | GitHub → Settings → Developer settings → Fine-grained tokens — scope to the gitops repo with Contents/Pull requests (read/write) and the org with Members (read) |
 | `redis_addr` | Yes | ElastiCache → Cluster → Primary endpoint (include port, typically `6379`) |
 | `redis_token` | No | ElastiCache → Cluster → Auth token — only set if in-transit encryption with token auth is enabled |
 
@@ -84,6 +84,7 @@ Mounted as a ConfigMap. Hot-reloaded on SIGHUP or file change (30s poll). See `d
 | `github.deployer_team` | GitHub team slug — members can request deploys |
 | `github.approver_team` | GitHub team slug — members can approve/reject |
 | `slack.deploy_channel` | Channel where deployment notifications are posted |
+| `slack.allowed_channels` | Optional list of channel IDs where `/deploy` commands are accepted. Omit or leave empty to allow all channels. Use channel IDs (e.g. `C01234567`), not names |
 | `deployment.stale_duration` | How long a pending deploy waits before expiring (default `2h`) |
 | `deployment.merge_method` | `squash`, `merge`, or `rebase` (default `squash`) |
 | `deployment.lock_ttl` | Per-app lock duration (default `5m`) |
@@ -183,44 +184,56 @@ And grant these permissions:
 }
 ```
 
-### Slack app permissions
+### Slack app setup
 
-Create a Slack App in Socket Mode at [api.slack.com/apps](https://api.slack.com/apps). Required **bot token scopes** (`xoxb-`):
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App → From scratch**. Name it (e.g. `deploy-bot`) and select your workspace.
 
-| Scope | Why |
-|---|---|
-| `commands` | Receive `/deploy` slash command |
-| `chat:write` | Post messages and approval prompts to channels and DMs |
-| `users:read` | Look up users by ID |
-| `users:read.email` | Map Slack user ID → email (used to find GitHub login) |
-| `im:write` | Open DM channels to notify requesters and approvers |
-| `views:open` | Open the deploy request modal |
-| `views:update` | Return inline validation errors on modal submission |
+2. In the left sidebar, go to **Socket Mode** and toggle **Enable Socket Mode** on. You will be prompted to create an app-level token — name it anything (e.g. `socket`), add the `connections:write` scope, and click **Generate**. Copy the token (starts with `xapp-`) — this is your `slack_app_token`.
 
-An **app-level token** (`xapp-`) with the `connections:write` scope is also required for Socket Mode.
+3. Go to **OAuth & Permissions** in the sidebar. Under **Bot Token Scopes**, add the following:
 
-Add the `/deploy` slash command pointing to any URL (Socket Mode does not use the request URL — Slack ignores it).
+   | Scope | Why |
+   |---|---|
+   | `commands` | Receive the `/deploy` slash command |
+   | `chat:write` | Post messages and approval prompts to channels and DMs |
+   | `users:read` | Look up users by ID |
+   | `users:read.email` | Map Slack user ID → email (used to find GitHub login) |
+   | `im:write` | Open DM channels to notify requesters and approvers |
+   | `views:open` | Open the deploy request modal |
+   | `views:update` | Return inline validation errors on modal submission |
+
+4. Scroll to the top of **OAuth & Permissions** and click **Install to Workspace**. Approve the permissions. Copy the **Bot User OAuth Token** (starts with `xoxb-`) — this is your `slack_bot_token`.
+
+5. Go to **Slash Commands** and click **Create New Command**:
+   - Command: `/deploy`
+   - Request URL: enter any valid URL (e.g. `https://example.com`) — Socket Mode does not use this field but it is required by the form
+   - Short description: `Request, approve, and manage deployments`
+   - Click **Save**
+
+6. Go to **App Home** and under **Show Tabs**, enable the **Messages Tab** and check **Allow users to send Slash commands and messages from the messages tab**. This allows the bot to receive DMs from users.
+
+7. Reinstall the app if Slack prompts you to after adding scopes or commands (**OAuth & Permissions → Reinstall to Workspace**).
 
 ### GitHub permissions
 
-A GitHub App or Personal Access Token is required. The token is stored in the `github_token` secret field.
+A **fine-grained Personal Access Token** is required. Store it in the `github_token` secret field.
 
-**Personal Access Token (classic)** — grant these scopes:
+Create it at GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens. Set the resource owner to your organisation (not your personal account) so that organisation permissions can be granted.
 
-| Scope | Why |
-|---|---|
-| `repo` | Create, merge, and close PRs; push branches in the gitops repo |
-| `read:org` | Check deployer/approver team membership |
-| `read:user` | Resolve GitHub login → email for identity matching |
-| `user:email` | Read email addresses of team members |
-
-**GitHub App** (recommended for organisations) — grant these repository permissions on the gitops repo, and these organisation permissions:
+**Repository permissions** — scope to the gitops repo only:
 
 | Permission | Level | Why |
 |---|---|---|
 | Contents | Read & write | Push kustomization branches |
 | Pull requests | Read & write | Create, merge, close PRs and post comments |
-| Members | Read | Check team membership |
+
+**Organisation permissions:**
+
+| Permission | Level | Why |
+|---|---|---|
+| Members | Read | Check deployer/approver team membership |
+
+If your organisation requires administrator approval for fine-grained tokens with organisation permissions (`Settings → Personal access tokens → Require administrator approval`), the token will be pending until an org admin approves it.
 
 ### Apply manifests
 

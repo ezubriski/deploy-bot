@@ -104,6 +104,14 @@ func main() {
 			}
 			switch evt.Type {
 			case socketmode.EventTypeSlashCommand:
+				cmd, ok := evt.Data.(slack.SlashCommand)
+				if ok && !cfg.Slack.IsChannelAllowed(cmd.ChannelID) {
+					sm.Ack(*evt.Request, map[string]interface{}{
+						"response_type": "ephemeral",
+						"text":          "The `/deploy` command is not available in this channel.",
+					})
+					continue
+				}
 				enqueueAndAck(ctx, sm, rdb, evt, log)
 
 			case socketmode.EventTypeInteractive:
