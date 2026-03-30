@@ -28,7 +28,7 @@ const (
 	actionReject  = "action_reject"
 )
 
-func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack.OptionBlockObject, preSelectedApp string, staleDuration string) slack.ModalViewRequest {
+func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack.OptionBlockObject, preSelectedApp, preSelectedTag, staleDuration string) slack.ModalViewRequest {
 	appElement := slack.NewOptionsSelectBlockElement(
 		slack.OptTypeStatic,
 		slack.NewTextBlockObject("plain_text", "Select app...", false, false),
@@ -69,10 +69,16 @@ func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack
 			slack.NewInputBlock(blockTagManual,
 				slack.NewTextBlockObject("plain_text", "Manual Tag Override", false, false),
 				slack.NewTextBlockObject("plain_text", "Leave blank to use selection above", false, false),
-				slack.NewPlainTextInputBlockElement(
-					slack.NewTextBlockObject("plain_text", "e.g. v1.2.3", false, false),
-					actionTagManual,
-				),
+				func() *slack.PlainTextInputBlockElement {
+					el := slack.NewPlainTextInputBlockElement(
+						slack.NewTextBlockObject("plain_text", "e.g. v1.2.3", false, false),
+						actionTagManual,
+					)
+					if preSelectedTag != "" {
+						el.InitialValue = preSelectedTag
+					}
+					return el
+				}(),
 			),
 			slack.NewInputBlock(blockReason,
 				slack.NewTextBlockObject("plain_text", "Reason", false, false),

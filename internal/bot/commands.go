@@ -27,7 +27,7 @@ func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Clien
 
 	switch {
 	case len(parts) == 0:
-		b.openDeployModal(ctx, cmd, "")
+		b.openDeployModal(ctx, cmd, "", "")
 	case parts[0] == "status":
 		b.handleStatus(ctx, cmd)
 	case parts[0] == "history":
@@ -40,13 +40,15 @@ func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Clien
 		b.handleCancel(ctx, cmd, parts[1])
 	case parts[0] == "nudge" && len(parts) >= 2:
 		b.handleNudge(ctx, cmd, parts[1])
+	case parts[0] == "rollback" && len(parts) >= 2:
+		b.handleRollback(ctx, cmd, parts[1])
 	default:
 		// Treat first arg as app name
-		b.openDeployModal(ctx, cmd, parts[0])
+		b.openDeployModal(ctx, cmd, parts[0], "")
 	}
 }
 
-func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSelectedApp string) {
+func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSelectedApp, preSelectedTag string) {
 	// Validate deployer
 	isMember, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
 	if err != nil {
@@ -85,7 +87,7 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 		))
 	}
 
-	modal := buildDeployModal(appOptions, tagOptions, preSelectedApp, staleDuration.String())
+	modal := buildDeployModal(appOptions, tagOptions, preSelectedApp, preSelectedTag, staleDuration.String())
 	_, err = b.slack.OpenViewContext(ctx, cmd.TriggerID, modal)
 	if err != nil {
 		b.log.Error("open deploy modal", zap.Error(err))
@@ -251,6 +253,22 @@ func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilt
 	b.postEphemeralCommand(ctx, cmd, header+"\n"+strings.Join(lines, "\n"))
 }
 
+// findRollbackTag scans entries (newest-first) for the two most recent approved
+// deploys of appName. It returns (currentTag, previousTag, true) when found,
+// and ("", "", false) when fewer than two approved entries exist.
+func findRollbackTag(entries []store.HistoryEntry, appName string) (current, previous string, ok bool) {
+	var approved []store.HistoryEntry
+	for _, e := range entries {
+		if e.App == appName && e.EventType == "approved" {
+			approved = append(approved, e)
+			if len(approved) == 2 {
+				return approved[0].Tag, approved[1].Tag, true
+			}
+		}
+	}
+	return "", "", false
+}
+
 func eventIcon(eventType string) string {
 	switch eventType {
 	case "approved":
@@ -264,6 +282,51 @@ func eventIcon(eventType string) string {
 	default:
 		return ":grey_question:"
 	}
+}
+
+func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appName string) {
+	isMember, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
+	if err != nil {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to validate permissions: %v", err))
+		return
+	}
+	if !isMember {
+		b.postEphemeralCommand(ctx, cmd, "You are not a member of the deployer team.")
+		return
+	}
+
+	entries, err := b.store.GetHistory(ctx, 100)
+	if err != nil {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to fetch history: %v", err))
+		return
+	}
+
+	current, rollbackTag, ok := findRollbackTag(entries, appName)
+	if !ok {
+		// Distinguish zero vs one approved deploy for a clearer message.
+		var count int
+		var onlyTag string
+		for _, e := range entries {
+			if e.App == appName && e.EventType == "approved" {
+				count++
+				onlyTag = e.Tag
+			}
+		}
+		if count == 0 {
+			b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("No approved deployments found for *%s*.", appName))
+		} else {
+			b.postEphemeralCommand(ctx, cmd, fmt.Sprintf(
+				"Only one approved deployment found for *%s* (`%s`). Nothing to roll back to.",
+				appName, onlyTag,
+			))
+		}
+		return
+	}
+	b.postEphemeralCommand(ctx, cmd, fmt.Sprintf(
+		":rewind: Rolling back *%s* from `%s` to `%s`. Opening deploy modal…",
+		appName, current, rollbackTag,
+	))
+	b.openDeployModal(ctx, cmd, appName, rollbackTag)
 }
 
 func (b *Bot) postEphemeralCommand(ctx context.Context, cmd slack.SlashCommand, text string) {
