@@ -152,15 +152,13 @@ prometheus.io/port:   "9090"
 prometheus.io/path:   "/metrics"
 ```
 
-If your Prometheus is configured with Kubernetes pod auto-discovery, add a scrape job that honours these annotations:
+If your Prometheus is configured with Kubernetes pod auto-discovery, the following scrape job will pick up any pod across the cluster that carries these annotations — not just deploy-bot:
 
 ```yaml
 scrape_configs:
-  - job_name: deploy-bot
+  - job_name: kubernetes-annotated-pods
     kubernetes_sd_configs:
       - role: pod
-        namespaces:
-          names: [deploy-bot]
     relabel_configs:
       - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
         action: keep
@@ -177,6 +175,9 @@ scrape_configs:
       - source_labels: [__meta_kubernetes_pod_label_app]
         action: replace
         target_label: app
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: namespace
 ```
 
 If you are running the Prometheus Operator, use a `ServiceMonitor` instead:
