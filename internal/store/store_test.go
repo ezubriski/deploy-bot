@@ -144,3 +144,101 @@ func TestGetByApp_NotFound(t *testing.T) {
 		t.Fatalf("expected nil, got %+v", got)
 	}
 }
+
+func TestPushHistory_OrderAndTrim(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Truncate(time.Second)
+
+	// Push historyMaxLen+2 entries; only the last historyMaxLen should survive.
+	for i := 0; i < historyMaxLen+2; i++ {
+		e := HistoryEntry{
+			EventType:   "approved",
+			App:         "myapp",
+			Tag:         "v1.0." + string(rune('0'+i%10)),
+			PRNumber:    i + 1,
+			RequesterID: "U123",
+			CompletedAt: base.Add(time.Duration(i) * time.Second),
+		}
+		if err := s.PushHistory(ctx, e); err != nil {
+			t.Fatalf("push entry %d: %v", i, err)
+		}
+	}
+
+	entries, err := s.GetHistory(ctx, historyMaxLen+10)
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	if len(entries) != historyMaxLen {
+		t.Fatalf("expected %d entries after trim, got %d", historyMaxLen, len(entries))
+	}
+
+	// LPUSH means newest (highest index) is first.
+	if entries[0].PRNumber != historyMaxLen+2 {
+		t.Errorf("first entry PRNumber = %d, want %d", entries[0].PRNumber, historyMaxLen+2)
+	}
+}
+
+func TestGetHistory_Limit(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	for i := 0; i < 10; i++ {
+		_ = s.PushHistory(ctx, HistoryEntry{
+			EventType:   "rejected",
+			App:         "app",
+			PRNumber:    i + 1,
+			CompletedAt: time.Now(),
+		})
+	}
+
+	entries, err := s.GetHistory(ctx, 5)
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("expected 5 entries with limit=5, got %d", len(entries))
+	}
+}
+
+func TestGetHistory_Empty(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	entries, err := s.GetHistory(ctx, 20)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected empty history, got %d entries", len(entries))
+	}
+}
+
+func TestPushHistory_AppFilter(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.PushHistory(ctx, HistoryEntry{EventType: "approved", App: "app-a", PRNumber: 1, CompletedAt: time.Now()})
+	_ = s.PushHistory(ctx, HistoryEntry{EventType: "approved", App: "app-b", PRNumber: 2, CompletedAt: time.Now()})
+	_ = s.PushHistory(ctx, HistoryEntry{EventType: "rejected", App: "app-a", PRNumber: 3, CompletedAt: time.Now()})
+
+	all, err := s.GetHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 total entries, got %d", len(all))
+	}
+
+	// Filter app-a entries (done at the command layer, verify raw store is unfiltered).
+	var appA []HistoryEntry
+	for _, e := range all {
+		if e.App == "app-a" {
+			appA = append(appA, e)
+		}
+	}
+	if len(appA) != 2 {
+		t.Fatalf("expected 2 app-a entries, got %d", len(appA))
+	}
+}

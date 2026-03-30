@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yourorg/deploy-bot/internal/audit"
+	"github.com/yourorg/deploy-bot/internal/store"
 )
 
 func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Client) {
@@ -29,6 +30,12 @@ func (b *Bot) handleSlashCommand(evt *socketmode.Event, client *socketmode.Clien
 		b.openDeployModal(ctx, cmd, "")
 	case parts[0] == "status":
 		b.handleStatus(ctx, cmd)
+	case parts[0] == "history":
+		appFilter := ""
+		if len(parts) >= 2 {
+			appFilter = parts[1]
+		}
+		b.handleHistory(ctx, cmd, appFilter)
 	case parts[0] == "cancel" && len(parts) >= 2:
 		b.handleCancel(ctx, cmd, parts[1])
 	case parts[0] == "nudge" && len(parts) >= 2:
@@ -150,6 +157,15 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
 	b.updatePendingGauge(ctx)
+	_ = b.store.PushHistory(ctx, store.HistoryEntry{
+		EventType:   audit.EventCancelled,
+		App:         d.App,
+		Tag:         d.Tag,
+		PRNumber:    prNumber,
+		PRURL:       d.PRURL,
+		RequesterID: d.RequesterID,
+		CompletedAt: time.Now(),
+	})
 	b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Deployment #%d cancelled.", prNumber))
 	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cmd.UserName))
 }
@@ -181,6 +197,73 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	}
 
 	b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Nudge sent to <@%s>.", d.ApproverID))
+}
+
+func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilter string) {
+	const defaultLimit = 20
+	const filteredLimit = 100
+
+	limit := defaultLimit
+	if appFilter != "" {
+		limit = filteredLimit
+	}
+
+	entries, err := b.store.GetHistory(ctx, limit)
+	if err != nil {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to fetch history: %v", err))
+		return
+	}
+
+	if appFilter != "" {
+		var filtered []store.HistoryEntry
+		for _, e := range entries {
+			if e.App == appFilter {
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
+	}
+
+	if len(entries) == 0 {
+		msg := "No deployment history."
+		if appFilter != "" {
+			msg = fmt.Sprintf("No deployment history for *%s*.", appFilter)
+		}
+		b.postEphemeralCommand(ctx, cmd, msg)
+		return
+	}
+
+	now := time.Now()
+	var lines []string
+	for _, e := range entries {
+		age := now.Sub(e.CompletedAt).Round(time.Minute)
+		icon := eventIcon(e.EventType)
+		lines = append(lines, fmt.Sprintf(
+			"%s *%s* `%s` — <%s|#%d> — <@%s> — %s ago",
+			icon, e.App, e.Tag, e.PRURL, e.PRNumber, e.RequesterID, age,
+		))
+	}
+
+	header := "*Recent Deployments:*"
+	if appFilter != "" {
+		header = fmt.Sprintf("*Deployments for %s:*", appFilter)
+	}
+	b.postEphemeralCommand(ctx, cmd, header+"\n"+strings.Join(lines, "\n"))
+}
+
+func eventIcon(eventType string) string {
+	switch eventType {
+	case "approved":
+		return ":white_check_mark:"
+	case "rejected":
+		return ":x:"
+	case "expired":
+		return ":hourglass_flowing_sand:"
+	case "cancelled":
+		return ":no_entry_sign:"
+	default:
+		return ":grey_question:"
+	}
 }
 
 func (b *Bot) postEphemeralCommand(ctx context.Context, cmd slack.SlashCommand, text string) {
