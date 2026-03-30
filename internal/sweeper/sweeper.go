@@ -11,18 +11,20 @@ import (
 	"github.com/yourorg/deploy-bot/internal/audit"
 	"github.com/yourorg/deploy-bot/internal/config"
 	"github.com/yourorg/deploy-bot/internal/github"
+	"github.com/yourorg/deploy-bot/internal/metrics"
 	"github.com/yourorg/deploy-bot/internal/store"
 )
 
 const sweepInterval = 5 * time.Minute
 
 type Sweeper struct {
-	store  *store.Store
-	gh     *github.Client
-	slack  *slack.Client
-	audit  *audit.Logger
-	cfg    *config.Config
-	log    *zap.Logger
+	store   *store.Store
+	gh      *github.Client
+	slack   *slack.Client
+	audit   *audit.Logger
+	metrics *metrics.Metrics
+	cfg     *config.Config
+	log     *zap.Logger
 }
 
 func New(
@@ -30,16 +32,18 @@ func New(
 	gh *github.Client,
 	slackClient *slack.Client,
 	auditLog *audit.Logger,
+	m *metrics.Metrics,
 	cfg *config.Config,
 	log *zap.Logger,
 ) *Sweeper {
 	return &Sweeper{
-		store: store,
-		gh:    gh,
-		slack: slackClient,
-		audit: auditLog,
-		cfg:   cfg,
-		log:   log,
+		store:   store,
+		gh:      gh,
+		slack:   slackClient,
+		audit:   auditLog,
+		metrics: m,
+		cfg:     cfg,
+		log:     log,
 	}
 }
 
@@ -133,6 +137,13 @@ func (s *Sweeper) sweep(ctx context.Context) {
 			Requester: d.Requester,
 		})
 
+		s.metrics.RecordDeploy(d.App, audit.EventExpired)
 		_ = s.store.Delete(ctx, d.PRNumber)
+	}
+
+	// Refresh the pending gauge after each sweep pass.
+	remaining, err := s.store.GetAll(ctx)
+	if err == nil {
+		s.metrics.SetPendingDeploys(len(remaining))
 	}
 }

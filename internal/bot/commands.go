@@ -147,6 +147,8 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 		Requester: requesterGH,
 	})
 
+	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
+	b.updatePendingGauge(ctx)
 	b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Deployment #%d cancelled.", prNumber))
 	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cmd.UserName))
 }

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
@@ -19,10 +21,13 @@ import (
 	"github.com/yourorg/deploy-bot/internal/ecr"
 	"github.com/yourorg/deploy-bot/internal/election"
 	githubPkg "github.com/yourorg/deploy-bot/internal/github"
+	"github.com/yourorg/deploy-bot/internal/metrics"
 	"github.com/yourorg/deploy-bot/internal/store"
 	"github.com/yourorg/deploy-bot/internal/sweeper"
 	"github.com/yourorg/deploy-bot/internal/validator"
 )
+
+const metricsAddr = ":9090"
 
 func main() {
 	log, err := zap.NewProduction()
@@ -53,6 +58,17 @@ func main() {
 		log.Fatal("invalid secrets", zap.Error(err))
 	}
 
+	// Metrics — start HTTP server on :9090 immediately so it's always scrapeable.
+	m := metrics.NewDefault()
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		log.Info("metrics server listening", zap.String("addr", metricsAddr))
+		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+			log.Error("metrics server error", zap.Error(err))
+		}
+	}()
+
 	// Redis store
 	redisStore := store.New(secrets.RedisAddr)
 	if err := redisStore.Ping(ctx); err != nil {
@@ -71,7 +87,7 @@ func main() {
 	)
 
 	// ECR cache
-	ecrCache, err := ecr.NewCache(ctx, cfg, log)
+	ecrCache, err := ecr.NewCache(ctx, cfg, m, log)
 	if err != nil {
 		log.Fatal("init ecr cache", zap.Error(err))
 	}
@@ -86,10 +102,10 @@ func main() {
 	val := validator.New(secrets.GitHubToken, slackClient, cfg, log)
 
 	// Bot
-	b := bot.New(slackClient, sm, redisStore, ghClient, ecrCache, val, auditLog, cfg, log)
+	b := bot.New(slackClient, sm, redisStore, ghClient, ecrCache, val, auditLog, m, cfg, log)
 
 	// Sweeper
-	sw := sweeper.New(redisStore, ghClient, slackClient, auditLog, cfg, log)
+	sw := sweeper.New(redisStore, ghClient, slackClient, auditLog, m, cfg, log)
 
 	// Kubernetes identity for leader election
 	podName := os.Getenv("POD_NAME")

@@ -106,6 +106,8 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 		Approver:  ghLogin,
 	})
 
+	b.metrics.RecordDeploy(d.App, audit.EventApproved)
+	b.updatePendingGauge(ctx)
 	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
 }
 
@@ -270,6 +272,8 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, cal
 		Reason:    reason,
 	})
 
+	b.metrics.RecordDeploy(appVal, audit.EventRequested)
+	b.updatePendingGauge(ctx)
 	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber))
 }
 
@@ -316,6 +320,8 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 		Rejection: rejReason,
 	})
 
+	b.metrics.RecordDeploy(d.App, audit.EventRejected)
+	b.updatePendingGauge(ctx)
 	b.log.Info("deployment rejected", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
 }
 
@@ -336,6 +342,16 @@ func (b *Bot) replaceButtons(ctx context.Context, callback slack.InteractionCall
 		callback.Message.Timestamp,
 		slack.MsgOptionBlocks(blocks...),
 	)
+}
+
+// updatePendingGauge refreshes the pending deployments gauge from Redis.
+func (b *Bot) updatePendingGauge(ctx context.Context) {
+	deploys, err := b.store.GetAll(ctx)
+	if err != nil {
+		b.log.Warn("metrics: get pending deploys", zap.Error(err))
+		return
+	}
+	b.metrics.SetPendingDeploys(len(deploys))
 }
 
 func (b *Bot) replyEphemeral(ctx context.Context, channelID, userID, text string) {

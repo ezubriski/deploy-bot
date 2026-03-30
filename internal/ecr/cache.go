@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/yourorg/deploy-bot/internal/config"
+	"github.com/yourorg/deploy-bot/internal/metrics"
 )
 
 const (
@@ -36,11 +37,12 @@ type appCache struct {
 }
 
 type Cache struct {
-	apps   map[string]*appCache
-	log    *zap.Logger
+	apps    map[string]*appCache
+	metrics *metrics.Metrics
+	log     *zap.Logger
 }
 
-func NewCache(ctx context.Context, cfg *config.Config, log *zap.Logger) (*Cache, error) {
+func NewCache(ctx context.Context, cfg *config.Config, m *metrics.Metrics, log *zap.Logger) (*Cache, error) {
 	baseCfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
@@ -49,8 +51,9 @@ func NewCache(ctx context.Context, cfg *config.Config, log *zap.Logger) (*Cache,
 	stsClient := sts.NewFromConfig(baseCfg)
 
 	c := &Cache{
-		apps: make(map[string]*appCache),
-		log:  log,
+		apps:    make(map[string]*appCache),
+		metrics: m,
+		log:     log,
 	}
 
 	for _, app := range cfg.Apps {
@@ -109,6 +112,8 @@ func (c *Cache) StartRefresh(ctx context.Context) {
 }
 
 func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error {
+	start := time.Now()
+
 	input := &ecr.DescribeImagesInput{
 		RepositoryName: aws.String(ac.repoName),
 		RegistryId:     aws.String(ac.registryID),
@@ -154,6 +159,7 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 	ac.tags = tags
 	ac.mu.Unlock()
 
+	c.metrics.ObserveECRRefresh(appName, time.Since(start))
 	c.log.Debug("ecr cache refreshed", zap.String("app", appName), zap.Int("tags", len(tags)))
 	return nil
 }
@@ -192,12 +198,14 @@ func (c *Cache) ValidateTag(ctx context.Context, appName, tag string) (bool, err
 	for _, t := range ac.tags {
 		if t == tag {
 			ac.mu.RUnlock()
+			c.metrics.RecordECRCacheHit(appName)
 			return true, nil
 		}
 	}
 	ac.mu.RUnlock()
 
 	// Fall back to direct ECR lookup
+	c.metrics.RecordECRCacheMiss(appName)
 	out, err := ac.client.DescribeImages(ctx, &ecr.DescribeImagesInput{
 		RepositoryName: aws.String(ac.repoName),
 		RegistryId:     aws.String(ac.registryID),

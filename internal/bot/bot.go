@@ -9,6 +9,7 @@ import (
 	"github.com/yourorg/deploy-bot/internal/config"
 	"github.com/yourorg/deploy-bot/internal/ecr"
 	githubPkg "github.com/yourorg/deploy-bot/internal/github"
+	"github.com/yourorg/deploy-bot/internal/metrics"
 	"github.com/yourorg/deploy-bot/internal/store"
 	"github.com/yourorg/deploy-bot/internal/validator"
 )
@@ -21,6 +22,7 @@ type Bot struct {
 	ecrCache  *ecr.Cache
 	validator *validator.Validator
 	auditLog  *audit.Logger
+	metrics   *metrics.Metrics
 	cfg       *config.Config
 	log       *zap.Logger
 }
@@ -33,6 +35,7 @@ func New(
 	ecrCache *ecr.Cache,
 	validator *validator.Validator,
 	auditLog *audit.Logger,
+	m *metrics.Metrics,
 	cfg *config.Config,
 	log *zap.Logger,
 ) *Bot {
@@ -44,6 +47,7 @@ func New(
 		ecrCache:  ecrCache,
 		validator: validator,
 		auditLog:  auditLog,
+		metrics:   m,
 		cfg:       cfg,
 		log:       log,
 	}
