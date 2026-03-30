@@ -1,31 +1,74 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: deploy-bot
+  name: deploy-bot-receiver
   namespace: deploy-bot
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: deploy-bot
+      app: deploy-bot-receiver
   template:
     metadata:
       labels:
-        app: deploy-bot
+        app: deploy-bot-receiver
     spec:
       serviceAccountName: deploy-bot
       containers:
-        - name: deploy-bot
-          image: deploy-bot:latest
+        - name: receiver
+          image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/deploy-bot:latest
+          command: ["/receiver"]
           env:
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
+            - name: CONFIG_PATH
+              value: /etc/deploy-bot/config.json
+            - name: AWS_SECRET_NAME
+              value: deploy-bot/secrets
+          volumeMounts:
+            - name: config
+              mountPath: /etc/deploy-bot
+              readOnly: true
+          ports:
+            - name: health
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: config
+          configMap:
+            name: deploy-bot-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deploy-bot-worker
+  namespace: deploy-bot
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: deploy-bot-worker
+  template:
+    metadata:
+      labels:
+        app: deploy-bot-worker
+    spec:
+      serviceAccountName: deploy-bot
+      containers:
+        - name: worker
+          image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/deploy-bot:latest
+          command: ["/bot"]
+          env:
             - name: CONFIG_PATH
               value: /etc/deploy-bot/config.json
             - name: AWS_SECRET_NAME
@@ -47,7 +90,7 @@ spec:
             httpGet:
               path: /readyz
               port: metrics
-            initialDelaySeconds: 5
+            initialDelaySeconds: 10
             periodSeconds: 10
           resources:
             requests:

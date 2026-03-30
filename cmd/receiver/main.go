@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,6 +20,8 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
+
+const healthAddr = ":8080"
 
 const approverRefreshInterval = 5 * time.Minute
 
@@ -67,6 +70,18 @@ func main() {
 		log.Warn("approver cache initial refresh failed", zap.Error(err))
 	}
 	approverCache.StartRefresh(ctx, approverRefreshInterval)
+
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("ok"))
+		})
+		log.Info("health server listening", zap.String("addr", healthAddr))
+		if err := http.ListenAndServe(healthAddr, mux); err != nil {
+			log.Error("health server error", zap.Error(err))
+		}
+	}()
 
 	sm := socketmode.New(slackClient)
 
