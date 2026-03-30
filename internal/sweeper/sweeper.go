@@ -15,6 +15,7 @@ import (
 	"github.com/yourorg/deploy-bot/internal/store"
 )
 
+
 const sweepInterval = 5 * time.Minute
 
 type Sweeper struct {
@@ -23,7 +24,7 @@ type Sweeper struct {
 	slack   *slack.Client
 	audit   *audit.Logger
 	metrics *metrics.Metrics
-	cfg     *config.Config
+	cfg     *config.Holder
 	log     *zap.Logger
 }
 
@@ -33,7 +34,7 @@ func New(
 	slackClient *slack.Client,
 	auditLog *audit.Logger,
 	m *metrics.Metrics,
-	cfg *config.Config,
+	cfg *config.Holder,
 	log *zap.Logger,
 ) *Sweeper {
 	return &Sweeper{
@@ -57,7 +58,7 @@ func (s *Sweeper) RecoverStuck(ctx context.Context) {
 	for _, d := range deploys {
 		if d.State == store.StateMerging {
 			s.log.Warn("recovering stuck deploy", zap.Int("pr", d.PRNumber), zap.String("app", d.App))
-			if err := s.gh.MergePR(ctx, d.PRNumber, s.cfg.Deployment.MergeMethod); err != nil {
+			if err := s.gh.MergePR(ctx, d.PRNumber, s.cfg.Load().Deployment.MergeMethod); err != nil {
 				s.log.Error("recover merge failed", zap.Int("pr", d.PRNumber), zap.Error(err))
 				continue
 			}
@@ -90,7 +91,7 @@ func (s *Sweeper) sweep(ctx context.Context) {
 		return
 	}
 
-	staleDuration, err := s.cfg.StaleDuration()
+	staleDuration, err := s.cfg.Load().StaleDuration()
 	if err != nil {
 		staleDuration = 2 * time.Hour
 	}

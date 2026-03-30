@@ -51,11 +51,11 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 		return
 	}
 
-	staleDuration, _ := b.cfg.StaleDuration()
+	staleDuration, _ := b.cfg.Load().StaleDuration()
 
 	// Build app options
 	var appOptions []*slack.OptionBlockObject
-	for _, app := range b.cfg.Apps {
+	for _, app := range b.cfg.Load().Apps {
 		appOptions = append(appOptions, slack.NewOptionBlockObject(
 			app.App,
 			slack.NewTextBlockObject("plain_text", app.App, false, false),
@@ -65,8 +65,8 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 
 	// Build tag options for first app (or pre-selected)
 	tagApp := preSelectedApp
-	if tagApp == "" && len(b.cfg.Apps) > 0 {
-		tagApp = b.cfg.Apps[0].App
+	if tagApp == "" && len(b.cfg.Load().Apps) > 0 {
+		tagApp = b.cfg.Load().Apps[0].App
 	}
 	tags := b.ecrCache.RecentTags(tagApp)
 	var tagOptions []*slack.OptionBlockObject

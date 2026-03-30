@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -44,15 +45,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	// Load config
+	// Load config and wrap in a Holder for hot-reload support.
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "/etc/deploy-bot/config.json"
 	}
-	cfg, err := config.Load(configPath)
+	initialCfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatal("load config", zap.Error(err))
 	}
+	cfgHolder := config.NewHolder(initialCfg, configPath)
 
 	// Load secrets from AWS Secrets Manager
 	secrets, err := loadSecrets(ctx, os.Getenv("AWS_SECRET_NAME"))
@@ -81,7 +83,7 @@ func main() {
 	}
 
 	// GitHub client
-	ghClient := githubPkg.NewClient(secrets.GitHubToken, cfg.GitHub.Org, cfg.GitHub.Repo)
+	ghClient := githubPkg.NewClient(secrets.GitHubToken, cfgHolder.Load().GitHub.Org, cfgHolder.Load().GitHub.Repo)
 
 	// Slack client
 	slackClient := slack.New(secrets.SlackBotToken,
@@ -92,25 +94,31 @@ func main() {
 	)
 
 	// ECR cache
-	ecrCache, err := ecr.NewCache(ctx, cfg, m, log)
+	ecrCache, err := ecr.NewCache(ctx, cfgHolder.Load(), m, log)
 	if err != nil {
 		log.Fatal("init ecr cache", zap.Error(err))
 	}
 
 	// Audit logger
-	auditLog, err := audit.NewLogger(ctx, cfg, log)
+	auditLog, err := audit.NewLogger(ctx, cfgHolder.Load(), log)
 	if err != nil {
 		log.Fatal("init audit logger", zap.Error(err))
 	}
 
 	// Validator
-	val := validator.New(secrets.GitHubToken, slackClient, cfg, log)
+	val := validator.New(secrets.GitHubToken, slackClient, cfgHolder.Load(), log)
 
-	// Bot
-	b := bot.New(slackClient, sm, redisStore, ghClient, ecrCache, val, auditLog, m, cfg, log)
+	// Bot and Sweeper receive the Holder so they pick up config changes live.
+	b := bot.New(slackClient, sm, redisStore, ghClient, ecrCache, val, auditLog, m, cfgHolder, log)
+	sw := sweeper.New(redisStore, ghClient, slackClient, auditLog, m, cfgHolder, log)
 
-	// Sweeper
-	sw := sweeper.New(redisStore, ghClient, slackClient, auditLog, m, cfg, log)
+	// Watch the config file for changes (SIGHUP or mtime), adding any new
+	// apps to the ECR cache on each successful reload.
+	config.Watch(ctx, cfgHolder, 30*time.Second, func(newCfg *config.Config) {
+		if err := ecrCache.AddApps(newCfg.Apps); err != nil {
+			log.Warn("ecr cache: failed to register new apps after reload", zap.Error(err))
+		}
+	}, log)
 
 	// Kubernetes identity for leader election
 	podName := os.Getenv("POD_NAME")

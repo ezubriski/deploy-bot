@@ -30,16 +30,18 @@ type appCache struct {
 	mu         sync.RWMutex
 	tags       []string // sorted newest first
 	pattern    *regexp.Regexp
-	ecrRepo    string
 	repoName   string
 	registryID string
-	client     *ecr.Client
 }
 
+// Cache holds per-app tag caches backed by a single shared ECR client
+// (all apps use the same assumed role).
 type Cache struct {
-	apps    map[string]*appCache
-	metrics *metrics.Metrics
-	log     *zap.Logger
+	mu        sync.RWMutex // protects apps map for AddApps
+	apps      map[string]*appCache
+	client    *ecr.Client // shared across all apps
+	metrics   *metrics.Metrics
+	log       *zap.Logger
 }
 
 func NewCache(ctx context.Context, cfg *config.Config, m *metrics.Metrics, log *zap.Logger) (*Cache, error) {
@@ -49,32 +51,22 @@ func NewCache(ctx context.Context, cfg *config.Config, m *metrics.Metrics, log *
 	}
 
 	stsClient := sts.NewFromConfig(baseCfg)
+	provider := stscreds.NewAssumeRoleProvider(stsClient, cfg.AWS.ECRRoleARN)
+	roleCfg := baseCfg.Copy()
+	roleCfg.Credentials = aws.NewCredentialsCache(provider)
+	roleCfg.Region = cfg.AWS.ECRRegion
 
 	c := &Cache{
 		apps:    make(map[string]*appCache),
+		client:  ecr.NewFromConfig(roleCfg),
 		metrics: m,
 		log:     log,
 	}
 
 	for _, app := range cfg.Apps {
-		pat, err := regexp.Compile(app.TagPattern)
+		ac, err := newAppCache(app)
 		if err != nil {
-			return nil, fmt.Errorf("compile tag pattern for %s: %w", app.App, err)
-		}
-
-		provider := stscreds.NewAssumeRoleProvider(stsClient, cfg.AWS.ECRRoleARN)
-		roleCfg := baseCfg.Copy()
-		roleCfg.Credentials = aws.NewCredentialsCache(provider)
-		roleCfg.Region = cfg.AWS.ECRRegion
-
-		ecrClient := ecr.NewFromConfig(roleCfg)
-
-		ac := &appCache{
-			pattern:    pat,
-			ecrRepo:    app.ECRRepo,
-			repoName:   repoNameFromURI(app.ECRRepo),
-			registryID: registryIDFromURI(app.ECRRepo),
-			client:     ecrClient,
+			return nil, err
 		}
 		c.apps[app.App] = ac
 	}
@@ -82,9 +74,48 @@ func NewCache(ctx context.Context, cfg *config.Config, m *metrics.Metrics, log *
 	return c, nil
 }
 
+// AddApps registers cache entries for any apps in the slice that are not
+// already present. Existing entries are left unchanged. Safe to call
+// concurrently with other cache operations.
+func (c *Cache) AddApps(apps []config.AppConfig) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, app := range apps {
+		if _, exists := c.apps[app.App]; exists {
+			continue
+		}
+		ac, err := newAppCache(app)
+		if err != nil {
+			return err
+		}
+		c.apps[app.App] = ac
+		c.log.Info("ecr cache: registered new app", zap.String("app", app.App))
+	}
+	return nil
+}
+
+func newAppCache(app config.AppConfig) (*appCache, error) {
+	pat, err := regexp.Compile(app.TagPattern)
+	if err != nil {
+		return nil, fmt.Errorf("compile tag pattern for %s: %w", app.App, err)
+	}
+	return &appCache{
+		pattern:    pat,
+		repoName:   repoNameFromURI(app.ECRRepo),
+		registryID: registryIDFromURI(app.ECRRepo),
+	}, nil
+}
+
 // Populate fetches tags for all apps. Fails open — logs warnings on error.
 func (c *Cache) Populate(ctx context.Context) {
-	for name, ac := range c.apps {
+	c.mu.RLock()
+	apps := make(map[string]*appCache, len(c.apps))
+	for k, v := range c.apps {
+		apps[k] = v
+	}
+	c.mu.RUnlock()
+
+	for name, ac := range apps {
 		if err := c.refresh(ctx, name, ac); err != nil {
 			c.log.Warn("ecr cache populate failed", zap.String("app", name), zap.Error(err))
 		}
@@ -101,7 +132,14 @@ func (c *Cache) StartRefresh(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				for name, ac := range c.apps {
+				c.mu.RLock()
+				apps := make(map[string]*appCache, len(c.apps))
+				for k, v := range c.apps {
+					apps[k] = v
+				}
+				c.mu.RUnlock()
+
+				for name, ac := range apps {
 					if err := c.refresh(ctx, name, ac); err != nil {
 						c.log.Warn("ecr cache refresh failed", zap.String("app", name), zap.Error(err))
 					}
@@ -121,7 +159,7 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 	}
 
 	var images []types.ImageDetail
-	paginator := ecr.NewDescribeImagesPaginator(ac.client, input)
+	paginator := ecr.NewDescribeImagesPaginator(c.client, input)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -130,7 +168,6 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 		images = append(images, page.ImageDetails...)
 	}
 
-	// Flatten tags with their push time
 	type tagTime struct {
 		tag  string
 		time time.Time
@@ -166,25 +203,28 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 
 // RecentTags returns up to 5 most recent tags for an app.
 func (c *Cache) RecentTags(appName string) []string {
+	c.mu.RLock()
 	ac, ok := c.apps[appName]
+	c.mu.RUnlock()
 	if !ok {
 		return nil
 	}
 	ac.mu.RLock()
 	defer ac.mu.RUnlock()
-	if len(ac.tags) <= maxRecentTags {
-		out := make([]string, len(ac.tags))
-		copy(out, ac.tags)
-		return out
+	n := len(ac.tags)
+	if n > maxRecentTags {
+		n = maxRecentTags
 	}
-	out := make([]string, maxRecentTags)
-	copy(out, ac.tags[:maxRecentTags])
+	out := make([]string, n)
+	copy(out, ac.tags[:n])
 	return out
 }
 
 // ValidateTag checks if a tag is valid for an app. Checks cache first, falls back to direct ECR lookup.
 func (c *Cache) ValidateTag(ctx context.Context, appName, tag string) (bool, error) {
+	c.mu.RLock()
 	ac, ok := c.apps[appName]
+	c.mu.RUnlock()
 	if !ok {
 		return false, fmt.Errorf("unknown app: %s", appName)
 	}
@@ -193,7 +233,6 @@ func (c *Cache) ValidateTag(ctx context.Context, appName, tag string) (bool, err
 		return false, nil
 	}
 
-	// Check cache first
 	ac.mu.RLock()
 	for _, t := range ac.tags {
 		if t == tag {
@@ -204,14 +243,11 @@ func (c *Cache) ValidateTag(ctx context.Context, appName, tag string) (bool, err
 	}
 	ac.mu.RUnlock()
 
-	// Fall back to direct ECR lookup
 	c.metrics.RecordECRCacheMiss(appName)
-	out, err := ac.client.DescribeImages(ctx, &ecr.DescribeImagesInput{
+	out, err := c.client.DescribeImages(ctx, &ecr.DescribeImagesInput{
 		RepositoryName: aws.String(ac.repoName),
 		RegistryId:     aws.String(ac.registryID),
-		ImageIds: []types.ImageIdentifier{
-			{ImageTag: aws.String(tag)},
-		},
+		ImageIds:       []types.ImageIdentifier{{ImageTag: aws.String(tag)}},
 	})
 	if err != nil {
 		return false, fmt.Errorf("ecr lookup: %w", err)
@@ -219,8 +255,6 @@ func (c *Cache) ValidateTag(ctx context.Context, appName, tag string) (bool, err
 	return len(out.ImageDetails) > 0, nil
 }
 
-// repoNameFromURI extracts the repo name (possibly with path prefix) from an ECR URI.
-// e.g. "123456789.dkr.ecr.us-east-1.amazonaws.com/myorg/myapp" → "myorg/myapp"
 func repoNameFromURI(uri string) string {
 	idx := strings.Index(uri, "/")
 	if idx < 0 {
@@ -229,8 +263,6 @@ func repoNameFromURI(uri string) string {
 	return uri[idx+1:]
 }
 
-// registryIDFromURI extracts the AWS account ID from an ECR URI.
-// e.g. "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp" → "123456789"
 func registryIDFromURI(uri string) string {
 	idx := strings.Index(uri, ".")
 	if idx < 0 {

@@ -29,7 +29,7 @@ type Bot struct {
 	validator *validator.Validator
 	auditLog  *audit.Logger
 	metrics   *metrics.Metrics
-	cfg       *config.Config
+	cfg       *config.Holder
 	log       *zap.Logger
 
 	wg        sync.WaitGroup   // tracks in-flight event handlers
@@ -45,7 +45,7 @@ func New(
 	validator *validator.Validator,
 	auditLog *audit.Logger,
 	m *metrics.Metrics,
-	cfg *config.Config,
+	cfg *config.Holder,
 	log *zap.Logger,
 ) *Bot {
 	return &Bot{

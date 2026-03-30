@@ -78,7 +78,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	}
 
 	// Merge PR
-	if err := b.gh.MergePR(ctx, prNumber, b.cfg.Deployment.MergeMethod); err != nil {
+	if err := b.gh.MergePR(ctx, prNumber, b.cfg.Load().Deployment.MergeMethod); err != nil {
 		b.log.Error("merge PR", zap.Int("pr", prNumber), zap.Error(err))
 		b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, fmt.Sprintf("Failed to merge PR #%d: %v", prNumber, err))
 		_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
@@ -186,7 +186,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, cal
 	}
 
 	// Acquire per-app deploy lock — prevent concurrent deploys of the same app.
-	lockTTL, _ := b.cfg.LockTTL()
+	lockTTL, _ := b.cfg.Load().LockTTL()
 	acquired, err := b.store.AcquireLock(ctx, appVal, requesterID, lockTTL)
 	if err != nil {
 		b.log.Error("acquire deploy lock", zap.String("app", appVal), zap.Error(err))
@@ -211,7 +211,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, cal
 	// All validation passed — ack and proceed
 	client.Ack(*evt.Request)
 
-	appCfg, ok := b.cfg.AppByName(appVal)
+	appCfg, ok := b.cfg.Load().AppByName(appVal)
 	if !ok {
 		b.log.Error("app not found", zap.String("app", appVal))
 		return
@@ -245,7 +245,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, cal
 		return
 	}
 
-	staleDuration, _ := b.cfg.StaleDuration()
+	staleDuration, _ := b.cfg.Load().StaleDuration()
 	expiresAt := time.Now().Add(staleDuration)
 
 	d := &store.PendingDeploy{
