@@ -139,6 +139,15 @@ func (s *Sweeper) sweep(ctx context.Context) {
 		})
 
 		s.metrics.RecordDeploy(d.App, audit.EventExpired)
+		_ = s.store.PushHistory(ctx, store.HistoryEntry{
+			EventType:   audit.EventExpired,
+			App:         d.App,
+			Tag:         d.Tag,
+			PRNumber:    d.PRNumber,
+			PRURL:       d.PRURL,
+			RequesterID: d.RequesterID,
+			CompletedAt: time.Now(),
+		})
 		_ = s.store.ReleaseLock(ctx, d.App)
 		_ = s.store.Delete(ctx, d.PRNumber)
 	}

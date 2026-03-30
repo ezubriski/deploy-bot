@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	keyPrefix  = "pending:"
-	lockPrefix = "lock:"
+	keyPrefix     = "pending:"
+	lockPrefix    = "lock:"
+	historyKey    = "history"
+	historyMaxLen = 100
 )
 
 type Store struct {
@@ -116,6 +118,40 @@ func (s *Store) GetExpired(ctx context.Context) ([]*PendingDeploy, error) {
 		}
 	}
 	return expired, nil
+}
+
+// PushHistory prepends a HistoryEntry to the history list and trims it to
+// historyMaxLen entries. Both operations run in a single pipeline.
+func (s *Store) PushHistory(ctx context.Context, e HistoryEntry) error {
+	data, err := json.Marshal(e)
+	if err != nil {
+		return fmt.Errorf("marshal history entry: %w", err)
+	}
+	pipe := s.rdb.Pipeline()
+	pipe.LPush(ctx, historyKey, data)
+	pipe.LTrim(ctx, historyKey, 0, historyMaxLen-1)
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("push history: %w", err)
+	}
+	return nil
+}
+
+// GetHistory returns up to limit entries from the history list, newest first.
+func (s *Store) GetHistory(ctx context.Context, limit int) ([]HistoryEntry, error) {
+	vals, err := s.rdb.LRange(ctx, historyKey, 0, int64(limit-1)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("get history: %w", err)
+	}
+	entries := make([]HistoryEntry, 0, len(vals))
+	for _, v := range vals {
+		var e HistoryEntry
+		if err := json.Unmarshal([]byte(v), &e); err != nil {
+			continue // skip malformed entries
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
 }
 
 // GetByApp returns the first pending deploy found for the given app name, or

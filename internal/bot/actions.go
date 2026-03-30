@@ -109,6 +109,15 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 
 	b.metrics.RecordDeploy(d.App, audit.EventApproved)
 	b.updatePendingGauge(ctx)
+	_ = b.store.PushHistory(ctx, store.HistoryEntry{
+		EventType:   audit.EventApproved,
+		App:         d.App,
+		Tag:         d.Tag,
+		PRNumber:    prNumber,
+		PRURL:       d.PRURL,
+		RequesterID: d.RequesterID,
+		CompletedAt: time.Now(),
+	})
 	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
 }
 
@@ -348,6 +357,15 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 
 	b.metrics.RecordDeploy(d.App, audit.EventRejected)
 	b.updatePendingGauge(ctx)
+	_ = b.store.PushHistory(ctx, store.HistoryEntry{
+		EventType:   audit.EventRejected,
+		App:         d.App,
+		Tag:         d.Tag,
+		PRNumber:    prNumber,
+		PRURL:       d.PRURL,
+		RequesterID: d.RequesterID,
+		CompletedAt: time.Now(),
+	})
 	b.log.Info("deployment rejected", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
 }
 
