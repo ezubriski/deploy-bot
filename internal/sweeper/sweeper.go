@@ -138,6 +138,7 @@ func (s *Sweeper) sweep(ctx context.Context) {
 		})
 
 		s.metrics.RecordDeploy(d.App, audit.EventExpired)
+		_ = s.store.ReleaseLock(ctx, d.App)
 		_ = s.store.Delete(ctx, d.PRNumber)
 	}
 

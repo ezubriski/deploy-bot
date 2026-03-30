@@ -31,6 +31,7 @@ type SlackConfig struct {
 type DeploymentConfig struct {
 	StaleDuration string `json:"stale_duration"`
 	MergeMethod   string `json:"merge_method"`
+	LockTTL       string `json:"lock_ttl"`
 }
 
 type AWSConfig struct {
@@ -106,6 +107,13 @@ func (c *Config) StaleDuration() (time.Duration, error) {
 		return 2 * time.Hour, nil
 	}
 	return time.ParseDuration(c.Deployment.StaleDuration)
+}
+
+func (c *Config) LockTTL() (time.Duration, error) {
+	if c.Deployment.LockTTL == "" {
+		return 5 * time.Minute, nil
+	}
+	return time.ParseDuration(c.Deployment.LockTTL)
 }
 
 func (c *Config) AppByName(name string) (*AppConfig, bool) {

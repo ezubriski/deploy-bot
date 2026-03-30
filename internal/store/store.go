@@ -10,7 +10,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const keyPrefix = "pending:"
+const (
+	keyPrefix  = "pending:"
+	lockPrefix = "lock:"
+)
 
 type Store struct {
 	rdb *redis.Client
@@ -113,6 +116,38 @@ func (s *Store) GetExpired(ctx context.Context) ([]*PendingDeploy, error) {
 		}
 	}
 	return expired, nil
+}
+
+// GetByApp returns the first pending deploy found for the given app name, or
+// nil if none exists. Used to surface the existing PR link when a lock is contested.
+func (s *Store) GetByApp(ctx context.Context, app string) (*PendingDeploy, error) {
+	all, err := s.GetAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range all {
+		if d.App == app {
+			return d, nil
+		}
+	}
+	return nil, nil
+}
+
+// AcquireLock attempts to claim the per-app deploy lock. It returns true if
+// the lock was acquired, false if another deploy is already in progress.
+// holder is stored as the lock value (use the requester's Slack user ID so
+// "who holds this?" is answerable by inspecting Redis directly).
+func (s *Store) AcquireLock(ctx context.Context, app, holder string, ttl time.Duration) (bool, error) {
+	ok, err := s.rdb.SetNX(ctx, lockPrefix+app, holder, ttl).Result()
+	if err != nil {
+		return false, fmt.Errorf("acquire lock %s: %w", app, err)
+	}
+	return ok, nil
+}
+
+// ReleaseLock deletes the per-app deploy lock.
+func (s *Store) ReleaseLock(ctx context.Context, app string) error {
+	return s.rdb.Del(ctx, lockPrefix+app).Err()
 }
 
 // PRNumberFromKey extracts the PR number from a Redis key like "pending:123".

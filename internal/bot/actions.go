@@ -86,6 +86,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	}
 
 	_ = b.gh.CommentApproved(ctx, prNumber, ghLogin)
+	_ = b.store.ReleaseLock(ctx, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
 	// Notify requester
@@ -184,6 +185,29 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, cal
 		return
 	}
 
+	// Acquire per-app deploy lock — prevent concurrent deploys of the same app.
+	lockTTL, _ := b.cfg.LockTTL()
+	acquired, err := b.store.AcquireLock(ctx, appVal, requesterID, lockTTL)
+	if err != nil {
+		b.log.Error("acquire deploy lock", zap.String("app", appVal), zap.Error(err))
+		client.Ack(*evt.Request, map[string]interface{}{
+			"response_action": "errors",
+			"errors":          map[string]string{blockApp: "Failed to check deploy lock. Please try again."},
+		})
+		return
+	}
+	if !acquired {
+		msg := fmt.Sprintf("A deployment of *%s* is already in progress.", appVal)
+		if existing, _ := b.store.GetByApp(ctx, appVal); existing != nil {
+			msg = fmt.Sprintf("A deployment of *%s* is already in progress: <%s|PR #%d>", appVal, existing.PRURL, existing.PRNumber)
+		}
+		client.Ack(*evt.Request, map[string]interface{}{
+			"response_action": "errors",
+			"errors":          map[string]string{blockApp: msg},
+		})
+		return
+	}
+
 	// All validation passed — ack and proceed
 	client.Ack(*evt.Request)
 
@@ -214,6 +238,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, evt *socketmode.Event, cal
 	})
 	if err != nil {
 		b.log.Error("create deploy PR", zap.Error(err))
+		_ = b.store.ReleaseLock(ctx, appVal)
 		_, _, _ = b.slack.PostMessageContext(ctx, requesterID,
 			slack.MsgOptionText(fmt.Sprintf("Failed to create deployment PR: %v", err), false),
 		)
@@ -299,6 +324,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 
 	_ = b.gh.CommentRejected(ctx, prNumber, ghLogin, rejReason)
 	_ = b.gh.ClosePR(ctx, prNumber)
+	_ = b.store.ReleaseLock(ctx, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
 	// Notify requester

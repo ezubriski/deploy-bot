@@ -10,7 +10,8 @@
   },
   "deployment": {
     "stale_duration": "2h",
-    "merge_method": "squash"
+    "merge_method": "squash",
+    "lock_ttl": "5m"
   },
   "aws": {
     "ecr_role_arn": "arn:aws:iam::ECR_ACCOUNT_ID:role/deploy-bot-ecr-reader",
