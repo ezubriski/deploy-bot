@@ -53,11 +53,11 @@ func main() {
 		log.Fatal("invalid secrets", zap.Error(err))
 	}
 
-	rdb := redis.NewClient(&redis.Options{Addr: secrets.RedisAddr})
+	rdb := redis.NewClient(&redis.Options{Addr: secrets.RedisAddr, Password: secrets.RedisToken})
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		log.Fatal("redis ping", zap.Error(err))
 	}
-	redisStore := store.New(secrets.RedisAddr)
+	redisStore := store.New(secrets.RedisAddr, secrets.RedisToken)
 
 	slackClient := slack.New(secrets.SlackBotToken,
 		slack.OptionAppLevelToken(secrets.SlackAppToken),

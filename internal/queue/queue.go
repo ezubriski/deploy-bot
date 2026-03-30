@@ -147,11 +147,13 @@ func (w *Worker) process(ctx context.Context, msg redis.XMessage, handle func(co
 	if err != nil {
 		w.log.Error("queue: decode message", zap.String("id", msg.ID), zap.Error(err))
 		// ACK malformed messages so they don't block the queue.
-		_ = w.rdb.XAck(ctx, StreamKey, ConsumerGroup, msg.ID)
+		_ = w.rdb.XAck(context.Background(), StreamKey, ConsumerGroup, msg.ID)
 		return
 	}
 	handle(ctx, evt)
-	if err := w.rdb.XAck(ctx, StreamKey, ConsumerGroup, msg.ID).Err(); err != nil {
+	// Use Background context for ACK: this is a cleanup operation that must
+	// succeed even if the worker is shutting down and ctx is already canceled.
+	if err := w.rdb.XAck(context.Background(), StreamKey, ConsumerGroup, msg.ID).Err(); err != nil {
 		w.log.Error("queue: xack", zap.String("id", msg.ID), zap.Error(err))
 	}
 }

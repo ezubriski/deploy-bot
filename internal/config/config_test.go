@@ -105,6 +105,41 @@ func TestSecretsValidate(t *testing.T) {
 	})
 }
 
+func TestCompiledTagPattern(t *testing.T) {
+	t.Run("matches valid semver tag", func(t *testing.T) {
+		a := &AppConfig{TagPattern: `^v[0-9]+\.[0-9]+\.[0-9]+$`}
+		re := a.CompiledTagPattern()
+		if re == nil {
+			t.Fatal("expected non-nil regexp")
+		}
+		if !re.MatchString("v1.2.3") {
+			t.Error("expected v1.2.3 to match")
+		}
+		if re.MatchString("v1.2") {
+			t.Error("expected v1.2 not to match")
+		}
+	})
+
+	t.Run("cached on repeated calls", func(t *testing.T) {
+		a := &AppConfig{TagPattern: `^v\d+$`}
+		r1 := a.CompiledTagPattern()
+		r2 := a.CompiledTagPattern()
+		if r1 != r2 {
+			t.Error("expected same *regexp.Regexp pointer on second call")
+		}
+	})
+
+	t.Run("panics on invalid pattern", func(t *testing.T) {
+		a := &AppConfig{TagPattern: `[invalid`}
+		defer func() {
+			if r := recover(); r == nil {
+				t.Error("expected panic for invalid regex pattern")
+			}
+		}()
+		a.CompiledTagPattern()
+	})
+}
+
 func TestTokenPrefix(t *testing.T) {
 	cases := []struct {
 		input string

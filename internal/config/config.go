@@ -71,6 +71,7 @@ type Secrets struct {
 	SlackAppToken string `json:"slack_app_token"`
 	GitHubToken   string `json:"github_token"`
 	RedisAddr     string `json:"redis_addr"`
+	RedisToken    string `json:"redis_token,omitempty"`
 }
 
 // Validate checks that all required secrets are present and have the expected format.

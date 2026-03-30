@@ -22,9 +22,10 @@ type Store struct {
 	rdb *redis.Client
 }
 
-func New(addr string) *Store {
+func New(addr, password string) *Store {
 	rdb := redis.NewClient(&redis.Options{
-		Addr: addr,
+		Addr:     addr,
+		Password: password,
 	})
 	return &Store{rdb: rdb}
 }

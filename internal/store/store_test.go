@@ -16,7 +16,7 @@ func newTestStore(t *testing.T) (*Store, *miniredis.Miniredis) {
 		t.Fatalf("start miniredis: %v", err)
 	}
 	t.Cleanup(mr.Close)
-	return New(mr.Addr()), mr
+	return New(mr.Addr(), ""), mr
 }
 
 func TestAcquireLock_Success(t *testing.T) {

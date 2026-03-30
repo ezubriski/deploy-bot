@@ -39,15 +39,38 @@ Two processes share a single container image:
 
 ### Secrets (AWS Secrets Manager)
 
-Create a secret (JSON) at the path set in `AWS_SECRET_NAME`:
+Create a secret at the path set in `AWS_SECRET_NAME` (default `deploy-bot/secrets`):
 
-```json
-{
-  "slack_bot_token":  "xoxb-...",
-  "slack_app_token":  "xapp-...",
-  "github_token":     "ghp_...",
-  "redis_addr":       "your-cluster.cache.amazonaws.com:6379"
-}
+```bash
+aws secretsmanager create-secret \
+  --name deploy-bot/secrets \
+  --secret-string '{
+    "slack_bot_token": "xoxb-111111111111-2222222222222-xxxxxxxxxxxxxxxxxxxxxxxx",
+    "slack_app_token": "xapp-1-Axxxxxxxxxx-2222222222222-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "github_token":    "github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "redis_addr":      "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
+    "redis_token":     "your-elasticache-auth-token"
+  }'
+```
+
+`redis_token` is optional. Omit the field entirely if your ElastiCache cluster does not require authentication.
+
+| Field | Required | Where to find it |
+|---|---|---|
+| `slack_bot_token` | Yes | Slack App → OAuth & Permissions → Bot User OAuth Token (`xoxb-`) |
+| `slack_app_token` | Yes | Slack App → Basic Information → App-Level Tokens (`xapp-`) — needs `connections:write` scope |
+| `github_token` | Yes | GitHub → Settings → Developer settings → Personal access tokens, or your GitHub App private key exchange |
+| `redis_addr` | Yes | ElastiCache → Cluster → Primary endpoint (include port, typically `6379`) |
+| `redis_token` | No | ElastiCache → Cluster → Auth token — only set if in-transit encryption with token auth is enabled |
+
+To rotate a value without touching the others:
+
+```bash
+aws secretsmanager get-secret-value --secret-id deploy-bot/secrets \
+  --query SecretString --output text | \
+  jq '.github_token = "github_pat_newtoken"' | \
+  xargs -0 aws secretsmanager put-secret-value \
+    --secret-id deploy-bot/secrets --secret-string
 ```
 
 ### Config file (`config.json`)
@@ -85,12 +108,119 @@ Each app entry:
 
 ### IAM
 
-The ServiceAccount needs an IAM role (set via the IRSA annotation in `deploy/rbac.yaml`) with:
+The bot uses three IAM roles:
 
-- `secretsmanager:GetSecretValue` on the bot's secret
-- `ecr:GetAuthorizationToken`, `ecr:DescribeImages`, `ecr:BatchGetImage` (via `ecr_role_arn` assume)
-- `s3:PutObject` on the audit bucket (via `audit_role_arn` assume)
-- `sts:AssumeRole` for the above two roles
+**Bot role** — attached to the `deploy-bot` Kubernetes ServiceAccount via IRSA (`deploy/rbac.yaml`). Needs permission to read its own secret and to assume the two cross-account roles:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadBotSecret",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:<region>:<account>:secret:deploy-bot/secrets-*"
+    },
+    {
+      "Sid": "AssumeServiceRoles",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": [
+        "<ecr_role_arn>",
+        "<audit_role_arn>"
+      ]
+    }
+  ]
+}
+```
+
+**ECR role** (`ecr_role_arn`) — assumed by the worker to read app image repositories. Attach this trust policy to the role so the bot role can assume it:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "AWS": "<bot-role-arn>" },
+    "Action": "sts:AssumeRole"
+  }]
+}
+```
+
+And grant these permissions:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "ReadECR",
+    "Effect": "Allow",
+    "Action": [
+      "ecr:GetAuthorizationToken",
+      "ecr:DescribeImages",
+      "ecr:BatchGetImage",
+      "ecr:ListImages"
+    ],
+    "Resource": "*"
+  }]
+}
+```
+
+> `ecr:GetAuthorizationToken` requires `Resource: "*"` — it cannot be scoped to a repository ARN.
+
+**Audit role** (`audit_role_arn`) — assumed by the worker to write audit log entries. Same trust policy pattern as above, with:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "WriteAuditLog",
+    "Effect": "Allow",
+    "Action": "s3:PutObject",
+    "Resource": "arn:aws:s3:::<audit_bucket>/deploy-bot/*"
+  }]
+}
+```
+
+### Slack app permissions
+
+Create a Slack App in Socket Mode at [api.slack.com/apps](https://api.slack.com/apps). Required **bot token scopes** (`xoxb-`):
+
+| Scope | Why |
+|---|---|
+| `commands` | Receive `/deploy` slash command |
+| `chat:write` | Post messages and approval prompts to channels and DMs |
+| `users:read` | Look up users by ID |
+| `users:read.email` | Map Slack user ID → email (used to find GitHub login) |
+| `im:write` | Open DM channels to notify requesters and approvers |
+| `views:open` | Open the deploy request modal |
+| `views:update` | Return inline validation errors on modal submission |
+
+An **app-level token** (`xapp-`) with the `connections:write` scope is also required for Socket Mode.
+
+Add the `/deploy` slash command pointing to any URL (Socket Mode does not use the request URL — Slack ignores it).
+
+### GitHub permissions
+
+A GitHub App or Personal Access Token is required. The token is stored in the `github_token` secret field.
+
+**Personal Access Token (classic)** — grant these scopes:
+
+| Scope | Why |
+|---|---|
+| `repo` | Create, merge, and close PRs; push branches in the gitops repo |
+| `read:org` | Check deployer/approver team membership |
+| `read:user` | Resolve GitHub login → email for identity matching |
+| `user:email` | Read email addresses of team members |
+
+**GitHub App** (recommended for organisations) — grant these repository permissions on the gitops repo, and these organisation permissions:
+
+| Permission | Level | Why |
+|---|---|---|
+| Contents | Read & write | Push kustomization branches |
+| Pull requests | Read & write | Create, merge, close PRs and post comments |
+| Members | Read | Check team membership |
 
 ### Apply manifests
 

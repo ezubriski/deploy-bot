@@ -73,7 +73,7 @@ func main() {
 		}
 	}()
 
-	redisStore := store.New(secrets.RedisAddr)
+	redisStore := store.New(secrets.RedisAddr, secrets.RedisToken)
 	if err := redisStore.Ping(ctx); err != nil {
 		log.Fatal("redis ping", zap.Error(err))
 	}
