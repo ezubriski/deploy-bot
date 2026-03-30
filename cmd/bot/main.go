@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -37,7 +39,10 @@ func main() {
 	}
 	defer log.Sync()
 
-	ctx := context.Background()
+	// Root context cancelled on SIGTERM or SIGINT. This propagates to the
+	// leader election loop and through leaderCtx to all leader-only components.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
 
 	// Load config
 	configPath := os.Getenv("CONFIG_PATH")
@@ -129,8 +134,15 @@ func main() {
 			sw.RecoverStuck(leaderCtx)
 			sw.Start(leaderCtx)
 
-			// Run the bot (blocks until context cancelled)
+			// Start the bot's event loop in the background.
 			b.Run()
+
+			// Block until the leader context is cancelled (signal or lease loss),
+			// then drain in-flight handlers before returning to the election loop.
+			<-leaderCtx.Done()
+			log.Info("leader context cancelled, initiating graceful shutdown",
+				zap.String("reason", context.Cause(leaderCtx).Error()))
+			b.Shutdown(context.Background())
 		},
 	}
 
