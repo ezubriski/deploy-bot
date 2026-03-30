@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -52,6 +53,17 @@ type AppConfig struct {
 	KustomizePath string `json:"kustomize_path"`
 	ECRRepo       string `json:"ecr_repo"`
 	TagPattern    string `json:"tag_pattern"`
+
+	compiledPattern *regexp.Regexp
+}
+
+// CompiledTagPattern returns a compiled version of TagPattern, compiling it
+// on first call. Panics if TagPattern is not a valid regular expression.
+func (a *AppConfig) CompiledTagPattern() *regexp.Regexp {
+	if a.compiledPattern == nil {
+		a.compiledPattern = regexp.MustCompile(a.TagPattern)
+	}
+	return a.compiledPattern
 }
 
 type Secrets struct {

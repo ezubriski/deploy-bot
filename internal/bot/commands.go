@@ -34,6 +34,12 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 			appFilter = parts[1]
 		}
 		b.handleHistory(ctx, cmd, appFilter)
+	case parts[0] == "tags" && len(parts) >= 2:
+		if len(parts) >= 3 {
+			b.handleTagVerify(ctx, cmd, parts[1], parts[2])
+		} else {
+			b.handleTagList(ctx, cmd, parts[1])
+		}
 	case parts[0] == "cancel" && len(parts) >= 2:
 		b.handleCancel(ctx, cmd, parts[1])
 	case parts[0] == "nudge" && len(parts) >= 2:
@@ -325,6 +331,42 @@ func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appNam
 		appName, current, rollbackTag,
 	))
 	b.openDeployModal(ctx, cmd, appName, rollbackTag)
+}
+
+func (b *Bot) handleTagList(ctx context.Context, cmd slack.SlashCommand, appName string) {
+	if _, ok := b.cfg.Load().AppByName(appName); !ok {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Unknown app *%s*.", appName))
+		return
+	}
+	tags := b.ecrCache.Tags(appName, 20)
+	if len(tags) == 0 {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("No tags found for *%s* (cache may still be warming up).", appName))
+		return
+	}
+	lines := make([]string, len(tags))
+	for i, t := range tags {
+		lines[i] = fmt.Sprintf("• `%s`", t)
+	}
+	b.postEphemeralCommand(ctx, cmd,
+		fmt.Sprintf("*Recent tags for %s:*\n%s", appName, strings.Join(lines, "\n")),
+	)
+}
+
+func (b *Bot) handleTagVerify(ctx context.Context, cmd slack.SlashCommand, appName, tag string) {
+	if _, ok := b.cfg.Load().AppByName(appName); !ok {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Unknown app *%s*.", appName))
+		return
+	}
+	valid, err := b.ecrCache.ValidateTag(ctx, appName, tag)
+	if err != nil {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Error checking tag: %v", err))
+		return
+	}
+	if valid {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf(":white_check_mark: Tag `%s` is valid for *%s*.", tag, appName))
+	} else {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf(":x: Tag `%s` was not found for *%s*.", tag, appName))
+	}
 }
 
 func (b *Bot) postEphemeralCommand(ctx context.Context, cmd slack.SlashCommand, text string) {

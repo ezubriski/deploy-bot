@@ -188,6 +188,15 @@ func (s *Store) AcquireLock(ctx context.Context, app, holder string, ttl time.Du
 	return ok, nil
 }
 
+// IsLocked returns true if a deploy lock is currently held for the given app.
+func (s *Store) IsLocked(ctx context.Context, app string) (bool, error) {
+	n, err := s.rdb.Exists(ctx, lockPrefix+app).Result()
+	if err != nil {
+		return false, fmt.Errorf("check lock %s: %w", app, err)
+	}
+	return n > 0, nil
+}
+
 // ReleaseLock deletes the per-app deploy lock.
 func (s *Store) ReleaseLock(ctx context.Context, app string) error {
 	return s.rdb.Del(ctx, lockPrefix+app).Err()

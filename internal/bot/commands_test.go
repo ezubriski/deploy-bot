@@ -80,7 +80,7 @@ func TestBuildDeployModal_PreSelectedTag(t *testing.T) {
 	// Find the manual tag input block and check its InitialValue.
 	for _, blk := range modal.Blocks.BlockSet {
 		ib, ok := blk.(*slack.InputBlock)
-		if !ok || ib.BlockID != blockTagManual {
+		if !ok || ib.BlockID != BlockTagManual {
 			continue
 		}
 		el, ok := ib.Element.(*slack.PlainTextInputBlockElement)
@@ -92,7 +92,7 @@ func TestBuildDeployModal_PreSelectedTag(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("blockTagManual input block not found in modal")
+	t.Fatal("BlockTagManual input block not found in modal")
 }
 
 func TestBuildDeployModal_NoPreSelectedTag(t *testing.T) {
@@ -100,7 +100,7 @@ func TestBuildDeployModal_NoPreSelectedTag(t *testing.T) {
 
 	for _, blk := range modal.Blocks.BlockSet {
 		ib, ok := blk.(*slack.InputBlock)
-		if !ok || ib.BlockID != blockTagManual {
+		if !ok || ib.BlockID != BlockTagManual {
 			continue
 		}
 		el, ok := ib.Element.(*slack.PlainTextInputBlockElement)
@@ -112,5 +112,5 @@ func TestBuildDeployModal_NoPreSelectedTag(t *testing.T) {
 		}
 		return
 	}
-	t.Fatal("blockTagManual input block not found in modal")
+	t.Fatal("BlockTagManual input block not found in modal")
 }

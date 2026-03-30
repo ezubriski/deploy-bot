@@ -32,9 +32,9 @@ func (b *Bot) handleInteraction(ctx context.Context, evt socketmode.Event) {
 func (b *Bot) handleBlockAction(ctx context.Context, callback slack.InteractionCallback) {
 	for _, action := range callback.ActionCallback.BlockActions {
 		switch action.ActionID {
-		case actionApprove:
+		case ActionApprove:
 			b.handleApprove(ctx, callback, action)
-		case actionReject:
+		case ActionReject:
 			b.handleRejectButton(ctx, callback, action)
 		}
 	}
@@ -138,9 +138,9 @@ func (b *Bot) handleRejectButton(ctx context.Context, callback slack.Interaction
 
 func (b *Bot) handleViewSubmission(ctx context.Context, callback slack.InteractionCallback) {
 	switch callback.View.CallbackID {
-	case modalCallbackDeploy:
+	case ModalCallbackDeploy:
 		b.handleDeploySubmit(ctx, callback)
-	case modalCallbackReject:
+	case ModalCallbackReject:
 		b.handleRejectSubmit(ctx, callback)
 	}
 }
@@ -148,11 +148,11 @@ func (b *Bot) handleViewSubmission(ctx context.Context, callback slack.Interacti
 func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.InteractionCallback) {
 	values := callback.View.State.Values
 
-	appVal := values[blockApp][actionApp].SelectedOption.Value
-	tagVal := values[blockTag][actionTag].SelectedOption.Value
-	manualTag := values[blockTagManual][actionTagManual].Value
-	reason := values[blockReason][actionReason].Value
-	approverID := values[blockApprover][actionApprover].SelectedUser
+	appVal := values[BlockApp][ActionApp].SelectedOption.Value
+	tagVal := values[BlockTag][ActionTag].SelectedOption.Value
+	manualTag := values[BlockTagManual][ActionTagManual].Value
+	reason := values[BlockReason][ActionReason].Value
+	approverID := values[BlockApprover][ActionApprover].SelectedUser
 
 	// Manual tag overrides dropdown selection
 	tag := tagVal
@@ -295,7 +295,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 		return
 	}
 
-	rejReason := callback.View.State.Values[blockRejReason][actionRejReason].Value
+	rejReason := callback.View.State.Values[BlockRejReason][ActionRejReason].Value
 	approverID := callback.User.ID
 
 	d, err := b.store.Get(ctx, prNumber)

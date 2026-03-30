@@ -201,6 +201,25 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 	return nil
 }
 
+// Tags returns up to limit of the most recent tags for an app.
+func (c *Cache) Tags(appName string, limit int) []string {
+	c.mu.RLock()
+	ac, ok := c.apps[appName]
+	c.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	ac.mu.RLock()
+	defer ac.mu.RUnlock()
+	n := len(ac.tags)
+	if n > limit {
+		n = limit
+	}
+	out := make([]string, n)
+	copy(out, ac.tags[:n])
+	return out
+}
+
 // RecentTags returns up to 5 most recent tags for an app.
 func (c *Cache) RecentTags(appName string) []string {
 	c.mu.RLock()

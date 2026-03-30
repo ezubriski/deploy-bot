@@ -7,32 +7,32 @@ import (
 )
 
 const (
-	modalCallbackDeploy = "deploy_modal"
-	modalCallbackReject = "reject_modal"
+	ModalCallbackDeploy = "deploy_modal"
+	ModalCallbackReject = "reject_modal"
 
-	blockApp       = "block_app"
-	blockTag       = "block_tag"
-	blockTagManual = "block_tag_manual"
-	blockReason    = "block_reason"
-	blockApprover  = "block_approver"
-	blockRejReason = "block_rej_reason"
+	BlockApp       = "block_app"
+	BlockTag       = "block_tag"
+	BlockTagManual = "block_tag_manual"
+	BlockReason    = "block_reason"
+	BlockApprover  = "block_approver"
+	BlockRejReason = "block_rej_reason"
 
-	actionApp       = "action_app"
-	actionTag       = "action_tag"
-	actionTagManual = "action_tag_manual"
-	actionReason    = "action_reason"
-	actionApprover  = "action_approver"
-	actionRejReason = "action_rej_reason"
+	ActionApp       = "action_app"
+	ActionTag       = "action_tag"
+	ActionTagManual = "action_tag_manual"
+	ActionReason    = "action_reason"
+	ActionApprover  = "action_approver"
+	ActionRejReason = "action_rej_reason"
 
-	actionApprove = "action_approve"
-	actionReject  = "action_reject"
+	ActionApprove = "action_approve"
+	ActionReject  = "action_reject"
 )
 
 func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack.OptionBlockObject, preSelectedApp, preSelectedTag, staleDuration string) slack.ModalViewRequest {
 	appElement := slack.NewOptionsSelectBlockElement(
 		slack.OptTypeStatic,
 		slack.NewTextBlockObject("plain_text", "Select app...", false, false),
-		actionApp,
+		ActionApp,
 		appOptions...,
 	)
 	if preSelectedApp != "" {
@@ -47,7 +47,7 @@ func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack
 	tagElement := slack.NewOptionsSelectBlockElement(
 		slack.OptTypeStatic,
 		slack.NewTextBlockObject("plain_text", "Select tag...", false, false),
-		actionTag,
+		ActionTag,
 		tagOptions...,
 	)
 	if len(tagOptions) > 0 {
@@ -56,23 +56,23 @@ func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack
 
 	blocks := slack.Blocks{
 		BlockSet: []slack.Block{
-			slack.NewInputBlock(blockApp,
+			slack.NewInputBlock(BlockApp,
 				slack.NewTextBlockObject("plain_text", "Application", false, false),
 				nil,
 				appElement,
 			),
-			slack.NewInputBlock(blockTag,
+			slack.NewInputBlock(BlockTag,
 				slack.NewTextBlockObject("plain_text", "Image Tag", false, false),
 				slack.NewTextBlockObject("plain_text", "5 most recent matching tags", false, false),
 				tagElement,
 			),
-			slack.NewInputBlock(blockTagManual,
+			slack.NewInputBlock(BlockTagManual,
 				slack.NewTextBlockObject("plain_text", "Manual Tag Override", false, false),
-				slack.NewTextBlockObject("plain_text", "Leave blank to use selection above", false, false),
+				slack.NewTextBlockObject("plain_text", "Leave blank to use selection above. If the tag is not found you will receive a DM — use /deploy tags <app> to list valid tags.", false, false),
 				func() *slack.PlainTextInputBlockElement {
 					el := slack.NewPlainTextInputBlockElement(
 						slack.NewTextBlockObject("plain_text", "e.g. v1.2.3", false, false),
-						actionTagManual,
+						ActionTagManual,
 					)
 					if preSelectedTag != "" {
 						el.InitialValue = preSelectedTag
@@ -80,21 +80,21 @@ func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack
 					return el
 				}(),
 			),
-			slack.NewInputBlock(blockReason,
+			slack.NewInputBlock(BlockReason,
 				slack.NewTextBlockObject("plain_text", "Reason", false, false),
 				nil,
 				slack.NewPlainTextInputBlockElement(
 					slack.NewTextBlockObject("plain_text", "Why are you deploying?", false, false),
-					actionReason,
+					ActionReason,
 				),
 			),
-			slack.NewInputBlock(blockApprover,
+			slack.NewInputBlock(BlockApprover,
 				slack.NewTextBlockObject("plain_text", "Approver", false, false),
 				nil,
 				slack.NewOptionsSelectBlockElement(
 					slack.OptTypeUser,
 					slack.NewTextBlockObject("plain_text", "Select approver...", false, false),
-					actionApprover,
+					ActionApprover,
 				),
 			),
 			slack.NewSectionBlock(
@@ -112,7 +112,7 @@ func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack
 		Title:         slack.NewTextBlockObject("plain_text", "Request Deployment", false, false),
 		Submit:        slack.NewTextBlockObject("plain_text", "Submit", false, false),
 		Close:         slack.NewTextBlockObject("plain_text", "Cancel", false, false),
-		CallbackID:    modalCallbackDeploy,
+		CallbackID:    ModalCallbackDeploy,
 		Blocks:        blocks,
 		NotifyOnClose: false,
 	}
@@ -124,7 +124,7 @@ func buildRejectModal(prNumber int, app, tag string) slack.ModalViewRequest {
 		Title:           slack.NewTextBlockObject("plain_text", "Reject Deployment", false, false),
 		Submit:          slack.NewTextBlockObject("plain_text", "Reject", false, false),
 		Close:           slack.NewTextBlockObject("plain_text", "Cancel", false, false),
-		CallbackID:      modalCallbackReject,
+		CallbackID:      ModalCallbackReject,
 		PrivateMetadata: fmt.Sprintf("%d", prNumber),
 		Blocks: slack.Blocks{
 			BlockSet: []slack.Block{
@@ -135,12 +135,12 @@ func buildRejectModal(prNumber int, app, tag string) slack.ModalViewRequest {
 					),
 					nil, nil,
 				),
-				slack.NewInputBlock(blockRejReason,
+				slack.NewInputBlock(BlockRejReason,
 					slack.NewTextBlockObject("plain_text", "Rejection Reason", false, false),
 					nil,
 					slack.NewPlainTextInputBlockElement(
 						slack.NewTextBlockObject("plain_text", "Why are you rejecting?", false, false),
-						actionRejReason,
+						ActionRejReason,
 					),
 				),
 			},
@@ -153,11 +153,11 @@ func buildApproverMessage(deploy pendingInfo) []slack.MsgOption {
 		"*Deployment Request*\n\n*App:* %s\n*Tag:* `%s`\n*Requester:* <@%s>\n*Reason:* %s\n*PR:* <%s|#%d>",
 		deploy.App, deploy.Tag, deploy.RequesterID, deploy.Reason, deploy.PRURL, deploy.PRNumber,
 	)
-	btnApprove := slack.NewButtonBlockElement(actionApprove, fmt.Sprintf("%d", deploy.PRNumber),
+	btnApprove := slack.NewButtonBlockElement(ActionApprove, fmt.Sprintf("%d", deploy.PRNumber),
 		slack.NewTextBlockObject("plain_text", "Approve", false, false))
 	btnApprove.Style = "primary"
 
-	btnReject := slack.NewButtonBlockElement(actionReject, fmt.Sprintf("%d", deploy.PRNumber),
+	btnReject := slack.NewButtonBlockElement(ActionReject, fmt.Sprintf("%d", deploy.PRNumber),
 		slack.NewTextBlockObject("plain_text", "Reject", false, false))
 	btnReject.Style = "danger"
 
