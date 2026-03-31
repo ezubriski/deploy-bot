@@ -91,7 +91,7 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 		))
 	}
 
-	modal := buildDeployModal(appOptions, tagOptions, preSelectedApp, preSelectedTag, staleDuration.String())
+	modal := buildDeployModal(appOptions, tagOptions, preSelectedApp, preSelectedTag, staleDuration.String(), cmd.Command)
 	_, err = b.slack.OpenViewContext(ctx, cmd.TriggerID, modal)
 	if err != nil {
 		b.log.Error("open deploy modal", zap.Error(err))

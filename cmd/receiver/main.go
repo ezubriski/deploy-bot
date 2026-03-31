@@ -108,7 +108,7 @@ func main() {
 				if ok && !cfg.Slack.IsChannelAllowed(cmd.ChannelID) {
 					sm.Ack(*evt.Request, map[string]interface{}{
 						"response_type": "ephemeral",
-						"text":          "The `/deploy` command is not available in this channel.",
+						"text":          fmt.Sprintf("The `%s` command is not available in this channel.", cmd.Command),
 					})
 					continue
 				}

@@ -75,7 +75,7 @@ func TestFindRollbackTag_EmptyHistory(t *testing.T) {
 // buildDeployModal pre-filled tag tests
 
 func TestBuildDeployModal_PreSelectedTag(t *testing.T) {
-	modal := buildDeployModal(nil, nil, "myapp", "v1.2.3", "2h")
+	modal := buildDeployModal(nil, nil, "myapp", "v1.2.3", "2h", "/deploy")
 
 	// Find the manual tag input block and check its InitialValue.
 	for _, blk := range modal.Blocks.BlockSet {
@@ -96,7 +96,7 @@ func TestBuildDeployModal_PreSelectedTag(t *testing.T) {
 }
 
 func TestBuildDeployModal_NoPreSelectedTag(t *testing.T) {
-	modal := buildDeployModal(nil, nil, "myapp", "", "2h")
+	modal := buildDeployModal(nil, nil, "myapp", "", "2h", "/deploy")
 
 	for _, blk := range modal.Blocks.BlockSet {
 		ib, ok := blk.(*slack.InputBlock)

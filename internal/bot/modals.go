@@ -28,7 +28,7 @@ const (
 	ActionReject  = "action_reject"
 )
 
-func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack.OptionBlockObject, preSelectedApp, preSelectedTag, staleDuration string) slack.ModalViewRequest {
+func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack.OptionBlockObject, preSelectedApp, preSelectedTag, staleDuration, commandName string) slack.ModalViewRequest {
 	appElement := slack.NewOptionsSelectBlockElement(
 		slack.OptTypeStatic,
 		slack.NewTextBlockObject("plain_text", "Select app...", false, false),
@@ -68,7 +68,7 @@ func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack
 			),
 			slack.NewInputBlock(BlockTagManual,
 				slack.NewTextBlockObject("plain_text", "Manual Tag Override", false, false),
-				slack.NewTextBlockObject("plain_text", "Leave blank to use selection above. If the tag is not found you will receive a DM — use /deploy tags <app> to list valid tags.", false, false),
+				slack.NewTextBlockObject("plain_text", fmt.Sprintf("Leave blank to use selection above. If the tag is not found you will receive a DM — use %s tags <app> to list valid tags.", commandName), false, false),
 				func() *slack.PlainTextInputBlockElement {
 					el := slack.NewPlainTextInputBlockElement(
 						slack.NewTextBlockObject("plain_text", "e.g. v1.2.3", false, false),
