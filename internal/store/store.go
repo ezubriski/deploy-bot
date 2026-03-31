@@ -15,7 +15,8 @@ const (
 	lockPrefix    = "lock:"
 	sysLockPrefix = "syslock:"
 	historyKey    = "history"
-	historyMaxLen = 100
+	// HistoryMaxLen is the maximum number of entries kept in the history list.
+	HistoryMaxLen = 100
 )
 
 type Store struct {
@@ -137,7 +138,7 @@ func (s *Store) PushHistory(ctx context.Context, e HistoryEntry) error {
 	}
 	pipe := s.rdb.Pipeline()
 	pipe.LPush(ctx, historyKey, data)
-	pipe.LTrim(ctx, historyKey, 0, historyMaxLen-1)
+	pipe.LTrim(ctx, historyKey, 0, HistoryMaxLen-1)
 	_, err = pipe.Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("push history: %w", err)

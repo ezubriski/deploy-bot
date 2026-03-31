@@ -18,6 +18,65 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
+// ReconstructHistory asynchronously populates the deployment history from
+// GitHub commit history if the Redis history list is empty. This recovers
+// display data after a Redis flush; entries will be missing requester IDs
+// and PR links since those are not derivable from commit messages alone.
+func (s *Sweeper) ReconstructHistory(ctx context.Context) {
+	existing, err := s.store.GetHistory(ctx, 1)
+	if err != nil {
+		s.log.Error("reconstruct history: check existing", zap.Error(err))
+		return
+	}
+	if len(existing) > 0 {
+		return // already populated
+	}
+
+	cfg := s.cfg.Load()
+	s.log.Info("reconstruct history: history empty, fetching from GitHub")
+
+	var all []github.DeployCommit
+	for _, app := range cfg.Apps {
+		commits, err := s.gh.ListDeployCommits(ctx, app.KustomizePath, store.HistoryMaxLen)
+		if err != nil {
+			s.log.Warn("reconstruct history: list commits",
+				zap.String("app", app.App), zap.Error(err))
+			continue
+		}
+		all = append(all, commits...)
+	}
+
+	if len(all) == 0 {
+		s.log.Info("reconstruct history: no deploy commits found")
+		return
+	}
+
+	// Sort oldest-first: LPUSH prepends, so pushing oldest-first leaves the
+	// list in newest-first order after all pushes complete.
+	slices.SortFunc(all, func(a, b github.DeployCommit) int {
+		return a.CommittedAt.Compare(b.CommittedAt)
+	})
+	if len(all) > store.HistoryMaxLen {
+		all = all[len(all)-store.HistoryMaxLen:]
+	}
+
+	pushed := 0
+	for _, c := range all {
+		entry := store.HistoryEntry{
+			EventType:   audit.EventApproved,
+			App:         c.App,
+			Tag:         c.Tag,
+			CompletedAt: c.CommittedAt,
+		}
+		if err := s.store.PushHistory(ctx, entry); err != nil {
+			s.log.Error("reconstruct history: push entry", zap.Error(err))
+			continue
+		}
+		pushed++
+	}
+	s.log.Info("reconstruct history: complete", zap.Int("pushed", pushed))
+}
+
 // recoveryCandidate holds a parsed open PR that is missing from Redis.
 type recoveryCandidate struct {
 	number int

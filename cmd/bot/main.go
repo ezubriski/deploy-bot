@@ -122,6 +122,9 @@ func main() {
 	// Re-insert any deploys missing from Redis (e.g. after a cache flush).
 	sw.ReconcileFromGitHub(ctx)
 
+	// Asynchronously reconstruct history from GitHub commit log if Redis is empty.
+	go sw.ReconstructHistory(ctx)
+
 	// Optional periodic reconciliation (disabled by default).
 	if interval := cfgHolder.Load().Deployment.ReconcileInterval; interval != "" {
 		reconcileInterval, err := time.ParseDuration(interval)

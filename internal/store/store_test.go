@@ -151,8 +151,8 @@ func TestPushHistory_OrderAndTrim(t *testing.T) {
 
 	base := time.Now().UTC().Truncate(time.Second)
 
-	// Push historyMaxLen+2 entries; only the last historyMaxLen should survive.
-	for i := 0; i < historyMaxLen+2; i++ {
+	// Push HistoryMaxLen+2 entries; only the last HistoryMaxLen should survive.
+	for i := 0; i < HistoryMaxLen+2; i++ {
 		e := HistoryEntry{
 			EventType:   "approved",
 			App:         "myapp",
@@ -166,17 +166,17 @@ func TestPushHistory_OrderAndTrim(t *testing.T) {
 		}
 	}
 
-	entries, err := s.GetHistory(ctx, historyMaxLen+10)
+	entries, err := s.GetHistory(ctx, HistoryMaxLen+10)
 	if err != nil {
 		t.Fatalf("get history: %v", err)
 	}
-	if len(entries) != historyMaxLen {
-		t.Fatalf("expected %d entries after trim, got %d", historyMaxLen, len(entries))
+	if len(entries) != HistoryMaxLen {
+		t.Fatalf("expected %d entries after trim, got %d", HistoryMaxLen, len(entries))
 	}
 
 	// LPUSH means newest (highest index) is first.
-	if entries[0].PRNumber != historyMaxLen+2 {
-		t.Errorf("first entry PRNumber = %d, want %d", entries[0].PRNumber, historyMaxLen+2)
+	if entries[0].PRNumber != HistoryMaxLen+2 {
+		t.Errorf("first entry PRNumber = %d, want %d", entries[0].PRNumber, HistoryMaxLen+2)
 	}
 }
 
