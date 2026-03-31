@@ -5,6 +5,52 @@ import (
 	"testing"
 )
 
+func TestIsChannelAllowed(t *testing.T) {
+	t.Run("empty allowlist permits all channels", func(t *testing.T) {
+		cfg := &SlackConfig{}
+		if !cfg.IsChannelAllowed("C12345") {
+			t.Error("expected all channels allowed when allowlist is empty")
+		}
+	})
+
+	t.Run("listed channel is allowed", func(t *testing.T) {
+		cfg := &SlackConfig{AllowedChannels: []string{"C11111", "C22222"}}
+		if !cfg.IsChannelAllowed("C11111") {
+			t.Error("expected C11111 to be allowed")
+		}
+	})
+
+	t.Run("unlisted channel is rejected", func(t *testing.T) {
+		cfg := &SlackConfig{AllowedChannels: []string{"C11111"}}
+		if cfg.IsChannelAllowed("C99999") {
+			t.Error("expected C99999 to be rejected")
+		}
+	})
+}
+
+func TestDeployLabel(t *testing.T) {
+	t.Run("default when unset", func(t *testing.T) {
+		cfg := &Config{}
+		if got := cfg.DeployLabel(); got != "deploy-bot" {
+			t.Errorf("DeployLabel() = %q, want %q", got, "deploy-bot")
+		}
+	})
+
+	t.Run("uses configured value", func(t *testing.T) {
+		cfg := &Config{Deployment: DeploymentConfig{Label: "custom-label"}}
+		if got := cfg.DeployLabel(); got != "custom-label" {
+			t.Errorf("DeployLabel() = %q, want %q", got, "custom-label")
+		}
+	})
+}
+
+func TestPendingLabel(t *testing.T) {
+	cfg := &Config{Deployment: DeploymentConfig{Label: "deploy-bot"}}
+	if got := cfg.PendingLabel(); got != "deploy-bot/pending" {
+		t.Errorf("PendingLabel() = %q, want %q", got, "deploy-bot/pending")
+	}
+}
+
 func TestSecretsValidate(t *testing.T) {
 	valid := Secrets{
 		SlackBotToken: "xoxb-valid-token",

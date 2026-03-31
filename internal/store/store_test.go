@@ -215,6 +215,62 @@ func TestGetHistory_Empty(t *testing.T) {
 	}
 }
 
+func TestTryLock_AcquireAndBlock(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	acquired, err := s.TryLock(ctx, "sweeper", 5*time.Minute)
+	if err != nil || !acquired {
+		t.Fatalf("first TryLock failed: acquired=%v err=%v", acquired, err)
+	}
+
+	acquired, err = s.TryLock(ctx, "sweeper", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("unexpected error on second TryLock: %v", err)
+	}
+	if acquired {
+		t.Fatal("expected second TryLock to fail while lock is held")
+	}
+}
+
+func TestTryLock_ExpiresAfterTTL(t *testing.T) {
+	s, mr := newTestStore(t)
+	ctx := context.Background()
+
+	_, _ = s.TryLock(ctx, "sweeper", 1*time.Second)
+	mr.FastForward(2 * time.Second)
+
+	acquired, err := s.TryLock(ctx, "sweeper", 5*time.Minute)
+	if err != nil || !acquired {
+		t.Fatalf("expected TryLock to succeed after TTL expiry: acquired=%v err=%v", acquired, err)
+	}
+}
+
+func TestPRNumberFromKey(t *testing.T) {
+	cases := []struct {
+		key    string
+		want   int
+		wantOK bool
+	}{
+		{"pending:42", 42, true},
+		{"pending:1", 1, true},
+		{"pending:99999", 99999, true},
+		{"lock:myapp", 0, false},
+		{"pending:", 0, false},
+		{"", 0, false},
+	}
+	for _, tc := range cases {
+		got, ok := PRNumberFromKey(tc.key)
+		if ok != tc.wantOK {
+			t.Errorf("PRNumberFromKey(%q): ok=%v, want %v", tc.key, ok, tc.wantOK)
+			continue
+		}
+		if ok && got != tc.want {
+			t.Errorf("PRNumberFromKey(%q): number=%d, want %d", tc.key, got, tc.want)
+		}
+	}
+}
+
 func TestPushHistory_AppFilter(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
