@@ -30,7 +30,7 @@ Two processes share a single container image:
 
 - Kubernetes cluster (EKS recommended)
 - AWS — Secrets Manager, ECR (for app images), S3 (audit log), STS (cross-account roles)
-- ElastiCache for Redis — Multi-AZ with automatic failover and AOF persistence enabled
+- ElastiCache for Redis — Multi-AZ with automatic failover and AOF persistence enabled. **Redis is required; the bot will not start without it.** See [docs/redis-resilience.md](docs/redis-resilience.md) for behaviour during outages and after a flush.
 - GitHub fine-grained PAT with repository (contents, pull requests) and organisation (members read) permissions
 - Slack App in Socket Mode with the following bot scopes:
   `commands`, `chat:write`, `users:read`, `users:read.email`, `im:write`
