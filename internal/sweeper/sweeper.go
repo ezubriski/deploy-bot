@@ -1,8 +1,11 @@
 package sweeper
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -15,9 +18,19 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
-// ReconcileFromGitHub scans open PRs carrying the deploy label and re-inserts
-// any that are missing from Redis — which happens after a cache flush. The
-// approver is left empty and the requester is notified to re-select one.
+// recoveryCandidate holds a parsed open PR that is missing from Redis.
+type recoveryCandidate struct {
+	number int
+	prURL  string
+	meta   *github.PRMeta
+}
+
+// ReconcileFromGitHub scans open PRs carrying the pending label and closes any
+// that are missing from Redis — which happens after a cache flush. Each
+// requester is notified with the exact command to reproduce their request.
+//
+// PRs are grouped by app so requesters are aware of concurrent requests for the
+// same app when deciding whether to re-request.
 func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 	cfg := s.cfg.Load()
 
@@ -27,10 +40,8 @@ func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 		return
 	}
 
-	staleDuration, _ := cfg.StaleDuration()
-	lockTTL, _ := cfg.LockTTL()
-	recovered := 0
-
+	// Filter to PRs not already tracked in Redis and group by app.
+	byApp := make(map[string][]recoveryCandidate)
 	for _, issue := range issues {
 		prNumber := issue.GetNumber()
 
@@ -40,7 +51,7 @@ func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 			continue
 		}
 		if existing != nil {
-			continue // already tracked in Redis
+			continue
 		}
 
 		meta, ok := github.ParsePRMeta(issue.GetBody())
@@ -49,41 +60,62 @@ func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 			continue
 		}
 
-		prURL := issue.GetHTMLURL()
-		d := &store.PendingDeploy{
-			App:         meta.App,
-			Tag:         meta.Tag,
-			PRNumber:    prNumber,
-			PRURL:       prURL,
-			RequesterID: meta.RequesterSlackID,
-			ApproverID:  "",
-			RequestedAt: issue.GetCreatedAt().Time,
-			ExpiresAt:   time.Now().Add(staleDuration),
-			State:       store.StatePending,
-		}
-		if err := s.store.Set(ctx, d, staleDuration); err != nil {
-			s.log.Error("reconcile: re-insert deploy", zap.Int("pr", prNumber), zap.Error(err))
-			continue
-		}
-
-		// Best-effort lock re-acquisition.
-		_, _ = s.store.AcquireLock(ctx, meta.App, meta.RequesterSlackID, lockTTL)
-
-		// Notify the requester so they know action is needed.
-		_, _, _ = s.slack.PostMessageContext(ctx, meta.RequesterSlackID,
-			slack.MsgOptionText(fmt.Sprintf(
-				":warning: Your deployment of *%s* `%s` (<%s|PR #%d>) was recovered after a system restart, but the assigned approver was lost.\n\nPlease cancel with `/deploy cancel %d` and re-request to assign a new approver.",
-				meta.App, meta.Tag, prURL, prNumber, prNumber,
-			), false),
-		)
-
-		recovered++
-		s.log.Info("reconcile: recovered deploy", zap.Int("pr", prNumber), zap.String("app", meta.App))
+		byApp[meta.App] = append(byApp[meta.App], recoveryCandidate{
+			number: prNumber,
+			prURL:  issue.GetHTMLURL(),
+			meta:   meta,
+		})
 	}
 
-	if recovered > 0 {
-		s.log.Info("reconcile: complete", zap.Int("recovered", recovered))
+	closed := 0
+
+	for _, candidates := range byApp {
+		// Sort oldest first so the context message lists them chronologically.
+		slices.SortFunc(candidates, func(a, b recoveryCandidate) int {
+			return cmp.Compare(a.number, b.number)
+		})
+
+		for i, c := range candidates {
+			_ = s.gh.ClosePR(ctx, c.number)
+			_ = s.gh.RemoveLabel(ctx, c.number, cfg.PendingLabel())
+			_ = s.store.ReleaseLock(ctx, c.meta.App)
+
+			others := make([]recoveryCandidate, 0, len(candidates)-1)
+			others = append(others, candidates[:i]...)
+			others = append(others, candidates[i+1:]...)
+
+			s.notifyRecoveryClose(ctx, c, others)
+			closed++
+			s.log.Info("reconcile: closed and notified",
+				zap.Int("pr", c.number),
+				zap.String("app", c.meta.App),
+			)
+		}
 	}
+
+	if closed > 0 {
+		s.log.Info("reconcile: complete", zap.Int("closed", closed))
+	}
+}
+
+// notifyRecoveryClose DMs the requester that their PR was closed after a
+// restart and gives them the exact command to re-request. If other concurrent
+// requests for the same app were found, they are listed for context.
+func (s *Sweeper) notifyRecoveryClose(ctx context.Context, c recoveryCandidate, others []recoveryCandidate) {
+	var sb strings.Builder
+	fmt.Fprintf(&sb,
+		":warning: Your deployment of *%s* `%s` (<%s|PR #%d>) was closed after a system restart.\n\nTo re-request: `/deploy %s` and select tag `%s`.",
+		c.meta.App, c.meta.Tag, c.prURL, c.number, c.meta.App, c.meta.Tag,
+	)
+
+	if len(others) > 0 {
+		sb.WriteString("\n\n*Note:* the following concurrent deployment requests for this app were also found and closed:")
+		for _, o := range others {
+			fmt.Fprintf(&sb, "\n• <%s|PR #%d> `%s` by <@%s>", o.prURL, o.number, o.meta.Tag, o.meta.RequesterSlackID)
+		}
+	}
+
+	_, _, _ = s.slack.PostMessageContext(ctx, c.meta.RequesterSlackID, slack.MsgOptionText(sb.String(), false))
 }
 
 
