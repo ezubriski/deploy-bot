@@ -1,0 +1,31 @@
+{
+  "github": {
+    "org": "your-org",
+    "repo": "deploy-bot-test-gitops",
+    "deployer_team": "deploy-bot-testers",
+    "approver_team": "deploy-bot-testers"
+  },
+  "slack": {
+    "deploy_channel": "C_YOUR_TEST_CHANNEL_ID"
+  },
+  "deployment": {
+    "stale_duration": "30m",
+    "merge_method": "squash",
+    "lock_ttl": "5m",
+    "label": "deploy-bot"
+  },
+  "aws": {
+    "ecr_role_arn": "arn:aws:iam::123456789012:role/deploy-bot-test-ecr",
+    "ecr_region": "us-east-1",
+    "audit_role_arn": "arn:aws:iam::123456789012:role/deploy-bot-test-audit",
+    "audit_bucket": "deploy-bot-test-audit"
+  },
+  "apps": [
+    {
+      "app": "test-app",
+      "kustomize_path": "apps/test-app/kustomization.yaml",
+      "ecr_repo": "123456789012.dkr.ecr.us-east-1.amazonaws.com/deploy-bot-test-app",
+      "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+    }
+  ]
+}

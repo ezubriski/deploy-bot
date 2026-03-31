@@ -130,6 +130,15 @@ func (c *Client) ClosePR(ctx context.Context, prNumber int) error {
 	return nil
 }
 
+// DeleteBranch deletes a git branch from the repository.
+func (c *Client) DeleteBranch(ctx context.Context, branch string) error {
+	_, err := c.gh.Git.DeleteRef(ctx, c.org, c.repo, "refs/heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("delete branch %s: %w", branch, err)
+	}
+	return nil
+}
+
 // GetDefaultBranch returns the default branch name for the repo.
 func (c *Client) GetDefaultBranch(ctx context.Context) (string, error) {
 	repo, _, err := c.gh.Repositories.Get(ctx, c.org, c.repo)

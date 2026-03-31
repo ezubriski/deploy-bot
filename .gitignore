@@ -1,1 +1,3 @@
 bin/
+tests/integration/testdata/config.json
+.env.integration
