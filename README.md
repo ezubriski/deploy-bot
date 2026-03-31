@@ -189,33 +189,21 @@ And grant these permissions:
 
 ### Slack app setup
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App → From scratch**. Name it (e.g. `deploy-bot`) and select your workspace.
+Use the `slack-manifest.yaml` file at the root of this repository to create
+the app in one step:
 
-2. In the left sidebar, go to **Socket Mode** and toggle **Enable Socket Mode** on. You will be prompted to create an app-level token — name it anything (e.g. `socket`), add the `connections:write` scope, and click **Generate**. Copy the token (starts with `xapp-`) — this is your `slack_app_token`.
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click
+   **Create New App → From a manifest**. Select your workspace, paste the
+   contents of `slack-manifest.yaml`, and click through to create the app.
 
-3. Go to **OAuth & Permissions** in the sidebar. Under **Bot Token Scopes**, add the following:
+2. Go to **Socket Mode** in the sidebar. You will see Socket Mode is already
+   enabled. Click **Generate Token**, name it (e.g. `socket`), add the
+   `connections:write` scope, and click **Generate**. Copy the token (starts
+   with `xapp-`) — this is your `slack_app_token`.
 
-   | Scope | Why |
-   |---|---|
-   | `commands` | Receive the `/deploy` slash command |
-   | `chat:write` | Post messages and approval prompts to channels and DMs |
-   | `users:read` | Look up users by ID |
-   | `users:read.email` | Map Slack user ID → email (used to find GitHub login) |
-   | `im:write` | Open DM channels to notify requesters and approvers |
-   | `views:open` | Open the deploy request modal |
-   | `views:update` | Return inline validation errors on modal submission |
-
-4. Scroll to the top of **OAuth & Permissions** and click **Install to Workspace**. Approve the permissions. Copy the **Bot User OAuth Token** (starts with `xoxb-`) — this is your `slack_bot_token`.
-
-5. Go to **Slash Commands** and click **Create New Command**:
-   - Command: `/deploy`
-   - Request URL: enter any valid URL (e.g. `https://example.com`) — Socket Mode does not use this field but it is required by the form
-   - Short description: `Request, approve, and manage deployments`
-   - Click **Save**
-
-6. Go to **App Home** and under **Show Tabs**, enable the **Messages Tab** and check **Allow users to send Slash commands and messages from the messages tab**. This allows the bot to receive DMs from users.
-
-7. Reinstall the app if Slack prompts you to after adding scopes or commands (**OAuth & Permissions → Reinstall to Workspace**).
+3. Go to **OAuth & Permissions** and click **Install to Workspace**. Approve
+   the permissions. Copy the **Bot User OAuth Token** (starts with `xoxb-`) —
+   this is your `slack_bot_token`.
 
 ### GitHub permissions
 
