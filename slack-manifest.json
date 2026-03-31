@@ -33,9 +33,7 @@
         "chat:write",
         "users:read",
         "users:read.email",
-        "im:write",
-        "views:open",
-        "views:update"
+        "im:write"
       ]
     }
   },
