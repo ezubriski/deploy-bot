@@ -16,6 +16,7 @@ import (
 
 	"github.com/ezubriski/deploy-bot/internal/approvers"
 	"github.com/ezubriski/deploy-bot/internal/bot"
+	"github.com/ezubriski/deploy-bot/internal/buffer"
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/store"
@@ -62,6 +63,9 @@ func main() {
 	slackClient := slack.New(secrets.SlackBotToken,
 		slack.OptionAppLevelToken(secrets.SlackAppToken),
 	)
+
+	evtBuffer := buffer.New(cfg.Slack.BufferSize, rdb, log)
+	go evtBuffer.Run(ctx)
 
 	approverCache := approvers.New(secrets.GitHubToken, slackClient, cfg.GitHub.Org, cfg.GitHub.ApproverTeam, log)
 	if err := approverCache.Refresh(ctx); err != nil {
@@ -112,7 +116,7 @@ func main() {
 					})
 					continue
 				}
-				enqueueAndAck(ctx, sm, rdb, evt, log)
+				enqueueAndAck(ctx, sm, rdb, evtBuffer, evt, log)
 
 			case socketmode.EventTypeInteractive:
 				callback, ok := evt.Data.(slack.InteractionCallback)
@@ -122,9 +126,9 @@ func main() {
 				}
 				if callback.Type == slack.InteractionTypeViewSubmission &&
 					callback.View.CallbackID == bot.ModalCallbackDeploy {
-					validateAndDispatch(ctx, sm, rdb, redisStore, cfg, approverCache, evt, callback, log)
+					validateAndDispatch(ctx, sm, rdb, redisStore, cfg, approverCache, evtBuffer, evt, callback, log)
 				} else {
-					enqueueAndAck(ctx, sm, rdb, evt, log)
+					enqueueAndAck(ctx, sm, rdb, evtBuffer, evt, log)
 				}
 
 			case socketmode.EventTypeConnecting:
@@ -139,10 +143,12 @@ func main() {
 }
 
 // enqueueAndAck enqueues the event and ACKs Slack. If enqueue fails the event
-// is not ACKed, allowing Slack to retry delivery.
-func enqueueAndAck(ctx context.Context, sm *socketmode.Client, rdb *redis.Client, evt socketmode.Event, log *zap.Logger) {
+// is placed in the buffer for retry — Slack is not ACKed and will retry
+// delivery in parallel, providing a second path if the receiver restarts.
+func enqueueAndAck(ctx context.Context, sm *socketmode.Client, rdb *redis.Client, buf *buffer.Buffer, evt socketmode.Event, log *zap.Logger) {
 	if err := queue.Enqueue(ctx, rdb, evt); err != nil {
-		log.Error("enqueue event", zap.String("type", string(evt.Type)), zap.Error(err))
+		log.Error("enqueue failed, buffering for retry", zap.String("type", string(evt.Type)), zap.Error(err))
+		buf.Add(evt)
 		return
 	}
 	sm.Ack(*evt.Request)
@@ -158,6 +164,7 @@ func validateAndDispatch(
 	s *store.Store,
 	cfg *config.Config,
 	approverCache *approvers.Cache,
+	buf *buffer.Buffer,
 	evt socketmode.Event,
 	callback slack.InteractionCallback,
 	log *zap.Logger,
@@ -203,5 +210,5 @@ func validateAndDispatch(
 		return
 	}
 
-	enqueueAndAck(ctx, sm, rdb, evt, log)
+	enqueueAndAck(ctx, sm, rdb, buf, evt, log)
 }

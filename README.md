@@ -85,6 +85,7 @@ Mounted as a ConfigMap. Hot-reloaded on SIGHUP or file change (30s poll). See `d
 | `github.approver_team` | GitHub team slug — members can approve/reject |
 | `slack.deploy_channel` | Channel where deployment notifications are posted |
 | `slack.allowed_channels` | Optional list of channel IDs where `/deploy` commands are accepted. Omit or leave empty to allow all channels. Use channel IDs (e.g. `C01234567`), not names |
+| `slack.buffer_size` | Number of events the receiver buffers in memory when Redis is unavailable (default `500`). Buffered events are retried with exponential backoff until Redis recovers. Events are never ACKed to Slack from the buffer — Slack retries in parallel |
 | `deployment.stale_duration` | How long a pending deploy waits before expiring (default `2h`) |
 | `deployment.merge_method` | `squash`, `merge`, or `rebase` (default `squash`) |
 | `deployment.lock_ttl` | Per-app lock duration (default `5m`) |

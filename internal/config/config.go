@@ -33,6 +33,7 @@ type GitHubConfig struct {
 type SlackConfig struct {
 	DeployChannel   string   `json:"deploy_channel"`
 	AllowedChannels []string `json:"allowed_channels,omitempty"`
+	BufferSize      int      `json:"buffer_size,omitempty"`
 }
 
 // IsChannelAllowed returns true if the channel is permitted to use the bot.
