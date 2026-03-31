@@ -29,14 +29,15 @@ import (
 var env *testEnv
 
 type testEnv struct {
-	ctx         context.Context
-	cancel      context.CancelFunc
-	store       *store.Store
-	ghClient    *githubpkg.Client
-	requesterID string
-	approverID  string
-	app         string
-	tag         string
+	ctx           context.Context
+	cancel        context.CancelFunc
+	store         *store.Store
+	ghClient      *githubpkg.Client
+	requesterID   string
+	approverID    string
+	app           string
+	tag           string
+	deployChannel string
 }
 
 func TestMain(m *testing.M) {
@@ -99,14 +100,15 @@ func TestMain(m *testing.M) {
 	go qw.Run(ctx, b.HandleEvent)
 
 	env = &testEnv{
-		ctx:         ctx,
-		cancel:      cancel,
-		store:       redisStore,
-		ghClient:    ghClient,
-		requesterID: requesterID,
-		approverID:  approverID,
-		app:         app,
-		tag:         tag,
+		ctx:           ctx,
+		cancel:        cancel,
+		store:         redisStore,
+		ghClient:      ghClient,
+		requesterID:   requesterID,
+		approverID:    approverID,
+		app:           app,
+		tag:           tag,
+		deployChannel: cfg.Slack.DeployChannel,
 	}
 
 	code := m.Run()
@@ -163,18 +165,25 @@ func poll(t *testing.T, timeout time.Duration, condition func() bool) bool {
 // Redis and returns its PR number.
 func waitForPR(t *testing.T) int {
 	t.Helper()
+	return waitForPRWithTag(t, env.tag)
+}
+
+// waitForPRWithTag polls until a pending deploy for env.app and the given tag
+// appears in Redis and returns its PR number.
+func waitForPRWithTag(t *testing.T, tag string) int {
+	t.Helper()
 	var prNumber int
 	if !poll(t, 60*time.Second, func() bool {
 		deploys, _ := env.store.GetAll(context.Background())
 		for _, d := range deploys {
-			if d.App == env.app && d.Tag == env.tag {
+			if d.App == env.app && d.Tag == tag {
 				prNumber = d.PRNumber
 				return true
 			}
 		}
 		return false
 	}) {
-		t.Fatal("timed out waiting for deploy PR to be created in Redis")
+		t.Fatalf("timed out waiting for deploy PR (tag %s) to be created in Redis", tag)
 	}
 	return prNumber
 }
@@ -183,6 +192,13 @@ func waitForPR(t *testing.T) int {
 // Errors are logged but do not fail the test — cleanup is best-effort.
 func cleanupPR(t *testing.T, prNumber int) {
 	t.Helper()
+	cleanupPRWithTag(t, prNumber, env.tag)
+}
+
+// cleanupPRWithTag is like cleanupPR but uses the given tag to derive the
+// branch name. Use this when the PR was created for a tag other than env.tag.
+func cleanupPRWithTag(t *testing.T, prNumber int, tag string) {
+	t.Helper()
 	if prNumber == 0 {
 		return
 	}
@@ -190,7 +206,7 @@ func cleanupPR(t *testing.T, prNumber int) {
 	if err := env.ghClient.ClosePR(ctx, prNumber); err != nil {
 		t.Logf("cleanup: close PR #%d: %v (may already be closed)", prNumber, err)
 	}
-	branch := deployBranch(env.app, env.tag)
+	branch := deployBranch(env.app, tag)
 	if err := env.ghClient.DeleteBranch(ctx, branch); err != nil {
 		t.Logf("cleanup: delete branch %s: %v (may already be deleted)", branch, err)
 	}
@@ -207,6 +223,12 @@ func deployBranch(app, tag string) string {
 // bypassing the receiver and Slack Socket Mode.
 func injectDeployRequest(t *testing.T, reason string) {
 	t.Helper()
+	injectDeployRequestWithTag(t, env.tag, reason)
+}
+
+// injectDeployRequestWithTag is like injectDeployRequest but uses an explicit tag.
+func injectDeployRequestWithTag(t *testing.T, tag, reason string) {
+	t.Helper()
 	evt := socketmode.Event{
 		Type: socketmode.EventTypeInteractive,
 		Data: slack.InteractionCallback{
@@ -222,7 +244,7 @@ func injectDeployRequest(t *testing.T, reason string) {
 							bot.ActionTag: {SelectedOption: slack.OptionBlockObject{}},
 						},
 						bot.BlockTagManual: {
-							bot.ActionTagManual: {Value: env.tag},
+							bot.ActionTagManual: {Value: tag},
 						},
 						bot.BlockReason: {
 							bot.ActionReason: {Value: reason},
@@ -238,6 +260,24 @@ func injectDeployRequest(t *testing.T, reason string) {
 	}
 	if err := queue.Enqueue(context.Background(), env.store.Redis(), evt); err != nil {
 		t.Fatalf("inject deploy request: %v", err)
+	}
+}
+
+// injectSlashCommand enqueues a /deploy slash command event directly to Redis.
+func injectSlashCommand(t *testing.T, text string) {
+	t.Helper()
+	evt := socketmode.Event{
+		Type: socketmode.EventTypeSlashCommand,
+		Data: slack.SlashCommand{
+			Command:   "/deploy",
+			Text:      text,
+			UserID:    env.requesterID,
+			UserName:  "ezubriski",
+			ChannelID: env.deployChannel,
+		},
+	}
+	if err := queue.Enqueue(context.Background(), env.store.Redis(), evt); err != nil {
+		t.Fatalf("inject slash command: %v", err)
 	}
 }
 
