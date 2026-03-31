@@ -83,6 +83,7 @@ Mounted as a ConfigMap. Hot-reloaded on SIGHUP or file change (30s poll). See `d
 | `github.repo` | GitOps repository name |
 | `github.deployer_team` | GitHub team slug — members can request deploys |
 | `github.approver_team` | GitHub team slug — members can approve/reject |
+| `github.users` | Optional map of Slack user ID → GitHub login for users with private GitHub emails (e.g. `{"U12345": "ghlogin"}`) |
 | `slack.deploy_channel` | Channel where deployment notifications are posted |
 | `slack.allowed_channels` | Optional list of channel IDs where `/deploy` commands are accepted. Omit or leave empty to allow all channels. Use channel IDs (e.g. `C01234567`), not names |
 | `slack.buffer_size` | Number of events the receiver buffers in memory when Redis is unavailable (default `500`). Buffered events are retried with exponential backoff until Redis recovers. Events are never ACKed to Slack from the buffer — Slack retries in parallel |
@@ -91,9 +92,10 @@ Mounted as a ConfigMap. Hot-reloaded on SIGHUP or file change (30s poll). See `d
 | `deployment.lock_ttl` | Per-app lock duration (default `5m`) |
 | `deployment.label` | GitHub label applied to every deploy PR (default `deploy-bot`). Used to rediscover open PRs after a Redis flush |
 | `deployment.reconcile_interval` | If set (e.g. `1h`), periodically reconcile open labeled PRs against Redis state. Disabled by default; startup reconciliation always runs |
-| `aws.ecr_role_arn` | Role to assume for reading app ECR repositories |
+| `aws.ecr_role_arn` | Optional role to assume for ECR reads. Omit to use the pod/instance identity directly |
 | `aws.ecr_region` | Region of app ECR repositories |
-| `aws.audit_role_arn` | Role to assume for writing audit logs to S3 |
+| `aws.audit_role_arn` | Optional role to assume for S3 audit writes. Omit to use the pod/instance identity directly |
+| `aws.audit_region` | Region of the audit S3 bucket |
 | `aws.audit_bucket` | S3 bucket for audit logs |
 | `apps[]` | One entry per deployable application (see below) |
 

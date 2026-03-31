@@ -32,7 +32,13 @@ func New(ghToken string, slackClient *slack.Client, cfg *config.Config, log *zap
 }
 
 // SlackUserToGitHub resolves a Slack user ID to their GitHub login.
+// It first checks the github.users config map (for users with private GitHub
+// emails), then falls back to searching GitHub by Slack profile email.
 func (v *Validator) SlackUserToGitHub(ctx context.Context, slackUserID string) (string, error) {
+	if login, ok := v.cfg.GitHub.Users[slackUserID]; ok {
+		return login, nil
+	}
+
 	info, err := v.slack.GetUserInfoContext(ctx, slackUserID)
 	if err != nil {
 		return "", fmt.Errorf("get slack user info: %w", err)

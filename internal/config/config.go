@@ -24,10 +24,13 @@ type Config struct {
 }
 
 type GitHubConfig struct {
-	Org          string `json:"org"`
-	Repo         string `json:"repo"`
-	DeployerTeam string `json:"deployer_team"`
-	ApproverTeam string `json:"approver_team"`
+	Org          string            `json:"org"`
+	Repo         string            `json:"repo"`
+	DeployerTeam string            `json:"deployer_team"`
+	ApproverTeam string            `json:"approver_team"`
+	// Users maps Slack user IDs to GitHub logins for users whose GitHub email
+	// is private. Takes precedence over the Slack email → GitHub search lookup.
+	Users        map[string]string `json:"users,omitempty"`
 }
 
 type SlackConfig struct {

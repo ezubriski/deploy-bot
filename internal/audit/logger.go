@@ -51,13 +51,14 @@ func NewLogger(ctx context.Context, cfg *config.Config, log *zap.Logger) (*Logge
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
-	stsClient := sts.NewFromConfig(baseCfg)
-	provider := stscreds.NewAssumeRoleProvider(stsClient, cfg.AWS.AuditRoleARN)
-	roleCfg := baseCfg.Copy()
-	roleCfg.Credentials = aws.NewCredentialsCache(provider)
-	roleCfg.Region = cfg.AWS.AuditRegion
+	clientCfg := baseCfg.Copy()
+	clientCfg.Region = cfg.AWS.AuditRegion
+	if cfg.AWS.AuditRoleARN != "" {
+		stsClient := sts.NewFromConfig(baseCfg)
+		clientCfg.Credentials = stscreds.NewAssumeRoleProvider(stsClient, cfg.AWS.AuditRoleARN)
+	}
 
-	s3Client := s3.NewFromConfig(roleCfg)
+	s3Client := s3.NewFromConfig(clientCfg)
 
 	return &Logger{
 		s3:     s3Client,

@@ -61,19 +61,22 @@ func TestDeployAndApprove(t *testing.T) {
 	}
 
 	// History should contain an approved entry for this deploy.
-	entries, err := env.store.GetHistory(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("get history: %v", err)
-	}
-	var found bool
-	for _, e := range entries {
-		if e.App == env.app && e.Tag == env.tag && e.EventType == audit.EventApproved && e.PRNumber == prNumber {
-			found = true
-			break
+	// PushHistory is called after Delete in the handler, so poll briefly.
+	var historyEntries []store.HistoryEntry
+	if !poll(t, 5*time.Second, func() bool {
+		entries, err := env.store.GetHistory(context.Background(), 20)
+		if err != nil {
+			return false
 		}
-	}
-	if !found {
-		t.Errorf("expected approved history entry for PR #%d, got %+v", prNumber, entries)
+		historyEntries = entries
+		for _, e := range entries {
+			if e.App == env.app && e.Tag == env.tag && e.EventType == audit.EventApproved && e.PRNumber == prNumber {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Errorf("expected approved history entry for PR #%d, got %+v", prNumber, historyEntries)
 	}
 }
 
@@ -107,19 +110,22 @@ func TestDeployAndReject(t *testing.T) {
 	}
 
 	// History should contain a rejected entry.
-	entries, err := env.store.GetHistory(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("get history: %v", err)
-	}
-	var found bool
-	for _, e := range entries {
-		if e.App == env.app && e.Tag == env.tag && e.EventType == audit.EventRejected && e.PRNumber == prNumber {
-			found = true
-			break
+	// PushHistory is called after Delete in the handler, so poll briefly.
+	var historyEntries []store.HistoryEntry
+	if !poll(t, 5*time.Second, func() bool {
+		entries, err := env.store.GetHistory(context.Background(), 20)
+		if err != nil {
+			return false
 		}
-	}
-	if !found {
-		t.Errorf("expected rejected history entry for PR #%d, got %+v", prNumber, entries)
+		historyEntries = entries
+		for _, e := range entries {
+			if e.App == env.app && e.Tag == env.tag && e.EventType == audit.EventRejected && e.PRNumber == prNumber {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Errorf("expected rejected history entry for PR #%d, got %+v", prNumber, historyEntries)
 	}
 }
 

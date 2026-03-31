@@ -50,15 +50,16 @@ func NewCache(ctx context.Context, cfg *config.Config, m *metrics.Metrics, log *
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
 
-	stsClient := sts.NewFromConfig(baseCfg)
-	provider := stscreds.NewAssumeRoleProvider(stsClient, cfg.AWS.ECRRoleARN)
-	roleCfg := baseCfg.Copy()
-	roleCfg.Credentials = aws.NewCredentialsCache(provider)
-	roleCfg.Region = cfg.AWS.ECRRegion
+	clientCfg := baseCfg.Copy()
+	clientCfg.Region = cfg.AWS.ECRRegion
+	if cfg.AWS.ECRRoleARN != "" {
+		stsClient := sts.NewFromConfig(baseCfg)
+		clientCfg.Credentials = stscreds.NewAssumeRoleProvider(stsClient, cfg.AWS.ECRRoleARN)
+	}
 
 	c := &Cache{
 		apps:    make(map[string]*appCache),
-		client:  ecr.NewFromConfig(roleCfg),
+		client:  ecr.NewFromConfig(clientCfg),
 		metrics: m,
 		log:     log,
 	}
