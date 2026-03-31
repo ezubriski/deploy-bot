@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -76,10 +77,15 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 		return 0, "", fmt.Errorf("update kustomization file: %w", err)
 	}
 
-	// Create PR
+	// Embed recovery metadata as an HTML comment (not rendered by GitHub).
+	metaJSON, _ := json.Marshal(PRMeta{
+		RequesterSlackID: params.RequesterSlackID,
+		App:              params.App,
+		Tag:              params.Tag,
+	})
 	prBody := fmt.Sprintf(
-		"**App:** %s\n**Tag:** %s\n**Requester:** @%s\n**Reason:** %s",
-		params.App, params.Tag, params.Requester, params.Reason,
+		"**App:** %s\n**Tag:** %s\n**Requester:** @%s\n**Reason:** %s\n\n<!-- deploy-bot-meta: %s -->",
+		params.App, params.Tag, params.Requester, params.Reason, string(metaJSON),
 	)
 	pr, _, err := c.gh.PullRequests.Create(ctx, c.org, c.repo, &gh.NewPullRequest{
 		Title: gh.String(fmt.Sprintf("deploy(%s): %s", params.App, params.Tag)),
@@ -89,6 +95,13 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 	})
 	if err != nil {
 		return 0, "", fmt.Errorf("create PR: %w", err)
+	}
+
+	if len(params.Labels) > 0 {
+		if err := c.AddLabels(ctx, pr.GetNumber(), params.Labels); err != nil {
+			// Non-fatal: log at call site if needed, deploy continues.
+			_ = err
+		}
 	}
 
 	return pr.GetNumber(), pr.GetHTMLURL(), nil
@@ -127,12 +140,14 @@ func (c *Client) GetDefaultBranch(ctx context.Context) (string, error) {
 }
 
 type CreatePRParams struct {
-	App           string
-	Tag           string
-	KustomizePath string
-	BaseBranch    string
-	Requester     string
-	Reason        string
+	App              string
+	Tag              string
+	KustomizePath    string
+	BaseBranch       string
+	Requester        string
+	Reason           string
+	RequesterSlackID string
+	Labels           []string
 }
 
 var newTagRegex = regexp.MustCompile(`(newTag:\s*)(\S+)`)

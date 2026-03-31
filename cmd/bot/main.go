@@ -80,6 +80,12 @@ func main() {
 
 	ghClient := githubPkg.NewClient(secrets.GitHubToken, cfgHolder.Load().GitHub.Org, cfgHolder.Load().GitHub.Repo)
 
+	for _, label := range []string{cfgHolder.Load().DeployLabel(), cfgHolder.Load().PendingLabel()} {
+		if err := ghClient.EnsureLabel(ctx, label, githubPkg.LabelColor); err != nil {
+			log.Warn("ensure label", zap.String("label", label), zap.Error(err))
+		}
+	}
+
 	slackClient := slack.New(secrets.SlackBotToken,
 		slack.OptionAppLevelToken(secrets.SlackAppToken),
 	)
@@ -112,6 +118,38 @@ func main() {
 
 	// Recover any deploys stuck in merging state from a previous crash.
 	sw.RecoverStuck(ctx)
+
+	// Re-insert any deploys missing from Redis (e.g. after a cache flush).
+	sw.ReconcileFromGitHub(ctx)
+
+	// Optional periodic reconciliation (disabled by default).
+	if interval := cfgHolder.Load().Deployment.ReconcileInterval; interval != "" {
+		reconcileInterval, err := time.ParseDuration(interval)
+		if err != nil {
+			log.Warn("invalid reconcile_interval, periodic reconciliation disabled", zap.Error(err))
+		} else {
+			go func() {
+				ticker := time.NewTicker(reconcileInterval)
+				defer ticker.Stop()
+				lockTTL := reconcileInterval + time.Minute
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						acquired, err := redisStore.TryLock(ctx, "reconcile", lockTTL)
+						if err != nil {
+							log.Error("reconcile lock", zap.Error(err))
+							continue
+						}
+						if acquired {
+							sw.ReconcileFromGitHub(ctx)
+						}
+					}
+				}
+			}()
+		}
+	}
 
 	// Start the sweeper with a Redis lock so only one worker pod runs it.
 	go func() {

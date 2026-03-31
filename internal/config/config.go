@@ -50,9 +50,25 @@ func (s *SlackConfig) IsChannelAllowed(channelID string) bool {
 }
 
 type DeploymentConfig struct {
-	StaleDuration string `json:"stale_duration"`
-	MergeMethod   string `json:"merge_method"`
-	LockTTL       string `json:"lock_ttl"`
+	StaleDuration     string `json:"stale_duration"`
+	MergeMethod       string `json:"merge_method"`
+	LockTTL           string `json:"lock_ttl"`
+	Label             string `json:"label,omitempty"`
+	ReconcileInterval string `json:"reconcile_interval,omitempty"`
+}
+
+// DeployLabel returns the configured GitHub label name, defaulting to "deploy-bot".
+func (c *Config) DeployLabel() string {
+	if c.Deployment.Label == "" {
+		return "deploy-bot"
+	}
+	return c.Deployment.Label
+}
+
+// PendingLabel returns the label applied to open deploy PRs and removed on any
+// closure. Derived from DeployLabel so no separate config is needed.
+func (c *Config) PendingLabel() string {
+	return c.DeployLabel() + "/pending"
 }
 
 type AWSConfig struct {

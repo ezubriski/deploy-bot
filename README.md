@@ -88,6 +88,8 @@ Mounted as a ConfigMap. Hot-reloaded on SIGHUP or file change (30s poll). See `d
 | `deployment.stale_duration` | How long a pending deploy waits before expiring (default `2h`) |
 | `deployment.merge_method` | `squash`, `merge`, or `rebase` (default `squash`) |
 | `deployment.lock_ttl` | Per-app lock duration (default `5m`) |
+| `deployment.label` | GitHub label applied to every deploy PR (default `deploy-bot`). Used to rediscover open PRs after a Redis flush |
+| `deployment.reconcile_interval` | If set (e.g. `1h`), periodically reconcile open labeled PRs against Redis state. Disabled by default; startup reconciliation always runs |
 | `aws.ecr_role_arn` | Role to assume for reading app ECR repositories |
 | `aws.ecr_region` | Region of app ECR repositories |
 | `aws.audit_role_arn` | Role to assume for writing audit logs to S3 |

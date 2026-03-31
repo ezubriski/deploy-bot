@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -128,6 +129,14 @@ func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmod
 		}).Result()
 		if err != nil {
 			if err == context.Canceled || err == redis.Nil {
+				continue
+			}
+			// Consumer group was removed (e.g. Redis flush). Re-initialise and continue.
+			if strings.Contains(err.Error(), "NOGROUP") {
+				w.log.Warn("queue: consumer group missing, re-initializing")
+				if initErr := w.Init(ctx); initErr != nil {
+					w.log.Error("queue: re-init consumer group", zap.Error(initErr))
+				}
 				continue
 			}
 			w.log.Error("queue: xreadgroup", zap.Error(err))

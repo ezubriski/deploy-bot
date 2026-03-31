@@ -82,6 +82,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	}
 
 	_ = b.gh.CommentApproved(ctx, prNumber, ghLogin)
+	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
 	_ = b.store.ReleaseLock(ctx, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
@@ -217,13 +218,16 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		requesterGH = callback.User.Name
 	}
 
+	cfg := b.cfg.Load()
 	prNumber, prURL, err := b.gh.CreateDeployPR(ctx, githubPkg.CreatePRParams{
-		App:           appVal,
-		Tag:           tag,
-		KustomizePath: appCfg.KustomizePath,
-		BaseBranch:    baseBranch,
-		Requester:     requesterGH,
-		Reason:        reason,
+		App:              appVal,
+		Tag:              tag,
+		KustomizePath:    appCfg.KustomizePath,
+		BaseBranch:       baseBranch,
+		Requester:        requesterGH,
+		Reason:           reason,
+		RequesterSlackID: requesterID,
+		Labels:           []string{cfg.DeployLabel(), cfg.PendingLabel()},
 	})
 	if err != nil {
 		b.log.Error("create deploy PR", zap.Error(err))
@@ -311,6 +315,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 
 	_ = b.gh.CommentRejected(ctx, prNumber, ghLogin, rejReason)
 	_ = b.gh.ClosePR(ctx, prNumber)
+	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
 	_ = b.store.ReleaseLock(ctx, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 

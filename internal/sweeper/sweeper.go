@@ -15,6 +15,77 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
+// ReconcileFromGitHub scans open PRs carrying the deploy label and re-inserts
+// any that are missing from Redis — which happens after a cache flush. The
+// approver is left empty and the requester is notified to re-select one.
+func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
+	cfg := s.cfg.Load()
+
+	issues, err := s.gh.ListOpenPRsWithLabel(ctx, cfg.PendingLabel())
+	if err != nil {
+		s.log.Error("reconcile: list labeled PRs", zap.Error(err))
+		return
+	}
+
+	staleDuration, _ := cfg.StaleDuration()
+	lockTTL, _ := cfg.LockTTL()
+	recovered := 0
+
+	for _, issue := range issues {
+		prNumber := issue.GetNumber()
+
+		existing, err := s.store.Get(ctx, prNumber)
+		if err != nil {
+			s.log.Error("reconcile: check store", zap.Int("pr", prNumber), zap.Error(err))
+			continue
+		}
+		if existing != nil {
+			continue // already tracked in Redis
+		}
+
+		meta, ok := github.ParsePRMeta(issue.GetBody())
+		if !ok {
+			s.log.Warn("reconcile: PR has no metadata, skipping", zap.Int("pr", prNumber))
+			continue
+		}
+
+		prURL := issue.GetHTMLURL()
+		d := &store.PendingDeploy{
+			App:         meta.App,
+			Tag:         meta.Tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
+			RequesterID: meta.RequesterSlackID,
+			ApproverID:  "",
+			RequestedAt: issue.GetCreatedAt().Time,
+			ExpiresAt:   time.Now().Add(staleDuration),
+			State:       store.StatePending,
+		}
+		if err := s.store.Set(ctx, d, staleDuration); err != nil {
+			s.log.Error("reconcile: re-insert deploy", zap.Int("pr", prNumber), zap.Error(err))
+			continue
+		}
+
+		// Best-effort lock re-acquisition.
+		_, _ = s.store.AcquireLock(ctx, meta.App, meta.RequesterSlackID, lockTTL)
+
+		// Notify the requester so they know action is needed.
+		_, _, _ = s.slack.PostMessageContext(ctx, meta.RequesterSlackID,
+			slack.MsgOptionText(fmt.Sprintf(
+				":warning: Your deployment of *%s* `%s` (<%s|PR #%d>) was recovered after a system restart, but the assigned approver was lost.\n\nPlease cancel with `/deploy cancel %d` and re-request to assign a new approver.",
+				meta.App, meta.Tag, prURL, prNumber, prNumber,
+			), false),
+		)
+
+		recovered++
+		s.log.Info("reconcile: recovered deploy", zap.Int("pr", prNumber), zap.String("app", meta.App))
+	}
+
+	if recovered > 0 {
+		s.log.Info("reconcile: complete", zap.Int("recovered", recovered))
+	}
+}
+
 
 
 type Sweeper struct {
@@ -61,6 +132,7 @@ func (s *Sweeper) RecoverStuck(ctx context.Context) {
 				s.log.Error("recover merge failed", zap.Int("pr", d.PRNumber), zap.Error(err))
 				continue
 			}
+			_ = s.gh.RemoveLabel(ctx, d.PRNumber, s.cfg.Load().PendingLabel())
 			_ = s.store.Delete(ctx, d.PRNumber)
 			s.log.Info("recovered stuck deploy", zap.Int("pr", d.PRNumber))
 		}
@@ -91,6 +163,7 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		if err := s.gh.ClosePR(ctx, d.PRNumber); err != nil {
 			s.log.Error("close expired PR", zap.Error(err))
 		}
+		_ = s.gh.RemoveLabel(ctx, d.PRNumber, s.cfg.Load().PendingLabel())
 
 		// DM requester
 		_, _, err := s.slack.PostMessageContext(ctx, d.RequesterID,

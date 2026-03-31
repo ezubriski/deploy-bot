@@ -149,6 +149,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 
 	_ = b.gh.CommentCancelled(ctx, prNumber, requesterGH)
 	_ = b.gh.ClosePR(ctx, prNumber)
+	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
 	_ = b.store.ReleaseLock(ctx, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
