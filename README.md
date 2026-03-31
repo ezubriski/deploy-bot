@@ -189,12 +189,12 @@ And grant these permissions:
 
 ### Slack app setup
 
-Use the `slack-manifest.yaml` file at the root of this repository to create
+Use the `slack-manifest.json` file at the root of this repository to create
 the app in one step:
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click
    **Create New App → From a manifest**. Select your workspace, paste the
-   contents of `slack-manifest.yaml`, and click through to create the app.
+   contents of `slack-manifest.json`, and click through to create the app.
 
 2. Go to **Socket Mode** in the sidebar. You will see Socket Mode is already
    enabled. Click **Generate Token**, name it (e.g. `socket`), add the
