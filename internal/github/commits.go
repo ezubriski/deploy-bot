@@ -13,6 +13,7 @@ import (
 type DeployCommit struct {
 	App         string
 	Tag         string
+	SHA         string
 	CommittedAt time.Time
 }
 
@@ -49,6 +50,7 @@ func (c *Client) ListDeployCommits(ctx context.Context, path string, limit int) 
 			results = append(results, DeployCommit{
 				App:         m[1],
 				Tag:         m[2],
+				SHA:         commit.GetSHA(),
 				CommittedAt: committedAt,
 			})
 			if len(results) >= limit {
@@ -61,4 +63,19 @@ func (c *Client) ListDeployCommits(ctx context.Context, path string, limit int) 
 		opts.Page = resp.NextPage
 	}
 	return results, nil
+}
+
+// PRForCommit returns the number and HTML URL of the first merged PR associated
+// with sha, or 0/"" if none is found. The API may return multiple PRs for a
+// squash-merged commit; the first result is used.
+func (c *Client) PRForCommit(ctx context.Context, sha string) (int, string, error) {
+	prs, _, err := c.gh.PullRequests.ListPullRequestsWithCommit(ctx, c.org, c.repo, sha,
+		&gh.ListOptions{PerPage: 1})
+	if err != nil {
+		return 0, "", fmt.Errorf("prs for commit %s: %w", sha, err)
+	}
+	if len(prs) == 0 {
+		return 0, "", nil
+	}
+	return prs[0].GetNumber(), prs[0].GetHTMLURL(), nil
 }

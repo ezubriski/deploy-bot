@@ -62,10 +62,17 @@ func (s *Sweeper) ReconstructHistory(ctx context.Context) {
 
 	pushed := 0
 	for _, c := range all {
+		prNumber, prURL, err := s.gh.PRForCommit(ctx, c.SHA)
+		if err != nil {
+			s.log.Warn("reconstruct history: lookup PR for commit",
+				zap.String("sha", c.SHA), zap.Error(err))
+		}
 		entry := store.HistoryEntry{
 			EventType:   audit.EventApproved,
 			App:         c.App,
 			Tag:         c.Tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
 			CompletedAt: c.CommittedAt,
 		}
 		if err := s.store.PushHistory(ctx, entry); err != nil {
