@@ -22,6 +22,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/health"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/queue"
+	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
 	"github.com/ezubriski/deploy-bot/internal/sweeper"
 	"github.com/ezubriski/deploy-bot/internal/validator"
@@ -93,9 +94,11 @@ func main() {
 		}
 	}
 
-	slackClient := slack.New(secrets.SlackBotToken,
+	rawSlack := slack.New(secrets.SlackBotToken,
 		slack.OptionAppLevelToken(secrets.SlackAppToken),
 	)
+	slackMaxRetries, slackRetryWait := cfgHolder.Load().Slack.RateLimitConfig()
+	slackClient := slackclient.New(rawSlack, slackMaxRetries, slackRetryWait, log)
 
 	ecrCache, err := ecr.NewCache(ctx, cfgHolder.Load(), m, log)
 	if err != nil {
@@ -107,7 +110,7 @@ func main() {
 		log.Fatal("init audit logger", zap.Error(err))
 	}
 
-	val := validator.New(secrets.GitHubToken, slackClient, cfgHolder.Load(), log)
+	val := validator.New(secrets.GitHubToken, rawSlack, cfgHolder.Load(), log)
 
 	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m, cfgHolder, log)
 	sw := sweeper.New(redisStore, ghClient, slackClient, auditLog, m, cfgHolder, log)

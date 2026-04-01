@@ -227,6 +227,38 @@ func TestRateLimitConfig(t *testing.T) {
 	})
 }
 
+func TestSlackRateLimitConfig(t *testing.T) {
+	t.Run("defaults when zero", func(t *testing.T) {
+		cfg := &SlackConfig{}
+		maxRetries, retryWait := cfg.RateLimitConfig()
+		if maxRetries != 3 {
+			t.Errorf("maxRetries = %d, want 3", maxRetries)
+		}
+		if retryWait != 30*time.Second {
+			t.Errorf("retryWait = %v, want 30s", retryWait)
+		}
+	})
+
+	t.Run("custom values parsed", func(t *testing.T) {
+		cfg := &SlackConfig{RateLimitMaxRetries: 5, RateLimitRetryWait: "60s"}
+		maxRetries, retryWait := cfg.RateLimitConfig()
+		if maxRetries != 5 {
+			t.Errorf("maxRetries = %d, want 5", maxRetries)
+		}
+		if retryWait != 60*time.Second {
+			t.Errorf("retryWait = %v, want 60s", retryWait)
+		}
+	})
+
+	t.Run("invalid duration falls back to default", func(t *testing.T) {
+		cfg := &SlackConfig{RateLimitRetryWait: "not-a-duration"}
+		_, retryWait := cfg.RateLimitConfig()
+		if retryWait != 30*time.Second {
+			t.Errorf("retryWait = %v, want 30s default on bad input", retryWait)
+		}
+	})
+}
+
 func TestTokenPrefix(t *testing.T) {
 	cases := []struct {
 		input string

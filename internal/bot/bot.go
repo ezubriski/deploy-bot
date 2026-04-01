@@ -3,7 +3,6 @@ package bot
 import (
 	"context"
 
-	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
 
@@ -12,12 +11,13 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/ecr"
 	githubPkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
+	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
 	"github.com/ezubriski/deploy-bot/internal/validator"
 )
 
 type Bot struct {
-	slack     *slack.Client
+	slack     slackclient.Poster
 	store     *store.Store
 	gh        *githubPkg.Client
 	ecrCache  *ecr.Cache
@@ -29,7 +29,7 @@ type Bot struct {
 }
 
 func New(
-	slackClient *slack.Client,
+	slackClient slackclient.Poster,
 	store *store.Store,
 	gh *githubPkg.Client,
 	ecrCache *ecr.Cache,

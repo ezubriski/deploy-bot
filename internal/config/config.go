@@ -58,6 +58,28 @@ type SlackConfig struct {
 	DeployChannel   string   `json:"deploy_channel"`
 	AllowedChannels []string `json:"allowed_channels,omitempty"`
 	BufferSize      int      `json:"buffer_size,omitempty"`
+	// RateLimitMaxRetries is the maximum number of retries on a Slack 429
+	// rate-limit response. Defaults to 3.
+	RateLimitMaxRetries int    `json:"rate_limit_max_retries,omitempty"`
+	// RateLimitRetryWait is the maximum duration to wait between retries.
+	// Accepts Go duration strings (e.g. "30s"). Defaults to "30s".
+	RateLimitRetryWait  string `json:"rate_limit_retry_wait,omitempty"`
+}
+
+// RateLimitConfig returns the parsed Slack rate limit retry settings with
+// defaults applied.
+func (s *SlackConfig) RateLimitConfig() (maxRetries int, retryWait time.Duration) {
+	maxRetries = s.RateLimitMaxRetries
+	if maxRetries == 0 {
+		maxRetries = 3
+	}
+	retryWait = 30 * time.Second
+	if s.RateLimitRetryWait != "" {
+		if d, err := time.ParseDuration(s.RateLimitRetryWait); err == nil && d > 0 {
+			retryWait = d
+		}
+	}
+	return
 }
 
 // IsChannelAllowed returns true if the channel is permitted to use the bot.

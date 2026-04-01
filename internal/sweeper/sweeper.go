@@ -15,6 +15,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
+	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
@@ -189,7 +190,7 @@ func (s *Sweeper) notifyRecoveryClose(ctx context.Context, c recoveryCandidate, 
 type Sweeper struct {
 	store   *store.Store
 	gh      *github.Client
-	slack   *slack.Client
+	slack   slackclient.Poster
 	audit   *audit.Logger
 	metrics *metrics.Metrics
 	cfg     *config.Holder
@@ -199,7 +200,7 @@ type Sweeper struct {
 func New(
 	store *store.Store,
 	gh *github.Client,
-	slackClient *slack.Client,
+	slackClient slackclient.Poster,
 	auditLog *audit.Logger,
 	m *metrics.Metrics,
 	cfg *config.Holder,

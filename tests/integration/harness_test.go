@@ -21,6 +21,7 @@ import (
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/queue"
+	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
 	"github.com/ezubriski/deploy-bot/internal/validator"
 )
@@ -79,7 +80,9 @@ func TestMain(m *testing.M) {
 
 	maxRetries, retryWait := cfg.GitHub.RateLimitConfig()
 	ghClient := githubpkg.NewClient(secrets.GitHubToken, cfg.GitHub.Org, cfg.GitHub.Repo, log, githubpkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
-	slackClient := slack.New(secrets.SlackBotToken, slack.OptionAppLevelToken(secrets.SlackAppToken))
+	rawSlack := slack.New(secrets.SlackBotToken, slack.OptionAppLevelToken(secrets.SlackAppToken))
+	slackMaxRetries, slackRetryWait := cfg.Slack.RateLimitConfig()
+	slackClient := slackclient.New(rawSlack, slackMaxRetries, slackRetryWait, log)
 
 	m2 := metrics.NewDefault()
 
