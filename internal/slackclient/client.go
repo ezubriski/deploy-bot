@@ -70,33 +70,41 @@ func (c *Client) retryOnRateLimit(ctx context.Context, fn func() error) error {
 }
 
 func (c *Client) PostMessageContext(ctx context.Context, channelID string, options ...slack.MsgOption) (channel, timestamp string, err error) {
-	_ = c.retryOnRateLimit(ctx, func() error {
+	if retryErr := c.retryOnRateLimit(ctx, func() error {
 		channel, timestamp, err = c.Client.PostMessageContext(ctx, channelID, options...)
 		return err
-	})
+	}); retryErr != nil {
+		err = retryErr
+	}
 	return
 }
 
 func (c *Client) PostEphemeralContext(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (timestamp string, err error) {
-	_ = c.retryOnRateLimit(ctx, func() error {
+	if retryErr := c.retryOnRateLimit(ctx, func() error {
 		timestamp, err = c.Client.PostEphemeralContext(ctx, channelID, userID, options...)
 		return err
-	})
+	}); retryErr != nil {
+		err = retryErr
+	}
 	return
 }
 
 func (c *Client) UpdateMessageContext(ctx context.Context, channelID, msgTimestamp string, options ...slack.MsgOption) (ch, ts, text string, err error) {
-	_ = c.retryOnRateLimit(ctx, func() error {
+	if retryErr := c.retryOnRateLimit(ctx, func() error {
 		ch, ts, text, err = c.Client.UpdateMessageContext(ctx, channelID, msgTimestamp, options...)
 		return err
-	})
+	}); retryErr != nil {
+		err = retryErr
+	}
 	return
 }
 
 func (c *Client) OpenViewContext(ctx context.Context, triggerID string, view slack.ModalViewRequest) (resp *slack.ViewResponse, err error) {
-	_ = c.retryOnRateLimit(ctx, func() error {
+	if retryErr := c.retryOnRateLimit(ctx, func() error {
 		resp, err = c.Client.OpenViewContext(ctx, triggerID, view)
 		return err
-	})
+	}); retryErr != nil {
+		err = retryErr
+	}
 	return
 }
