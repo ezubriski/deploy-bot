@@ -1,3 +1,5 @@
 bin/
+bot
 tests/integration/testdata/config.json
+tests/integration/cpu.prof
 .env.integration
