@@ -63,6 +63,7 @@ func TestProfiling(t *testing.T) {
 		t.Logf("approve cycle %d (app: %s)", i+1, app)
 
 		resetAppStateFor(t, app)
+		purgeStaleBranch(t, app, env.tag)
 		injectDeployRequestFor(t, app, env.tag, fmt.Sprintf("profiling: approve cycle %d", i+1))
 
 		prNumber := waitForPRFor(t, app, env.tag)
@@ -84,6 +85,7 @@ func TestProfiling(t *testing.T) {
 		t.Logf("reject cycle (app: %s)", app)
 
 		resetAppStateFor(t, app)
+		purgeStaleBranch(t, app, env.tag)
 		injectDeployRequestFor(t, app, env.tag, "profiling: reject cycle")
 
 		prNumber := waitForPRFor(t, app, env.tag)
@@ -105,6 +107,7 @@ func TestProfiling(t *testing.T) {
 		t.Logf("cancel cycle (app: %s)", app)
 
 		resetAppStateFor(t, app)
+		purgeStaleBranch(t, app, env.tag)
 		injectDeployRequestFor(t, app, env.tag, "profiling: cancel cycle")
 
 		prNumber := waitForPRFor(t, app, env.tag)
@@ -187,6 +190,16 @@ func injectDeployRequestFor(t *testing.T, app, tag, reason string) {
 	}
 	if err := queue.Enqueue(context.Background(), env.store.Redis(), evt); err != nil {
 		t.Fatalf("injectDeployRequestFor %s@%s: %v", app, tag, err)
+	}
+}
+
+// purgeStaleBranch deletes the deploy branch for app+tag if it still exists in
+// GitHub from a previous failed run. Errors are ignored — the branch may not exist.
+func purgeStaleBranch(t *testing.T, app, tag string) {
+	t.Helper()
+	branch := deployBranch(app, tag)
+	if err := env.ghClient.DeleteBranch(context.Background(), branch); err != nil {
+		t.Logf("purgeStaleBranch: %s: %v (may not exist)", branch, err)
 	}
 }
 

@@ -97,7 +97,7 @@ func TestMain(m *testing.M) {
 		fatalf("init audit logger: %v", err)
 	}
 
-	val := validator.New(secrets.GitHubToken, slackClient, cfg, log)
+	val := validator.New(secrets.GitHubToken, rawSlack, cfg, log)
 	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m2, cfgHolder, log)
 
 	qw := queue.NewWorker(redisStore.Redis(), log)
