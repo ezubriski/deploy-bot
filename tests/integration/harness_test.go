@@ -38,6 +38,9 @@ type testEnv struct {
 	app           string
 	tag           string
 	deployChannel string
+	cfg           *config.Config
+	metrics       *metrics.Metrics
+	log           *zap.Logger
 }
 
 func TestMain(m *testing.M) {
@@ -74,7 +77,8 @@ func TestMain(m *testing.M) {
 		fatalf("redis ping: %v", err)
 	}
 
-	ghClient := githubpkg.NewClient(secrets.GitHubToken, cfg.GitHub.Org, cfg.GitHub.Repo)
+	maxRetries, retryWait := cfg.GitHub.RateLimitConfig()
+	ghClient := githubpkg.NewClient(secrets.GitHubToken, cfg.GitHub.Org, cfg.GitHub.Repo, log, githubpkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
 	slackClient := slack.New(secrets.SlackBotToken, slack.OptionAppLevelToken(secrets.SlackAppToken))
 
 	m2 := metrics.NewDefault()
@@ -109,6 +113,9 @@ func TestMain(m *testing.M) {
 		app:           app,
 		tag:           tag,
 		deployChannel: cfg.Slack.DeployChannel,
+		cfg:           cfg,
+		metrics:       m2,
+		log:           log,
 	}
 
 	code := m.Run()

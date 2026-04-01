@@ -9,13 +9,15 @@ import (
 
 // AddComment posts a comment on the given PR.
 func (c *Client) AddComment(ctx context.Context, prNumber int, body string) error {
-	_, _, err := c.gh.Issues.CreateComment(ctx, c.org, c.repo, prNumber, &gh.IssueComment{
-		Body: gh.String(body),
+	return c.retryOnRateLimit(ctx, func() error {
+		_, _, err := c.gh.Issues.CreateComment(ctx, c.org, c.repo, prNumber, &gh.IssueComment{
+			Body: gh.String(body),
+		})
+		if err != nil {
+			return fmt.Errorf("create comment: %w", err)
+		}
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("create comment: %w", err)
-	}
-	return nil
 }
 
 // CommentRequested posts a "deployment requested" comment.

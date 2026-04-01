@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	gh "github.com/google/go-github/v60/github"
+	"go.uber.org/zap"
 )
 
 // NewClientWithHTTP creates a Client using the provided HTTP client and base URL.
@@ -14,5 +15,11 @@ func NewClientWithHTTP(httpClient *http.Client, baseURL, org, repo string) (*Cli
 	if err != nil {
 		return nil, err
 	}
-	return &Client{gh: ghc, org: org, repo: repo}, nil
+	return &Client{
+		gh:    ghc,
+		org:   org,
+		repo:  repo,
+		log:   zap.NewNop(),
+		retry: defaultRetryConfig(),
+	}, nil
 }

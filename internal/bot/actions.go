@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -76,8 +77,12 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	// Merge PR
 	if err := b.gh.MergePR(ctx, prNumber, b.cfg.Load().Deployment.MergeMethod); err != nil {
 		b.log.Error("merge PR", zap.Int("pr", prNumber), zap.Error(err))
-		b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, fmt.Sprintf("Failed to merge PR #%d: %v", prNumber, err))
 		_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+		if errors.Is(err, githubPkg.ErrRateLimited) {
+			b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, fmt.Sprintf("GitHub rate limit reached. PR #%d is still open — please try approving again in a few minutes.", prNumber))
+		} else {
+			b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, fmt.Sprintf("Failed to merge PR #%d: %v", prNumber, err))
+		}
 		return
 	}
 
@@ -232,7 +237,11 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	if err != nil {
 		b.log.Error("create deploy PR", zap.Error(err))
 		_ = b.store.ReleaseLock(ctx, appVal)
-		b.dmUser(ctx, requesterID, fmt.Sprintf("Failed to create deployment PR: %v", err))
+		if errors.Is(err, githubPkg.ErrRateLimited) {
+			b.dmUser(ctx, requesterID, "GitHub rate limit reached. Please try again in a few minutes.")
+		} else {
+			b.dmUser(ctx, requesterID, fmt.Sprintf("Failed to create deployment PR: %v", err))
+		}
 		return
 	}
 

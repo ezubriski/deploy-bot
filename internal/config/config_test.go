@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsChannelAllowed(t *testing.T) {
@@ -183,6 +184,46 @@ func TestCompiledTagPattern(t *testing.T) {
 			}
 		}()
 		a.CompiledTagPattern()
+	})
+}
+
+func TestRateLimitConfig(t *testing.T) {
+	t.Run("defaults when zero", func(t *testing.T) {
+		cfg := &GitHubConfig{}
+		maxRetries, retryWait := cfg.RateLimitConfig()
+		if maxRetries != 3 {
+			t.Errorf("maxRetries = %d, want 3", maxRetries)
+		}
+		if retryWait != 2*time.Minute {
+			t.Errorf("retryWait = %v, want 2m", retryWait)
+		}
+	})
+
+	t.Run("custom values parsed", func(t *testing.T) {
+		cfg := &GitHubConfig{RateLimitMaxRetries: 5, RateLimitRetryWait: "90s"}
+		maxRetries, retryWait := cfg.RateLimitConfig()
+		if maxRetries != 5 {
+			t.Errorf("maxRetries = %d, want 5", maxRetries)
+		}
+		if retryWait != 90*time.Second {
+			t.Errorf("retryWait = %v, want 90s", retryWait)
+		}
+	})
+
+	t.Run("invalid duration falls back to default", func(t *testing.T) {
+		cfg := &GitHubConfig{RateLimitMaxRetries: 2, RateLimitRetryWait: "not-a-duration"}
+		_, retryWait := cfg.RateLimitConfig()
+		if retryWait != 2*time.Minute {
+			t.Errorf("retryWait = %v, want 2m default on bad input", retryWait)
+		}
+	})
+
+	t.Run("zero duration falls back to default", func(t *testing.T) {
+		cfg := &GitHubConfig{RateLimitRetryWait: "0s"}
+		_, retryWait := cfg.RateLimitConfig()
+		if retryWait != 2*time.Minute {
+			t.Errorf("retryWait = %v, want 2m default for zero duration", retryWait)
+		}
 	})
 }
 

@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	pprofhttp "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/slack-go/slack"
@@ -67,6 +68,11 @@ func main() {
 		mux.Handle("/metrics", promhttp.Handler())
 		mux.HandleFunc("/healthz", hh.Liveness)
 		mux.HandleFunc("/readyz", hh.Readiness)
+		mux.HandleFunc("/debug/pprof/", pprofhttp.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprofhttp.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprofhttp.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprofhttp.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprofhttp.Trace)
 		log.Info("metrics/health server listening", zap.String("addr", metricsAddr))
 		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
 			log.Error("metrics/health server error", zap.Error(err))
@@ -78,7 +84,8 @@ func main() {
 		log.Fatal("redis ping", zap.Error(err))
 	}
 
-	ghClient := githubPkg.NewClient(secrets.GitHubToken, cfgHolder.Load().GitHub.Org, cfgHolder.Load().GitHub.Repo)
+	maxRetries, retryWait := cfgHolder.Load().GitHub.RateLimitConfig()
+	ghClient := githubPkg.NewClient(secrets.GitHubToken, cfgHolder.Load().GitHub.Org, cfgHolder.Load().GitHub.Repo, log, githubPkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
 
 	for _, label := range []string{cfgHolder.Load().DeployLabel(), cfgHolder.Load().PendingLabel()} {
 		if err := ghClient.EnsureLabel(ctx, label, githubPkg.LabelColor); err != nil {

@@ -33,8 +33,13 @@ func (c *Client) ListDeployCommits(ctx context.Context, path string, limit int) 
 		ListOptions: gh.ListOptions{PerPage: perPage},
 	}
 	for {
-		commits, resp, err := c.gh.Repositories.ListCommits(ctx, c.org, c.repo, opts)
-		if err != nil {
+		var commits []*gh.RepositoryCommit
+		var resp *gh.Response
+		if err := c.retryOnRateLimit(ctx, func() error {
+			var err error
+			commits, resp, err = c.gh.Repositories.ListCommits(ctx, c.org, c.repo, opts)
+			return err
+		}); err != nil {
 			return nil, fmt.Errorf("list commits for %s: %w", path, err)
 		}
 		for _, commit := range commits {
@@ -69,9 +74,13 @@ func (c *Client) ListDeployCommits(ctx context.Context, path string, limit int) 
 // with sha, or 0/"" if none is found. The API may return multiple PRs for a
 // squash-merged commit; the first result is used.
 func (c *Client) PRForCommit(ctx context.Context, sha string) (int, string, error) {
-	prs, _, err := c.gh.PullRequests.ListPullRequestsWithCommit(ctx, c.org, c.repo, sha,
-		&gh.ListOptions{PerPage: 1})
-	if err != nil {
+	var prs []*gh.PullRequest
+	if err := c.retryOnRateLimit(ctx, func() error {
+		var err error
+		prs, _, err = c.gh.PullRequests.ListPullRequestsWithCommit(ctx, c.org, c.repo, sha,
+			&gh.ListOptions{PerPage: 1})
+		return err
+	}); err != nil {
 		return 0, "", fmt.Errorf("prs for commit %s: %w", sha, err)
 	}
 	if len(prs) == 0 {

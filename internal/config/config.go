@@ -30,7 +30,28 @@ type GitHubConfig struct {
 	ApproverTeam string            `json:"approver_team"`
 	// Users maps Slack user IDs to GitHub logins for users whose GitHub email
 	// is private. Takes precedence over the Slack email → GitHub search lookup.
-	Users        map[string]string `json:"users,omitempty"`
+	Users               map[string]string `json:"users,omitempty"`
+	// RateLimitMaxRetries is the maximum number of retries on a GitHub secondary
+	// rate limit (abuse detection). Defaults to 3.
+	RateLimitMaxRetries int    `json:"rate_limit_max_retries,omitempty"`
+	// RateLimitRetryWait is the maximum duration to wait between retries.
+	// Accepts Go duration strings (e.g. "2m"). Defaults to "2m".
+	RateLimitRetryWait  string `json:"rate_limit_retry_wait,omitempty"`
+}
+
+// RateLimitConfig returns the parsed rate limit retry settings with defaults applied.
+func (g *GitHubConfig) RateLimitConfig() (maxRetries int, retryWait time.Duration) {
+	maxRetries = g.RateLimitMaxRetries
+	if maxRetries == 0 {
+		maxRetries = 3
+	}
+	retryWait = 2 * time.Minute
+	if g.RateLimitRetryWait != "" {
+		if d, err := time.ParseDuration(g.RateLimitRetryWait); err == nil && d > 0 {
+			retryWait = d
+		}
+	}
+	return
 }
 
 type SlackConfig struct {

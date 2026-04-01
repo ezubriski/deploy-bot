@@ -120,11 +120,11 @@ spec:
             periodSeconds: 10
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 10m
+              memory: 32Mi
             limits:
-              cpu: 200m
-              memory: 256Mi
+              cpu: 250m
+              memory: 128Mi
       volumes:
         - name: config
           configMap:
