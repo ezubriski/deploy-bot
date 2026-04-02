@@ -175,7 +175,12 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 		RequesterID: d.RequesterID,
 		CompletedAt: time.Now(),
 	})
-	b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Deployment #%d cancelled.", prNumber))
+	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
+		slack.MsgOptionText(fmt.Sprintf(
+			"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *cancelled* by <@%s>.",
+			d.App, d.Environment, d.Tag, d.PRURL, prNumber, cmd.UserID,
+		), false),
+	)
 	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cmd.UserName))
 }
 
@@ -193,19 +198,15 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	}
 
 	remaining := time.Until(d.ExpiresAt).Round(time.Minute)
-	_, _, err = b.slack.PostMessageContext(ctx, d.ApproverID,
+	_, _, err = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
 		slack.MsgOptionText(fmt.Sprintf(
-			":bell: Reminder: deployment of *%s* (%s) `%s` by <@%s> is waiting for your approval. Expires in *%s*. PR: <%s|#%d>",
-			d.App, d.Environment, d.Tag, d.RequesterID, remaining, d.PRURL, d.PRNumber,
+			":bell: <@%s> — reminder: deployment of *%s* (%s) `%s` by <@%s> is waiting for your approval. Expires in *%s*. <%s|PR #%d>",
+			d.ApproverID, d.App, d.Environment, d.Tag, d.RequesterID, remaining, d.PRURL, d.PRNumber,
 		), false),
 	)
 	if err != nil {
 		b.log.Error("nudge approver", zap.Error(err))
-		b.postEphemeralCommand(ctx, cmd, "Failed to send nudge.")
-		return
 	}
-
-	b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Nudge sent to <@%s>.", d.ApproverID))
 }
 
 func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilter string) {

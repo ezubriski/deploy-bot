@@ -62,12 +62,14 @@ func TestProfiling(t *testing.T) {
 	for i, app := range profilingApps[:3] {
 		t.Logf("approve cycle %d (app: %s)", i+1, app)
 
+		tag := pickTagFor(t, app)
 		resetAppStateFor(t, app)
-		purgeStaleBranch(t, app, env.tag)
-		injectDeployRequestFor(t, app, env.tag, fmt.Sprintf("profiling: approve cycle %d", i+1))
+		purgeStaleBranch(t, app, tag)
+		injectDeployRequestFor(t, app, tag, fmt.Sprintf("profiling: approve cycle %d", i+1))
 
-		prNumber := waitForPRFor(t, app, env.tag)
-		t.Cleanup(func() { cleanupPRWithTag(t, prNumber, env.tag) })
+		prNumber := waitForPRFor(t, app, tag)
+		prTag := tag
+		t.Cleanup(func() { cleanupPRWithTag(t, prNumber, prTag) })
 
 		injectApprove(t, prNumber)
 		if !poll(t, 60*time.Second, func() bool {
@@ -76,7 +78,7 @@ func TestProfiling(t *testing.T) {
 		}) {
 			t.Fatalf("approve cycle %d: timed out waiting for merge (PR #%d)", i+1, prNumber)
 		}
-		t.Logf("approve cycle %d complete (PR #%d)", i+1, prNumber)
+		t.Logf("approve cycle %d complete (PR #%d, tag %s)", i+1, prNumber, tag)
 	}
 
 	// Reject cycle.
@@ -84,12 +86,14 @@ func TestProfiling(t *testing.T) {
 		app := profilingApps[3]
 		t.Logf("reject cycle (app: %s)", app)
 
+		tag := pickTagFor(t, app)
 		resetAppStateFor(t, app)
-		purgeStaleBranch(t, app, env.tag)
-		injectDeployRequestFor(t, app, env.tag, "profiling: reject cycle")
+		purgeStaleBranch(t, app, tag)
+		injectDeployRequestFor(t, app, tag, "profiling: reject cycle")
 
-		prNumber := waitForPRFor(t, app, env.tag)
-		t.Cleanup(func() { cleanupPRWithTag(t, prNumber, env.tag) })
+		prNumber := waitForPRFor(t, app, tag)
+		prTag := tag
+		t.Cleanup(func() { cleanupPRWithTag(t, prNumber, prTag) })
 
 		injectRejectSubmit(t, prNumber, "profiling: rejected")
 		if !poll(t, 30*time.Second, func() bool {
@@ -98,7 +102,7 @@ func TestProfiling(t *testing.T) {
 		}) {
 			t.Fatalf("reject cycle: timed out (PR #%d)", prNumber)
 		}
-		t.Logf("reject cycle complete (PR #%d)", prNumber)
+		t.Logf("reject cycle complete (PR #%d, tag %s)", prNumber, tag)
 	}
 
 	// Cancel cycle.
@@ -106,12 +110,14 @@ func TestProfiling(t *testing.T) {
 		app := profilingApps[4]
 		t.Logf("cancel cycle (app: %s)", app)
 
+		tag := pickTagFor(t, app)
 		resetAppStateFor(t, app)
-		purgeStaleBranch(t, app, env.tag)
-		injectDeployRequestFor(t, app, env.tag, "profiling: cancel cycle")
+		purgeStaleBranch(t, app, tag)
+		injectDeployRequestFor(t, app, tag, "profiling: cancel cycle")
 
-		prNumber := waitForPRFor(t, app, env.tag)
-		t.Cleanup(func() { cleanupPRWithTag(t, prNumber, env.tag) })
+		prNumber := waitForPRFor(t, app, tag)
+		prTag := tag
+		t.Cleanup(func() { cleanupPRWithTag(t, prNumber, prTag) })
 
 		injectSlashCommand(t, fmt.Sprintf("cancel %d", prNumber))
 		if !poll(t, 30*time.Second, func() bool {
@@ -120,7 +126,7 @@ func TestProfiling(t *testing.T) {
 		}) {
 			t.Fatalf("cancel cycle: timed out (PR #%d)", prNumber)
 		}
-		t.Logf("cancel cycle complete (PR #%d)", prNumber)
+		t.Logf("cancel cycle complete (PR #%d, tag %s)", prNumber, tag)
 	}
 
 	// Read-only paths.

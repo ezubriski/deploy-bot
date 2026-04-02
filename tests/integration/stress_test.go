@@ -88,10 +88,12 @@ func enqueueConcurrent(events []socketmode.Event) []error {
 func TestConcurrentLockContention(t *testing.T) {
 	const n = 10
 	resetAppState(t)
+	tag := pickTagFor(t, env.app)
+	purgeStaleBranch(t, env.app, tag)
 
 	events := make([]socketmode.Event, n)
 	for i := range events {
-		events[i] = buildDeployEvent(env.app, env.tag,
+		events[i] = buildDeployEvent(env.app, tag,
 			fmt.Sprintf("stress: concurrent request %d", i))
 	}
 
@@ -113,7 +115,7 @@ func TestConcurrentLockContention(t *testing.T) {
 	}) {
 		t.Fatal("timed out waiting for any deploy PR to appear")
 	}
-	t.Cleanup(func() { cleanupPR(t, firstPR) })
+	t.Cleanup(func() { cleanupPRWithTag(t, firstPR, tag) })
 
 	// Give the worker time to process the remaining n-1 events. Rejected
 	// requests (lock held) are fast — no GitHub API calls — so 15s is generous.
@@ -161,14 +163,18 @@ func TestConcurrentLockContention(t *testing.T) {
 func TestConcurrentDifferentApps(t *testing.T) {
 	apps := []string{"nginx-06", "nginx-07", "nginx-08", "nginx-09", "nginx-10"}
 
+	// Pick a non-current tag per app independently before firing concurrent events.
+	tagByApp := make(map[string]string, len(apps))
 	for _, app := range apps {
 		resetAppStateFor(t, app)
-		purgeStaleBranch(t, app, env.tag)
+		tag := pickTagFor(t, app)
+		tagByApp[app] = tag
+		purgeStaleBranch(t, app, tag)
 	}
 
 	events := make([]socketmode.Event, len(apps))
 	for i, app := range apps {
-		events[i] = buildDeployEvent(app, env.tag,
+		events[i] = buildDeployEvent(app, tagByApp[app],
 			fmt.Sprintf("stress: concurrent deploy of %s", app))
 	}
 
@@ -176,15 +182,13 @@ func TestConcurrentDifferentApps(t *testing.T) {
 		t.Fatalf("enqueue errors: %v", errs)
 	}
 
-	// Poll until all apps have a pending deploy.
+	// Poll until all apps have a pending deploy matching their assigned tag.
 	prByApp := make(map[string]int)
 	if !poll(t, 120*time.Second, func() bool {
 		deploys, _ := env.store.GetAll(context.Background())
 		for _, d := range deploys {
-			for _, app := range apps {
-				if d.App == app {
-					prByApp[app] = d.PRNumber
-				}
+			if expected, ok := tagByApp[d.App]; ok && d.Tag == expected {
+				prByApp[d.App] = d.PRNumber
 			}
 		}
 		return len(prByApp) == len(apps)
@@ -199,8 +203,8 @@ func TestConcurrentDifferentApps(t *testing.T) {
 	t.Logf("all %d apps got PRs: %v", len(apps), prByApp)
 
 	for app, pr := range prByApp {
-		app, pr := app, pr
-		t.Cleanup(func() { cleanupPRForApp(t, pr, app, env.tag) })
+		app, pr, tag := app, pr, tagByApp[app]
+		t.Cleanup(func() { cleanupPRForApp(t, pr, app, tag) })
 		injectApprove(t, pr)
 	}
 
@@ -227,10 +231,12 @@ func TestMultiWorker_LockContention(t *testing.T) {
 	const n = 10
 	startExtraWorker(t, "stress-worker-2")
 	resetAppState(t)
+	tag := pickTagFor(t, env.app)
+	purgeStaleBranch(t, env.app, tag)
 
 	events := make([]socketmode.Event, n)
 	for i := range events {
-		events[i] = buildDeployEvent(env.app, env.tag,
+		events[i] = buildDeployEvent(env.app, tag,
 			fmt.Sprintf("multi-worker: concurrent request %d", i))
 	}
 
@@ -251,7 +257,7 @@ func TestMultiWorker_LockContention(t *testing.T) {
 	}) {
 		t.Fatal("timed out waiting for any deploy PR to appear")
 	}
-	t.Cleanup(func() { cleanupPR(t, firstPR) })
+	t.Cleanup(func() { cleanupPRWithTag(t, firstPR, tag) })
 
 	// Allow time for both workers to drain remaining events.
 	time.Sleep(15 * time.Second)
@@ -288,12 +294,13 @@ func TestMultiWorker_LockContention(t *testing.T) {
 func TestMultiWorker_NoDoubleDelivery(t *testing.T) {
 	startExtraWorker(t, "delivery-worker-2")
 	resetAppState(t)
-	purgeStaleBranch(t, env.app, env.tag)
+	tag := pickTagFor(t, env.app)
+	purgeStaleBranch(t, env.app, tag)
 
-	injectDeployRequest(t, "multi-worker: single event delivery test")
+	injectDeployRequestWithTag(t, tag, "multi-worker: single event delivery test")
 
-	prNumber := waitForPR(t)
-	t.Cleanup(func() { cleanupPR(t, prNumber) })
+	prNumber := waitForPRWithTag(t, tag)
+	t.Cleanup(func() { cleanupPRWithTag(t, prNumber, tag) })
 
 	// Give both workers time to potentially process the same message again.
 	time.Sleep(10 * time.Second)

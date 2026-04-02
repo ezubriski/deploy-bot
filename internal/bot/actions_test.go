@@ -256,11 +256,6 @@ func TestHandleDeploySubmit_NoChange(t *testing.T) {
 		t.Error("expected no-op notice posted to deploy channel")
 	}
 
-	// Requester must be DM'd.
-	if !sl.hasMessageTo("U_REQUESTER") {
-		t.Error("expected DM sent to requester")
-	}
-
 	// No pending deploy stored.
 	deploys, _ := st.GetAll(context.Background())
 	if len(deploys) != 0 {
@@ -389,9 +384,9 @@ func TestHandleApprove_ConflictAutoResolved(t *testing.T) {
 		t.Error("expected lock released after successful merge")
 	}
 
-	// Requester notified.
-	if !sl.hasMessageTo("U_REQUESTER") {
-		t.Error("expected requester notified of approval")
+	// Approval outcome posted to deploy channel.
+	if !sl.hasMessageTo("C_DEPLOY") {
+		t.Error("expected approval outcome posted to deploy channel")
 	}
 
 	if callCount != 2 {

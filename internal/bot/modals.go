@@ -68,7 +68,7 @@ func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack
 			),
 			slack.NewInputBlock(BlockTagManual,
 				slack.NewTextBlockObject("plain_text", "Manual Tag Override", false, false),
-				slack.NewTextBlockObject("plain_text", fmt.Sprintf("Leave blank to use selection above. If the tag is not found you will receive a DM — use %s tags <app> to list valid tags.", commandName), false, false),
+				slack.NewTextBlockObject("plain_text", fmt.Sprintf("Leave blank to use selection above. If the tag is not found a message will be posted in the deploy channel — use %s tags <app> to list valid tags.", commandName), false, false),
 				func() *slack.PlainTextInputBlockElement {
 					el := slack.NewPlainTextInputBlockElement(
 						slack.NewTextBlockObject("plain_text", "e.g. v1.2.3", false, false),
@@ -150,8 +150,8 @@ func buildRejectModal(prNumber int, app, env, tag string) slack.ModalViewRequest
 
 func buildApproverMessage(deploy pendingInfo) []slack.MsgOption {
 	text := fmt.Sprintf(
-		"*Deployment Request*\n\n*App:* %s\n*Environment:* %s\n*Tag:* `%s`\n*Requester:* <@%s>\n*Reason:* %s\n*PR:* <%s|#%d>",
-		deploy.App, deploy.Environment, deploy.Tag, deploy.RequesterID, deploy.Reason, deploy.PRURL, deploy.PRNumber,
+		"*Deployment Request* — <@%s> your approval is needed\n\n*App:* %s\n*Environment:* %s\n*Tag:* `%s`\n*Requester:* <@%s>\n*Reason:* %s\n*PR:* <%s|#%d>",
+		deploy.ApproverID, deploy.App, deploy.Environment, deploy.Tag, deploy.RequesterID, deploy.Reason, deploy.PRURL, deploy.PRNumber,
 	)
 	btnApprove := slack.NewButtonBlockElement(ActionApprove, fmt.Sprintf("%d", deploy.PRNumber),
 		slack.NewTextBlockObject("plain_text", "Approve", false, false))
@@ -179,5 +179,6 @@ type pendingInfo struct {
 	PRNumber    int
 	PRURL       string
 	RequesterID string
+	ApproverID  string
 	Reason      string
 }

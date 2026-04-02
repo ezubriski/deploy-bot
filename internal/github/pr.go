@@ -356,6 +356,25 @@ func (c *Client) DeleteBranch(ctx context.Context, branch string) error {
 	})
 }
 
+// GetFileContent returns the decoded text content of a file at the given ref
+// (branch name, tag, or commit SHA). Useful for inspecting current state
+// without making any changes.
+func (c *Client) GetFileContent(ctx context.Context, path, ref string) (string, error) {
+	var fc *gh.RepositoryContent
+	if err := c.retryOnRateLimit(ctx, func() error {
+		var err error
+		fc, _, _, err = c.gh.Repositories.GetContents(ctx, c.org, c.repo, path, &gh.RepositoryContentGetOptions{Ref: ref})
+		return err
+	}); err != nil {
+		return "", fmt.Errorf("get file content: %w", err)
+	}
+	content, err := fc.GetContent()
+	if err != nil {
+		return "", fmt.Errorf("decode file content: %w", err)
+	}
+	return content, nil
+}
+
 // GetDefaultBranch returns the default branch name for the repo.
 func (c *Client) GetDefaultBranch(ctx context.Context) (string, error) {
 	var repo *gh.Repository

@@ -14,13 +14,15 @@ import (
 
 func TestDeployAndApprove(t *testing.T) {
 	resetAppState(t)
+	tag := pickTagFor(t, env.app)
+	purgeStaleBranch(t, env.app, tag)
 
-	injectDeployRequest(t, "integration test: approve path")
+	injectDeployRequestWithTag(t, tag, "integration test: approve path")
 
-	prNumber := waitForPR(t)
-	t.Cleanup(func() { cleanupPR(t, prNumber) })
+	prNumber := waitForPRWithTag(t, tag)
+	t.Cleanup(func() { cleanupPRWithTag(t, prNumber, tag) })
 
-	t.Logf("deploy PR created: #%d", prNumber)
+	t.Logf("deploy PR created: #%d (tag %s)", prNumber, tag)
 
 	// Verify the pending deploy record is well-formed.
 	d, err := env.store.Get(context.Background(), prNumber)
@@ -30,8 +32,8 @@ func TestDeployAndApprove(t *testing.T) {
 	if d.App != env.app {
 		t.Errorf("pending deploy app = %q, want %q", d.App, env.app)
 	}
-	if d.Tag != env.tag {
-		t.Errorf("pending deploy tag = %q, want %q", d.Tag, env.tag)
+	if d.Tag != tag {
+		t.Errorf("pending deploy tag = %q, want %q", d.Tag, tag)
 	}
 	if d.ApproverID != env.approverID {
 		t.Errorf("pending deploy approverID = %q, want %q", d.ApproverID, env.approverID)
@@ -58,11 +60,10 @@ func TestDeployAndApprove(t *testing.T) {
 	}
 	if locked {
 		t.Error("app lock should be released after merge")
-		_ = env.store.ReleaseLock(context.Background(), env.environment, env.app) // repair for next test
+		_ = env.store.ReleaseLock(context.Background(), env.environment, env.app)
 	}
 
 	// History should contain an approved entry for this deploy.
-	// PushHistory is called after Delete in the handler, so poll briefly.
 	var historyEntries []store.HistoryEntry
 	if !poll(t, 5*time.Second, func() bool {
 		entries, err := env.store.GetHistory(context.Background(), 20)
@@ -71,7 +72,7 @@ func TestDeployAndApprove(t *testing.T) {
 		}
 		historyEntries = entries
 		for _, e := range entries {
-			if e.App == env.app && e.Tag == env.tag && e.EventType == audit.EventApproved && e.PRNumber == prNumber {
+			if e.App == env.app && e.Tag == tag && e.EventType == audit.EventApproved && e.PRNumber == prNumber {
 				return true
 			}
 		}
@@ -83,16 +84,17 @@ func TestDeployAndApprove(t *testing.T) {
 
 func TestDeployAndReject(t *testing.T) {
 	resetAppState(t)
+	tag := pickTagFor(t, env.app)
+	purgeStaleBranch(t, env.app, tag)
 
-	injectDeployRequest(t, "integration test: reject path")
+	injectDeployRequestWithTag(t, tag, "integration test: reject path")
 
-	prNumber := waitForPR(t)
-	t.Cleanup(func() { cleanupPR(t, prNumber) })
+	prNumber := waitForPRWithTag(t, tag)
+	t.Cleanup(func() { cleanupPRWithTag(t, prNumber, tag) })
 
-	t.Logf("deploy PR created: #%d", prNumber)
+	t.Logf("deploy PR created: #%d (tag %s)", prNumber, tag)
 
-	// Reject by submitting the rejection modal directly (skip the button click
-	// which only opens the modal on the Slack side).
+	// Reject by submitting the rejection modal directly.
 	injectRejectSubmit(t, prNumber, "rejected by integration test")
 
 	// Poll until the pending deploy is removed from Redis.
@@ -111,7 +113,6 @@ func TestDeployAndReject(t *testing.T) {
 	}
 
 	// History should contain a rejected entry.
-	// PushHistory is called after Delete in the handler, so poll briefly.
 	var historyEntries []store.HistoryEntry
 	if !poll(t, 5*time.Second, func() bool {
 		entries, err := env.store.GetHistory(context.Background(), 20)
@@ -120,7 +121,7 @@ func TestDeployAndReject(t *testing.T) {
 		}
 		historyEntries = entries
 		for _, e := range entries {
-			if e.App == env.app && e.Tag == env.tag && e.EventType == audit.EventRejected && e.PRNumber == prNumber {
+			if e.App == env.app && e.Tag == tag && e.EventType == audit.EventRejected && e.PRNumber == prNumber {
 				return true
 			}
 		}
@@ -132,18 +133,18 @@ func TestDeployAndReject(t *testing.T) {
 
 func TestDeployLockPreventsSecondDeploy(t *testing.T) {
 	resetAppState(t)
+	tag := pickTagFor(t, env.app)
+	purgeStaleBranch(t, env.app, tag)
 
-	injectDeployRequest(t, "integration test: lock contention first")
+	injectDeployRequestWithTag(t, tag, "integration test: lock contention first")
 
-	firstPR := waitForPR(t)
-	t.Cleanup(func() { cleanupPR(t, firstPR) })
+	firstPR := waitForPRWithTag(t, tag)
+	t.Cleanup(func() { cleanupPRWithTag(t, firstPR, tag) })
 
-	t.Logf("first deploy PR: #%d", firstPR)
+	t.Logf("first deploy PR: #%d (tag %s)", firstPR, tag)
 
-	// Attempt a second deploy for the same app while the first is pending.
-	// The worker should DM the requester that a deploy is already in progress
-	// and must NOT create a second PR.
-	injectDeployRequest(t, "integration test: lock contention second")
+	// Attempt a second deploy while the first is pending; lock must block it.
+	injectDeployRequestWithTag(t, tag, "integration test: lock contention second")
 
 	// Give the worker time to process the second request.
 	time.Sleep(5 * time.Second)
@@ -173,12 +174,14 @@ func TestDeployLockPreventsSecondDeploy(t *testing.T) {
 
 func TestCancelDeploy(t *testing.T) {
 	resetAppState(t)
+	tag := pickTagFor(t, env.app)
+	purgeStaleBranch(t, env.app, tag)
 
-	injectDeployRequest(t, "integration test: cancel path")
+	injectDeployRequestWithTag(t, tag, "integration test: cancel path")
 
-	prNumber := waitForPR(t)
-	t.Cleanup(func() { cleanupPR(t, prNumber) })
-	t.Logf("deploy PR created: #%d", prNumber)
+	prNumber := waitForPRWithTag(t, tag)
+	t.Cleanup(func() { cleanupPRWithTag(t, prNumber, tag) })
+	t.Logf("deploy PR created: #%d (tag %s)", prNumber, tag)
 
 	injectSlashCommand(t, fmt.Sprintf("cancel %d", prNumber))
 
@@ -206,7 +209,7 @@ func TestCancelDeploy(t *testing.T) {
 		}
 		historyEntries = entries
 		for _, e := range entries {
-			if e.App == env.app && e.Tag == env.tag && e.EventType == audit.EventCancelled && e.PRNumber == prNumber {
+			if e.App == env.app && e.Tag == tag && e.EventType == audit.EventCancelled && e.PRNumber == prNumber {
 				return true
 			}
 		}
@@ -217,22 +220,25 @@ func TestCancelDeploy(t *testing.T) {
 }
 
 // TestRollback verifies the rollback flow end-to-end:
-//  1. Deploy and approve tag A, then deploy and approve tag B (B becomes current).
-//  2. Inject /deploy rollback — the bot reads history, finds A as the rollback
-//     target, and attempts to open a Slack modal (which fails silently since
-//     there is no real TriggerID in the injected event, but that is expected).
-//  3. Inject the modal submission for tag A directly, simulating the user
-//     submitting the pre-filled modal that the bot would have shown.
+//  1. Deploy and approve tagA (becomes previous), then deploy and approve tagB (becomes current).
+//  2. Inject /deploy rollback — the bot reads history, finds tagA as the rollback
+//     target, and attempts to open a Slack modal (fails silently without a real TriggerID).
+//  3. Inject the modal submission for tagA directly, simulating the user submitting
+//     the pre-filled modal.
 //  4. Approve the rollback deploy and verify it completes.
 func TestRollback(t *testing.T) {
 	resetAppState(t)
 
-	const rollbackTag = "v1.24.0" // older tag; will be "previous" after we deploy env.tag
+	// Pick two distinct tags, neither currently deployed.
+	tagA := pickTagFor(t, env.app)
+	tagB := pickTagFor(t, env.app, tagA)
+	t.Logf("rollback test: tagA=%s tagB=%s", tagA, tagB)
 
-	// Step 1a: deploy rollbackTag and approve it.
-	injectDeployRequestWithTag(t, rollbackTag, "integration test: rollback setup — first deploy")
-	firstPR := waitForPRWithTag(t, rollbackTag)
-	t.Cleanup(func() { cleanupPRWithTag(t, firstPR, rollbackTag) })
+	// Step 1a: deploy tagA and approve it.
+	purgeStaleBranch(t, env.app, tagA)
+	injectDeployRequestWithTag(t, tagA, "integration test: rollback setup — first deploy")
+	firstPR := waitForPRWithTag(t, tagA)
+	t.Cleanup(func() { cleanupPRWithTag(t, firstPR, tagA) })
 	injectApprove(t, firstPR)
 	if !poll(t, 30*time.Second, func() bool {
 		d, _ := env.store.Get(context.Background(), firstPR)
@@ -240,16 +246,16 @@ func TestRollback(t *testing.T) {
 	}) {
 		t.Fatal("timed out waiting for first setup deploy to complete")
 	}
-	// The merged PR's branch persists in GitHub (no auto-delete). Delete it now
-	// so step 3 can create a new PR for the same tag without a ref conflict.
-	if err := env.ghClient.DeleteBranch(context.Background(), deployBranch(env.environment, env.app, rollbackTag)); err != nil {
+	// Delete the merged branch so the rollback redeploy can create a fresh one.
+	if err := env.ghClient.DeleteBranch(context.Background(), deployBranch(env.environment, env.app, tagA)); err != nil {
 		t.Fatalf("delete setup branch: %v", err)
 	}
 
-	// Step 1b: deploy env.tag and approve it — this becomes "current".
-	injectDeployRequest(t, "integration test: rollback setup — second deploy")
-	secondPR := waitForPR(t)
-	t.Cleanup(func() { cleanupPR(t, secondPR) })
+	// Step 1b: deploy tagB and approve it — this becomes "current".
+	purgeStaleBranch(t, env.app, tagB)
+	injectDeployRequestWithTag(t, tagB, "integration test: rollback setup — second deploy")
+	secondPR := waitForPRWithTag(t, tagB)
+	t.Cleanup(func() { cleanupPRWithTag(t, secondPR, tagB) })
 	injectApprove(t, secondPR)
 	if !poll(t, 30*time.Second, func() bool {
 		d, _ := env.store.Get(context.Background(), secondPR)
@@ -263,15 +269,14 @@ func TestRollback(t *testing.T) {
 	// silently without a real TriggerID.
 	injectSlashCommand(t, "rollback "+env.app)
 
-	// Step 3: inject the modal submission for the rollback tag. This simulates
-	// the user submitting the pre-filled modal. We enqueue it immediately after
+	// Step 3: inject the modal submission for tagA. Enqueued immediately after
 	// the slash command; Redis Streams FIFO ordering ensures the rollback
 	// command is processed first.
-	injectDeployRequestWithTag(t, rollbackTag, "integration test: rollback deploy")
+	injectDeployRequestWithTag(t, tagA, "integration test: rollback deploy")
 
-	rollbackPR := waitForPRWithTag(t, rollbackTag)
-	t.Cleanup(func() { cleanupPRWithTag(t, rollbackPR, rollbackTag) })
-	t.Logf("rollback PR: #%d (tag %s)", rollbackPR, rollbackTag)
+	rollbackPR := waitForPRWithTag(t, tagA)
+	t.Cleanup(func() { cleanupPRWithTag(t, rollbackPR, tagA) })
+	t.Logf("rollback PR: #%d (tag %s)", rollbackPR, tagA)
 
 	// Step 4: approve and verify.
 	injectApprove(t, rollbackPR)
@@ -287,12 +292,12 @@ func TestRollback(t *testing.T) {
 		entries, _ := env.store.GetHistory(context.Background(), 20)
 		historyEntries = entries
 		for _, e := range entries {
-			if e.App == env.app && e.Tag == rollbackTag && e.EventType == audit.EventApproved && e.PRNumber == rollbackPR {
+			if e.App == env.app && e.Tag == tagA && e.EventType == audit.EventApproved && e.PRNumber == rollbackPR {
 				return true
 			}
 		}
 		return false
 	}) {
-		t.Errorf("expected approved history for rollback PR #%d tag %s, got %+v", rollbackPR, rollbackTag, historyEntries)
+		t.Errorf("expected approved history for rollback PR #%d tag %s, got %+v", rollbackPR, tagA, historyEntries)
 	}
 }

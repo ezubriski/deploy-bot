@@ -34,11 +34,11 @@ test-pkg: ## Run tests for a single package: make test-pkg PKG=./internal/store/
 	go test $(PKG)
 
 test-integ: ## Run all integration tests (loads $(ENV_FILE))
-	set -a && . $(ENV_FILE) && set +a && \
+	set -a && . ./$(ENV_FILE) && set +a && \
 	go test -tags=integration -v -count=1 -timeout=$(INTEG_TIMEOUT) ./tests/integration/...
 
 test-integ-single: ## Run one integration test: make test-integ-single RUN=TestDeployAndApprove
-	set -a && . $(ENV_FILE) && set +a && \
+	set -a && . ./$(ENV_FILE) && set +a && \
 	go test -tags=integration -v -count=1 -timeout=$(INTEG_TIMEOUT) -run $(RUN) ./tests/integration/...
 
 # --- lint ---

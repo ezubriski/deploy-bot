@@ -26,25 +26,34 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/validator"
 )
 
+// tagPool is populated in TestMain from the live ECR cache. It holds the
+// most recent tags available for the test application. Tests call pickTagFor
+// to get a tag that is not currently deployed, so deploys always produce real
+// changes regardless of prior run state.
+var tagPool []string
+
 // env holds all shared state for the integration test suite.
 var env *testEnv
 
 type testEnv struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
-	store            *store.Store
-	ghClient         *githubpkg.Client
-	bot              *bot.Bot
-	requesterID      string
+	ctx               context.Context
+	cancel            context.CancelFunc
+	store             *store.Store
+	ghClient          *githubpkg.Client
+	bot               *bot.Bot
+	requesterID       string
 	requesterUsername string
-	approverID       string
-	app              string
-	environment      string
-	tag              string
-	deployChannel    string
-	cfg              *config.Config
-	metrics          *metrics.Metrics
-	log              *zap.Logger
+	approverID        string
+	app               string
+	environment       string
+	// tag is any valid ECR tag used by tests that only need ECR validation
+	// (e.g. TestValidateTag_CacheMiss). Deployment tests call pickTagFor instead.
+	tag           string
+	defaultBranch string
+	deployChannel string
+	cfg           *config.Config
+	metrics       *metrics.Metrics
+	log           *zap.Logger
 }
 
 func TestMain(m *testing.M) {
@@ -52,7 +61,6 @@ func TestMain(m *testing.M) {
 	requesterUsername := requireEnv("INTEGRATION_REQUESTER_USERNAME")
 	approverID        := requireEnv("INTEGRATION_APPROVER_ID")
 	app               := requireEnv("INTEGRATION_APP")
-	tag               := requireEnv("INTEGRATION_TAG")
 
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
@@ -84,6 +92,11 @@ func TestMain(m *testing.M) {
 
 	maxRetries, retryWait := cfg.GitHub.RateLimitConfig()
 	ghClient := githubpkg.NewClient(secrets.GitHubToken, cfg.GitHub.Org, cfg.GitHub.Repo, log, githubpkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
+
+	defaultBranch, err := ghClient.GetDefaultBranch(ctx)
+	if err != nil {
+		fatalf("get default branch: %v", err)
+	}
 	rawSlack := slack.New(secrets.SlackBotToken, slack.OptionAppLevelToken(secrets.SlackAppToken))
 	slackMaxRetries, slackRetryWait := cfg.Slack.RateLimitConfig()
 	slackClient := slackclient.New(rawSlack, slackMaxRetries, slackRetryWait, log)
@@ -96,6 +109,14 @@ func TestMain(m *testing.M) {
 	}
 	ecrCache.Populate(ctx)
 
+	// Build tag pool from real ECR tags so pickTagFor never attempts a tag that
+	// doesn't exist. Pull enough entries that the pool survives multiple
+	// successive deploys within a single test run.
+	tagPool = ecrCache.Tags(app, 10)
+	if len(tagPool) < 2 {
+		fatalf("ECR cache for app %q returned fewer than 2 tags; cannot run integration tests", app)
+	}
+
 	auditLog, err := audit.NewLogger(ctx, cfg, log)
 	if err != nil {
 		fatalf("init audit logger: %v", err)
@@ -103,6 +124,12 @@ func TestMain(m *testing.M) {
 
 	val := validator.New(secrets.GitHubToken, rawSlack, cfg, log)
 	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m2, cfgHolder, log)
+
+	// Delete any leftover stream from a previous test run. This clears the
+	// consumer group and PEL so ghost events from failed runs are not replayed.
+	if err := redisStore.Redis().Del(ctx, queue.StreamKey).Err(); err != nil {
+		fatalf("flush event stream: %v", err)
+	}
 
 	qw := queue.NewWorker(redisStore.Redis(), log)
 	if err := qw.Init(ctx); err != nil {
@@ -116,21 +143,22 @@ func TestMain(m *testing.M) {
 	}
 
 	env = &testEnv{
-		ctx:              ctx,
-		cancel:           cancel,
-		store:            redisStore,
-		ghClient:         ghClient,
-		bot:              b,
-		requesterID:      requesterID,
+		ctx:               ctx,
+		cancel:            cancel,
+		store:             redisStore,
+		ghClient:          ghClient,
+		bot:               b,
+		requesterID:       requesterID,
 		requesterUsername: requesterUsername,
-		approverID:       approverID,
-		app:              app,
-		environment:      appCfg.Environment,
-		tag:              tag,
-		deployChannel:    cfg.Slack.DeployChannel,
-		cfg:              cfg,
-		metrics:          m2,
-		log:              log,
+		approverID:        approverID,
+		app:               app,
+		environment:       appCfg.Environment,
+		tag:               tagPool[len(tagPool)-1], // any valid ECR tag; deploy tests use pickTagFor
+		defaultBranch:     defaultBranch,
+		deployChannel:     cfg.Slack.DeployChannel,
+		cfg:               cfg,
+		metrics:           m2,
+		log:               log,
 	}
 
 	code := m.Run()
@@ -151,6 +179,41 @@ func requireEnv(key string) string {
 func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 	os.Exit(1)
+}
+
+// pickTagFor returns a tag from tagPool that is (a) not in the exclude list
+// and (b) not the tag currently deployed for app according to the live
+// kustomization file on GitHub. Call this at the start of any test that
+// deploys, so the deploy is guaranteed to produce a real change.
+//
+// If the GitHub read fails, the first non-excluded pool member is returned.
+// If all pool members are excluded the test fails immediately.
+func pickTagFor(t *testing.T, app string, exclude ...string) string {
+	t.Helper()
+	excluded := make(map[string]bool, len(exclude))
+	for _, e := range exclude {
+		excluded[e] = true
+	}
+	appCfg, ok := env.cfg.AppByName(app)
+	if !ok {
+		t.Fatalf("pickTagFor: app %q not found in config", app)
+	}
+	content, _ := env.ghClient.GetFileContent(env.ctx, appCfg.KustomizePath, env.defaultBranch)
+	for _, tag := range tagPool {
+		if !excluded[tag] && !strings.Contains(content, "newTag: "+tag) {
+			return tag
+		}
+	}
+	// All non-excluded tags happen to be current (pool exhausted) — fall back
+	// to the first non-excluded entry and let GitHub reject the no-op naturally.
+	for _, tag := range tagPool {
+		if !excluded[tag] {
+			t.Logf("pickTagFor: all pool tags appear current for %s; using %s as best-effort", app, tag)
+			return tag
+		}
+	}
+	t.Fatalf("pickTagFor: all %d pool tags are excluded for app %q", len(tagPool), app)
+	return ""
 }
 
 // resetAppState removes any leftover Redis state for the test app so each test
