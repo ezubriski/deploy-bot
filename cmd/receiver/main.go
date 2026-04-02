@@ -178,11 +178,13 @@ func validateAndDispatch(
 
 	// Check per-app deploy lock.
 	if appVal != "" {
-		locked, err := s.IsLocked(ctx, appVal)
-		if err != nil {
-			log.Error("receiver: check deploy lock", zap.String("app", appVal), zap.Error(err))
-		} else if locked {
-			errs[bot.BlockApp] = fmt.Sprintf("A deployment of *%s* is already in progress.", appVal)
+		if appCfg, ok := cfg.AppByName(appVal); ok {
+			locked, err := s.IsLocked(ctx, appCfg.Environment, appVal)
+			if err != nil {
+				log.Error("receiver: check deploy lock", zap.String("app", appVal), zap.Error(err))
+			} else if locked {
+				errs[bot.BlockApp] = fmt.Sprintf("A deployment of *%s* (%s) is already in progress.", appVal, appCfg.Environment)
+			}
 		}
 	}
 

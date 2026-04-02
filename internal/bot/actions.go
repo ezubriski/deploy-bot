@@ -88,25 +88,26 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 
 	_ = b.gh.CommentApproved(ctx, prNumber, ghLogin)
 	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
-	_ = b.store.ReleaseLock(ctx, d.App)
+	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
 	// Notify requester
 	_, _, _ = b.slack.PostMessageContext(ctx, d.RequesterID,
 		slack.MsgOptionText(fmt.Sprintf(
-			"Your deployment of *%s* `%s` (PR #%d) was *approved* by <@%s> and is now merging.",
-			d.App, d.Tag, prNumber, approverID,
+			"Your deployment of *%s* (%s) `%s` (PR #%d) was *approved* by <@%s> and is now merging.",
+			d.App, d.Environment, d.Tag, prNumber, approverID,
 		), false),
 	)
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType: audit.EventApproved,
-		App:       d.App,
-		Tag:       d.Tag,
-		PRNumber:  prNumber,
-		PRURL:     d.PRURL,
-		Requester: d.Requester,
-		Approver:  ghLogin,
+		EventType:   audit.EventApproved,
+		App:         d.App,
+		Environment: d.Environment,
+		Tag:         d.Tag,
+		PRNumber:    prNumber,
+		PRURL:       d.PRURL,
+		Requester:   d.Requester,
+		Approver:    ghLogin,
 	})
 
 	b.metrics.RecordDeploy(d.App, audit.EventApproved)
@@ -114,6 +115,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	_ = b.store.PushHistory(ctx, store.HistoryEntry{
 		EventType:   audit.EventApproved,
 		App:         d.App,
+		Environment: d.Environment,
 		Tag:         d.Tag,
 		PRNumber:    prNumber,
 		PRURL:       d.PRURL,
@@ -135,7 +137,7 @@ func (b *Bot) handleRejectButton(ctx context.Context, callback slack.Interaction
 		return
 	}
 
-	modal := buildRejectModal(prNumber, d.App, d.Tag)
+	modal := buildRejectModal(prNumber, d.App, d.Environment, d.Tag)
 	_, err = b.slack.OpenViewContext(ctx, callback.TriggerID, modal)
 	if err != nil {
 		b.log.Error("open reject modal", zap.Error(err))
@@ -187,34 +189,34 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		return
 	}
 
-	// Acquire per-app deploy lock
+	appCfg, ok := b.cfg.Load().AppByName(appVal)
+	if !ok {
+		b.log.Error("app not found", zap.String("app", appVal))
+		return
+	}
+	env := appCfg.Environment
+
+	// Acquire per-app deploy lock scoped to environment.
 	lockTTL, _ := b.cfg.Load().LockTTL()
-	acquired, err := b.store.AcquireLock(ctx, appVal, requesterID, lockTTL)
+	acquired, err := b.store.AcquireLock(ctx, env, appVal, requesterID, lockTTL)
 	if err != nil {
 		b.log.Error("acquire deploy lock", zap.String("app", appVal), zap.Error(err))
 		b.dmUser(ctx, requesterID, "Failed to check deploy lock. Please try again.")
 		return
 	}
 	if !acquired {
-		msg := fmt.Sprintf("A deployment of *%s* is already in progress.", appVal)
-		if existing, _ := b.store.GetByApp(ctx, appVal); existing != nil {
-			msg = fmt.Sprintf("A deployment of *%s* is already in progress: <%s|PR #%d>", appVal, existing.PRURL, existing.PRNumber)
+		msg := fmt.Sprintf("A deployment of *%s* (%s) is already in progress.", appVal, env)
+		if existing, _ := b.store.GetByEnvApp(ctx, env, appVal); existing != nil {
+			msg = fmt.Sprintf("A deployment of *%s* (%s) is already in progress: <%s|PR #%d>", appVal, env, existing.PRURL, existing.PRNumber)
 		}
 		b.dmUser(ctx, requesterID, msg)
-		return
-	}
-
-	appCfg, ok := b.cfg.Load().AppByName(appVal)
-	if !ok {
-		b.log.Error("app not found", zap.String("app", appVal))
-		_ = b.store.ReleaseLock(ctx, appVal)
 		return
 	}
 
 	baseBranch, err := b.gh.GetDefaultBranch(ctx)
 	if err != nil {
 		b.log.Error("get default branch", zap.Error(err))
-		_ = b.store.ReleaseLock(ctx, appVal)
+		_ = b.store.ReleaseLock(ctx, env, appVal)
 		return
 	}
 
@@ -226,6 +228,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	cfg := b.cfg.Load()
 	prNumber, prURL, err := b.gh.CreateDeployPR(ctx, githubPkg.CreatePRParams{
 		App:              appVal,
+		Environment:      env,
 		Tag:              tag,
 		KustomizePath:    appCfg.KustomizePath,
 		BaseBranch:       baseBranch,
@@ -236,7 +239,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	})
 	if err != nil {
 		b.log.Error("create deploy PR", zap.Error(err))
-		_ = b.store.ReleaseLock(ctx, appVal)
+		_ = b.store.ReleaseLock(ctx, env, appVal)
 		if errors.Is(err, githubPkg.ErrRateLimited) {
 			b.dmUser(ctx, requesterID, "GitHub rate limit reached. Please try again in a few minutes.")
 		} else {
@@ -250,6 +253,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 
 	d := &store.PendingDeploy{
 		App:         appVal,
+		Environment: env,
 		Tag:         tag,
 		PRNumber:    prNumber,
 		PRURL:       prURL,
@@ -271,6 +275,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	_, _, _ = b.slack.PostMessageContext(ctx, approverID,
 		buildApproverMessage(pendingInfo{
 			App:         appVal,
+			Environment: env,
 			Tag:         tag,
 			PRNumber:    prNumber,
 			PRURL:       prURL,
@@ -282,19 +287,20 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	// Confirm to requester
 	_, _, _ = b.slack.PostMessageContext(ctx, requesterID,
 		slack.MsgOptionText(fmt.Sprintf(
-			"Deployment request for *%s* `%s` submitted. PR: <%s|#%d>. Waiting for approval from <@%s>.",
-			appVal, tag, prURL, prNumber, approverID,
+			"Deployment request for *%s* (%s) `%s` submitted. PR: <%s|#%d>. Waiting for approval from <@%s>.",
+			appVal, env, tag, prURL, prNumber, approverID,
 		), false),
 	)
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType: audit.EventRequested,
-		App:       appVal,
-		Tag:       tag,
-		PRNumber:  prNumber,
-		PRURL:     prURL,
-		Requester: requesterGH,
-		Reason:    reason,
+		EventType:   audit.EventRequested,
+		App:         appVal,
+		Environment: env,
+		Tag:         tag,
+		PRNumber:    prNumber,
+		PRURL:       prURL,
+		Requester:   requesterGH,
+		Reason:      reason,
 	})
 
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
@@ -325,26 +331,27 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	_ = b.gh.CommentRejected(ctx, prNumber, ghLogin, rejReason)
 	_ = b.gh.ClosePR(ctx, prNumber)
 	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
-	_ = b.store.ReleaseLock(ctx, d.App)
+	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
 	// Notify requester
 	_, _, _ = b.slack.PostMessageContext(ctx, d.RequesterID,
 		slack.MsgOptionText(fmt.Sprintf(
-			"Your deployment of *%s* `%s` (PR #%d) was *rejected* by <@%s>.\n\n*Reason:* %s",
-			d.App, d.Tag, prNumber, approverID, rejReason,
+			"Your deployment of *%s* (%s) `%s` (PR #%d) was *rejected* by <@%s>.\n\n*Reason:* %s",
+			d.App, d.Environment, d.Tag, prNumber, approverID, rejReason,
 		), false),
 	)
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType: audit.EventRejected,
-		App:       d.App,
-		Tag:       d.Tag,
-		PRNumber:  prNumber,
-		PRURL:     d.PRURL,
-		Requester: d.Requester,
-		Approver:  ghLogin,
-		Rejection: rejReason,
+		EventType:   audit.EventRejected,
+		App:         d.App,
+		Environment: d.Environment,
+		Tag:         d.Tag,
+		PRNumber:    prNumber,
+		PRURL:       d.PRURL,
+		Requester:   d.Requester,
+		Approver:    ghLogin,
+		Rejection:   rejReason,
 	})
 
 	b.metrics.RecordDeploy(d.App, audit.EventRejected)
@@ -352,6 +359,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	_ = b.store.PushHistory(ctx, store.HistoryEntry{
 		EventType:   audit.EventRejected,
 		App:         d.App,
+		Environment: d.Environment,
 		Tag:         d.Tag,
 		PRNumber:    prNumber,
 		PRURL:       d.PRURL,

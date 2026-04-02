@@ -52,13 +52,13 @@ func TestDeployAndApprove(t *testing.T) {
 	}
 
 	// App lock must be released.
-	locked, err := env.store.IsLocked(context.Background(), env.app)
+	locked, err := env.store.IsLocked(context.Background(), env.environment, env.app)
 	if err != nil {
 		t.Fatalf("check lock: %v", err)
 	}
 	if locked {
 		t.Error("app lock should be released after merge")
-		_ = env.store.ReleaseLock(context.Background(), env.app) // repair for next test
+		_ = env.store.ReleaseLock(context.Background(), env.environment, env.app) // repair for next test
 	}
 
 	// History should contain an approved entry for this deploy.
@@ -104,10 +104,10 @@ func TestDeployAndReject(t *testing.T) {
 	}
 
 	// App lock must be released.
-	locked, _ := env.store.IsLocked(context.Background(), env.app)
+	locked, _ := env.store.IsLocked(context.Background(), env.environment, env.app)
 	if locked {
 		t.Error("app lock should be released after rejection")
-		_ = env.store.ReleaseLock(context.Background(), env.app)
+		_ = env.store.ReleaseLock(context.Background(), env.environment, env.app)
 	}
 
 	// History should contain a rejected entry.
@@ -191,10 +191,10 @@ func TestCancelDeploy(t *testing.T) {
 	}
 
 	// App lock must be released.
-	locked, _ := env.store.IsLocked(context.Background(), env.app)
+	locked, _ := env.store.IsLocked(context.Background(), env.environment, env.app)
 	if locked {
 		t.Error("app lock should be released after cancel")
-		_ = env.store.ReleaseLock(context.Background(), env.app)
+		_ = env.store.ReleaseLock(context.Background(), env.environment, env.app)
 	}
 
 	// History should contain a cancelled entry.
@@ -242,7 +242,7 @@ func TestRollback(t *testing.T) {
 	}
 	// The merged PR's branch persists in GitHub (no auto-delete). Delete it now
 	// so step 3 can create a new PR for the same tag without a ref conflict.
-	if err := env.ghClient.DeleteBranch(context.Background(), deployBranch(env.app, rollbackTag)); err != nil {
+	if err := env.ghClient.DeleteBranch(context.Background(), deployBranch(env.environment, env.app, rollbackTag)); err != nil {
 		t.Fatalf("delete setup branch: %v", err)
 	}
 

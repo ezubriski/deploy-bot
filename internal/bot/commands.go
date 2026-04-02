@@ -115,8 +115,8 @@ func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand) {
 	for _, d := range deploys {
 		age := now.Sub(d.RequestedAt).Round(time.Minute)
 		lines = append(lines, fmt.Sprintf(
-			"• *%s* `%s` — PR <%s|#%d> — <@%s> — %s old — _%s_",
-			d.App, d.Tag, d.PRURL, d.PRNumber, d.RequesterID, age, d.State,
+			"• *%s* (%s) `%s` — PR <%s|#%d> — <@%s> — %s old — _%s_",
+			d.App, d.Environment, d.Tag, d.PRURL, d.PRNumber, d.RequesterID, age, d.State,
 		))
 	}
 
@@ -150,16 +150,17 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	_ = b.gh.CommentCancelled(ctx, prNumber, requesterGH)
 	_ = b.gh.ClosePR(ctx, prNumber)
 	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
-	_ = b.store.ReleaseLock(ctx, d.App)
+	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType: audit.EventCancelled,
-		App:       d.App,
-		Tag:       d.Tag,
-		PRNumber:  prNumber,
-		PRURL:     d.PRURL,
-		Requester: requesterGH,
+		EventType:   audit.EventCancelled,
+		App:         d.App,
+		Environment: d.Environment,
+		Tag:         d.Tag,
+		PRNumber:    prNumber,
+		PRURL:       d.PRURL,
+		Requester:   requesterGH,
 	})
 
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
@@ -167,6 +168,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	_ = b.store.PushHistory(ctx, store.HistoryEntry{
 		EventType:   audit.EventCancelled,
 		App:         d.App,
+		Environment: d.Environment,
 		Tag:         d.Tag,
 		PRNumber:    prNumber,
 		PRURL:       d.PRURL,
@@ -193,8 +195,8 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	remaining := time.Until(d.ExpiresAt).Round(time.Minute)
 	_, _, err = b.slack.PostMessageContext(ctx, d.ApproverID,
 		slack.MsgOptionText(fmt.Sprintf(
-			":bell: Reminder: deployment of *%s* `%s` by <@%s> is waiting for your approval. Expires in *%s*. PR: <%s|#%d>",
-			d.App, d.Tag, d.RequesterID, remaining, d.PRURL, d.PRNumber,
+			":bell: Reminder: deployment of *%s* (%s) `%s` by <@%s> is waiting for your approval. Expires in *%s*. PR: <%s|#%d>",
+			d.App, d.Environment, d.Tag, d.RequesterID, remaining, d.PRURL, d.PRNumber,
 		), false),
 	)
 	if err != nil {
@@ -246,8 +248,8 @@ func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilt
 		age := now.Sub(e.CompletedAt).Round(time.Minute)
 		icon := eventIcon(e.EventType)
 		lines = append(lines, fmt.Sprintf(
-			"%s *%s* `%s` — <%s|#%d> — <@%s> — %s ago",
-			icon, e.App, e.Tag, e.PRURL, e.PRNumber, e.RequesterID, age,
+			"%s *%s* (%s) `%s` — <%s|#%d> — <@%s> — %s ago",
+			icon, e.App, e.Environment, e.Tag, e.PRURL, e.PRNumber, e.RequesterID, age,
 		))
 	}
 

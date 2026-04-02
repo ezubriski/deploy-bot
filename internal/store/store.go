@@ -163,45 +163,53 @@ func (s *Store) GetHistory(ctx context.Context, limit int) ([]HistoryEntry, erro
 	return entries, nil
 }
 
-// GetByApp returns the first pending deploy found for the given app name, or
-// nil if none exists. Used to surface the existing PR link when a lock is contested.
-func (s *Store) GetByApp(ctx context.Context, app string) (*PendingDeploy, error) {
+// GetByEnvApp returns the first pending deploy found for the given environment
+// and app, or nil if none exists. Used to surface the existing PR link when a
+// lock is contested.
+func (s *Store) GetByEnvApp(ctx context.Context, env, app string) (*PendingDeploy, error) {
 	all, err := s.GetAll(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, d := range all {
-		if d.App == app {
+		if d.Environment == env && d.App == app {
 			return d, nil
 		}
 	}
 	return nil, nil
 }
 
+// deployLockKey returns the Redis key for a per-app deploy lock scoped to its
+// environment, preventing false conflicts between same-named apps in different
+// environments.
+func deployLockKey(env, app string) string {
+	return lockPrefix + env + "/" + app
+}
+
 // AcquireLock attempts to claim the per-app deploy lock. It returns true if
 // the lock was acquired, false if another deploy is already in progress.
 // holder is stored as the lock value (use the requester's Slack user ID so
 // "who holds this?" is answerable by inspecting Redis directly).
-func (s *Store) AcquireLock(ctx context.Context, app, holder string, ttl time.Duration) (bool, error) {
-	ok, err := s.rdb.SetNX(ctx, lockPrefix+app, holder, ttl).Result()
+func (s *Store) AcquireLock(ctx context.Context, env, app, holder string, ttl time.Duration) (bool, error) {
+	ok, err := s.rdb.SetNX(ctx, deployLockKey(env, app), holder, ttl).Result()
 	if err != nil {
-		return false, fmt.Errorf("acquire lock %s: %w", app, err)
+		return false, fmt.Errorf("acquire lock %s/%s: %w", env, app, err)
 	}
 	return ok, nil
 }
 
 // IsLocked returns true if a deploy lock is currently held for the given app.
-func (s *Store) IsLocked(ctx context.Context, app string) (bool, error) {
-	n, err := s.rdb.Exists(ctx, lockPrefix+app).Result()
+func (s *Store) IsLocked(ctx context.Context, env, app string) (bool, error) {
+	n, err := s.rdb.Exists(ctx, deployLockKey(env, app)).Result()
 	if err != nil {
-		return false, fmt.Errorf("check lock %s: %w", app, err)
+		return false, fmt.Errorf("check lock %s/%s: %w", env, app, err)
 	}
 	return n > 0, nil
 }
 
 // ReleaseLock deletes the per-app deploy lock.
-func (s *Store) ReleaseLock(ctx context.Context, app string) error {
-	return s.rdb.Del(ctx, lockPrefix+app).Err()
+func (s *Store) ReleaseLock(ctx context.Context, env, app string) error {
+	return s.rdb.Del(ctx, deployLockKey(env, app)).Err()
 }
 
 // TryLock acquires a named system lock (distinct from per-app deploy locks).

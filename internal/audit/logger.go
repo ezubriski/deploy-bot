@@ -26,10 +26,11 @@ const (
 )
 
 type AuditEvent struct {
-	EventType string    `json:"event_type"`
-	Timestamp time.Time `json:"timestamp"`
-	App       string    `json:"app"`
-	Tag       string    `json:"tag"`
+	EventType   string    `json:"event_type"`
+	Timestamp   time.Time `json:"timestamp"`
+	App         string    `json:"app"`
+	Environment string    `json:"environment"`
+	Tag         string    `json:"tag"`
 	PRNumber  int       `json:"pr_number"`
 	PRURL     string    `json:"pr_url"`
 	Requester string    `json:"requester"`

@@ -40,7 +40,7 @@ func NewClient(token, org, repo string, log *zap.Logger, retry RetryConfig) *Cli
 
 // CreateDeployPR creates a branch, commits the kustomize image tag update, and opens a PR.
 func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int, string, error) {
-	branch := fmt.Sprintf("deploy/%s-%s", params.App, sanitizeBranchName(params.Tag))
+	branch := fmt.Sprintf("deploy/%s-%s-%s", params.Environment, params.App, sanitizeBranchName(params.Tag))
 
 	// Get default branch SHA
 	var ref *gh.Reference
@@ -87,7 +87,7 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 		return 0, "", fmt.Errorf("update kustomization tag: %w", err)
 	}
 
-	commitMsg := fmt.Sprintf("deploy(%s): update image tag to %s", params.App, params.Tag)
+	commitMsg := fmt.Sprintf("deploy(%s/%s): update image tag to %s", params.Environment, params.App, params.Tag)
 	if err := c.retryOnRateLimit(ctx, func() error {
 		_, _, err := c.gh.Repositories.UpdateFile(ctx, c.org, c.repo, params.KustomizePath, &gh.RepositoryContentFileOptions{
 			Message: gh.String(commitMsg),
@@ -104,18 +104,19 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 	metaJSON, _ := json.Marshal(PRMeta{
 		RequesterSlackID: params.RequesterSlackID,
 		App:              params.App,
+		Environment:      params.Environment,
 		Tag:              params.Tag,
 	})
 	prBody := fmt.Sprintf(
-		"**App:** %s\n**Tag:** %s\n**Requester:** @%s\n**Reason:** %s\n\n<!-- deploy-bot-meta: %s -->",
-		params.App, params.Tag, params.Requester, params.Reason, string(metaJSON),
+		"**Environment:** %s\n**App:** %s\n**Tag:** %s\n**Requester:** @%s\n**Reason:** %s\n\n<!-- deploy-bot-meta: %s -->",
+		params.Environment, params.App, params.Tag, params.Requester, params.Reason, string(metaJSON),
 	)
 
 	var pr *gh.PullRequest
 	if err := c.retryOnRateLimit(ctx, func() error {
 		var err error
 		pr, _, err = c.gh.PullRequests.Create(ctx, c.org, c.repo, &gh.NewPullRequest{
-			Title: gh.String(fmt.Sprintf("deploy(%s): %s", params.App, params.Tag)),
+			Title: gh.String(fmt.Sprintf("deploy(%s/%s): %s", params.Environment, params.App, params.Tag)),
 			Head:  gh.String(branch),
 			Base:  gh.String(params.BaseBranch),
 			Body:  gh.String(prBody),
@@ -188,6 +189,7 @@ func (c *Client) GetDefaultBranch(ctx context.Context) (string, error) {
 
 type CreatePRParams struct {
 	App              string
+	Environment      string
 	Tag              string
 	KustomizePath    string
 	BaseBranch       string

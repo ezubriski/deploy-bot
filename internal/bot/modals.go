@@ -118,7 +118,7 @@ func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack
 	}
 }
 
-func buildRejectModal(prNumber int, app, tag string) slack.ModalViewRequest {
+func buildRejectModal(prNumber int, app, env, tag string) slack.ModalViewRequest {
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,
 		Title:           slack.NewTextBlockObject("plain_text", "Reject Deployment", false, false),
@@ -130,7 +130,7 @@ func buildRejectModal(prNumber int, app, tag string) slack.ModalViewRequest {
 			BlockSet: []slack.Block{
 				slack.NewSectionBlock(
 					slack.NewTextBlockObject("mrkdwn",
-						fmt.Sprintf("Rejecting deployment of *%s* `%s` (PR #%d)", app, tag, prNumber),
+						fmt.Sprintf("Rejecting deployment of *%s* (%s) `%s` (PR #%d)", app, env, tag, prNumber),
 						false, false,
 					),
 					nil, nil,
@@ -150,8 +150,8 @@ func buildRejectModal(prNumber int, app, tag string) slack.ModalViewRequest {
 
 func buildApproverMessage(deploy pendingInfo) []slack.MsgOption {
 	text := fmt.Sprintf(
-		"*Deployment Request*\n\n*App:* %s\n*Tag:* `%s`\n*Requester:* <@%s>\n*Reason:* %s\n*PR:* <%s|#%d>",
-		deploy.App, deploy.Tag, deploy.RequesterID, deploy.Reason, deploy.PRURL, deploy.PRNumber,
+		"*Deployment Request*\n\n*App:* %s\n*Environment:* %s\n*Tag:* `%s`\n*Requester:* <@%s>\n*Reason:* %s\n*PR:* <%s|#%d>",
+		deploy.App, deploy.Environment, deploy.Tag, deploy.RequesterID, deploy.Reason, deploy.PRURL, deploy.PRNumber,
 	)
 	btnApprove := slack.NewButtonBlockElement(ActionApprove, fmt.Sprintf("%d", deploy.PRNumber),
 		slack.NewTextBlockObject("plain_text", "Approve", false, false))
@@ -174,6 +174,7 @@ func buildApproverMessage(deploy pendingInfo) []slack.MsgOption {
 
 type pendingInfo struct {
 	App         string
+	Environment string
 	Tag         string
 	PRNumber    int
 	PRURL       string

@@ -10,6 +10,7 @@ const (
 
 type PendingDeploy struct {
 	App         string    `json:"app"`
+	Environment string    `json:"environment"`
 	Tag         string    `json:"tag"`
 	PRNumber    int       `json:"pr_number"`
 	PRURL       string    `json:"pr_url"`
@@ -27,6 +28,7 @@ type PendingDeploy struct {
 type HistoryEntry struct {
 	EventType   string    `json:"event_type"`   // approved, rejected, expired, cancelled
 	App         string    `json:"app"`
+	Environment string    `json:"environment"`
 	Tag         string    `json:"tag"`
 	PRNumber    int       `json:"pr_number"`
 	PRURL       string    `json:"pr_url"`

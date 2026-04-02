@@ -40,7 +40,7 @@ func newTestCfgHolder() *config.Holder {
 			MergeMethod: "squash",
 		},
 		Apps: []config.AppConfig{
-			{App: "myapp", KustomizePath: "apps/myapp/kustomization.yaml"},
+			{App: "myapp", Environment: "dev", KustomizePath: "apps/myapp/kustomization.yaml"},
 		},
 	}
 	return config.NewHolder(cfg, "/tmp/fake")
@@ -48,7 +48,7 @@ func newTestCfgHolder() *config.Holder {
 
 // prIssueJSON builds a GitHub API issue response representing a deploy-bot PR.
 func prIssueJSON(number int, app, tag, requesterID string) map[string]interface{} {
-	meta := fmt.Sprintf(`{"requester_id":%q,"app":%q,"tag":%q}`, requesterID, app, tag)
+	meta := fmt.Sprintf(`{"requester_id":%q,"app":%q,"tag":%q,"environment":"dev"}`, requesterID, app, tag)
 	body := fmt.Sprintf("Deploy PR\n<!-- deploy-bot-meta: %s -->", meta)
 	return map[string]interface{}{
 		"number":   number,
@@ -77,7 +77,7 @@ func TestReconcileFromGitHub_ClosesUntrackedPRs(t *testing.T) {
 	}, time.Hour)
 
 	// PR #2 is not in Redis but has a lock — should be closed and lock released.
-	_, _ = st.AcquireLock(ctx, "myapp", "U456", 5*time.Minute)
+	_, _ = st.AcquireLock(ctx, "dev", "myapp", "U456", 5*time.Minute)
 
 	var closedPRs []int
 	var slackMsgs atomic.Int32
@@ -129,7 +129,7 @@ func TestReconcileFromGitHub_ClosesUntrackedPRs(t *testing.T) {
 	}
 
 	// Lock for myapp must be released (PR #2 held it).
-	locked, _ := st.IsLocked(ctx, "myapp")
+	locked, _ := st.IsLocked(ctx, "dev", "myapp")
 	if locked {
 		t.Error("expected myapp lock to be released after reconcile")
 	}

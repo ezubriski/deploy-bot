@@ -125,7 +125,7 @@ func TestCreateDeployPR(t *testing.T) {
 		// CreateRef — create new branch
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/refs"):
 			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref":    "refs/heads/deploy/myapp-v2.0.0",
+				"ref":    "refs/heads/deploy/dev-myapp-v2.0.0",
 				"object": map[string]interface{}{"sha": baseSHA},
 			})
 
@@ -190,6 +190,7 @@ func TestCreateDeployPR(t *testing.T) {
 
 	prNumber, prURL, err := client.CreateDeployPR(context.Background(), CreatePRParams{
 		App:              app,
+		Environment:      "dev",
 		Tag:              tag,
 		KustomizePath:    kustomizePath,
 		BaseBranch:       baseBranch,
@@ -290,11 +291,11 @@ func TestCreateDeployPR_BranchNameSanitized(t *testing.T) {
 
 	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", org, repo)
 	client.CreateDeployPR(context.Background(), CreatePRParams{
-		App: "myapp", Tag: "feature/v1.0:arm64", KustomizePath: kustomizePath,
+		App: "myapp", Environment: "dev", Tag: "feature/v1.0:arm64", KustomizePath: kustomizePath,
 		BaseBranch: "main",
 	})
 
-	const wantPrefix = "deploy/myapp-"
+	const wantPrefix = "deploy/dev-myapp-"
 	if !strings.HasPrefix(createdBranch, wantPrefix) {
 		t.Errorf("branch name %q should start with %q", createdBranch, wantPrefix)
 	}

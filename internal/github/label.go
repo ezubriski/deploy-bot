@@ -16,6 +16,7 @@ const LabelColor = "0075ca"
 type PRMeta struct {
 	RequesterSlackID string `json:"requester_id"`
 	App              string `json:"app"`
+	Environment      string `json:"environment"`
 	Tag              string `json:"tag"`
 }
 

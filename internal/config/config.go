@@ -128,6 +128,7 @@ type AWSConfig struct {
 
 type AppConfig struct {
 	App           string `json:"app"`
+	Environment   string `json:"environment"`
 	KustomizePath string `json:"kustomize_path"`
 	ECRRepo       string `json:"ecr_repo"`
 	TagPattern    string `json:"tag_pattern"`
@@ -194,6 +195,11 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Deployment.MergeMethod == "" {
 		cfg.Deployment.MergeMethod = "squash"
+	}
+	for _, app := range cfg.Apps {
+		if app.Environment == "" {
+			return nil, fmt.Errorf("app %q is missing required field \"environment\"", app.App)
+		}
 	}
 	return &cfg, nil
 }

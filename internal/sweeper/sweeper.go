@@ -145,7 +145,7 @@ func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 		for i, c := range candidates {
 			_ = s.gh.ClosePR(ctx, c.number)
 			_ = s.gh.RemoveLabel(ctx, c.number, cfg.PendingLabel())
-			_ = s.store.ReleaseLock(ctx, c.meta.App)
+			_ = s.store.ReleaseLock(ctx, c.meta.Environment, c.meta.App)
 
 			others := make([]recoveryCandidate, 0, len(candidates)-1)
 			others = append(others, candidates[:i]...)
@@ -171,8 +171,8 @@ func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 func (s *Sweeper) notifyRecoveryClose(ctx context.Context, c recoveryCandidate, others []recoveryCandidate) {
 	var sb strings.Builder
 	fmt.Fprintf(&sb,
-		":warning: Your deployment of *%s* `%s` (<%s|PR #%d>) was closed after a system restart.\n\nTo re-request: `/deploy %s` and select tag `%s`.",
-		c.meta.App, c.meta.Tag, c.prURL, c.number, c.meta.App, c.meta.Tag,
+		":warning: Your deployment of *%s* (%s) `%s` (<%s|PR #%d>) was closed after a system restart.\n\nTo re-request: `/deploy %s` and select tag `%s`.",
+		c.meta.App, c.meta.Environment, c.meta.Tag, c.prURL, c.number, c.meta.App, c.meta.Tag,
 	)
 
 	if len(others) > 0 {
@@ -232,6 +232,7 @@ func (s *Sweeper) RecoverStuck(ctx context.Context) {
 				continue
 			}
 			_ = s.gh.RemoveLabel(ctx, d.PRNumber, s.cfg.Load().PendingLabel())
+			_ = s.store.ReleaseLock(ctx, d.Environment, d.App)
 			_ = s.store.Delete(ctx, d.PRNumber)
 			s.log.Info("recovered stuck deploy", zap.Int("pr", d.PRNumber))
 		}
@@ -267,8 +268,8 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		// DM requester
 		_, _, err := s.slack.PostMessageContext(ctx, d.RequesterID,
 			slack.MsgOptionText(fmt.Sprintf(
-				"Your deployment of *%s* `%s` (PR #%d) expired after %s with no approval.",
-				d.App, d.Tag, d.PRNumber, staleDurationStr,
+				"Your deployment of *%s* (%s) `%s` (PR #%d) expired after %s with no approval.",
+				d.App, d.Environment, d.Tag, d.PRNumber, staleDurationStr,
 			), false),
 		)
 		if err != nil {
@@ -278,8 +279,8 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		// DM approver
 		_, _, err = s.slack.PostMessageContext(ctx, d.ApproverID,
 			slack.MsgOptionText(fmt.Sprintf(
-				"The deployment request for *%s* `%s` (PR #%d) expired after %s.",
-				d.App, d.Tag, d.PRNumber, staleDurationStr,
+				"The deployment request for *%s* (%s) `%s` (PR #%d) expired after %s.",
+				d.App, d.Environment, d.Tag, d.PRNumber, staleDurationStr,
 			), false),
 		)
 		if err != nil {
@@ -287,25 +288,27 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		}
 
 		_ = s.audit.Log(ctx, audit.AuditEvent{
-			EventType: audit.EventExpired,
-			App:       d.App,
-			Tag:       d.Tag,
-			PRNumber:  d.PRNumber,
-			PRURL:     d.PRURL,
-			Requester: d.Requester,
+			EventType:   audit.EventExpired,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    d.PRNumber,
+			PRURL:       d.PRURL,
+			Requester:   d.Requester,
 		})
 
 		s.metrics.RecordDeploy(d.App, audit.EventExpired)
 		_ = s.store.PushHistory(ctx, store.HistoryEntry{
 			EventType:   audit.EventExpired,
 			App:         d.App,
+			Environment: d.Environment,
 			Tag:         d.Tag,
 			PRNumber:    d.PRNumber,
 			PRURL:       d.PRURL,
 			RequesterID: d.RequesterID,
 			CompletedAt: time.Now(),
 		})
-		_ = s.store.ReleaseLock(ctx, d.App)
+		_ = s.store.ReleaseLock(ctx, d.Environment, d.App)
 		_ = s.store.Delete(ctx, d.PRNumber)
 	}
 

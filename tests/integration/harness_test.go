@@ -37,6 +37,7 @@ type testEnv struct {
 	requesterID   string
 	approverID    string
 	app           string
+	environment   string
 	tag           string
 	deployChannel string
 	cfg           *config.Config
@@ -106,6 +107,11 @@ func TestMain(m *testing.M) {
 	}
 	go qw.Run(ctx, b.HandleEvent)
 
+	appCfg, ok := cfg.AppByName(app)
+	if !ok {
+		fatalf("app %q not found in config", app)
+	}
+
 	env = &testEnv{
 		ctx:           ctx,
 		cancel:        cancel,
@@ -114,6 +120,7 @@ func TestMain(m *testing.M) {
 		requesterID:   requesterID,
 		approverID:    approverID,
 		app:           app,
+		environment:   appCfg.Environment,
 		tag:           tag,
 		deployChannel: cfg.Slack.DeployChannel,
 		cfg:           cfg,
@@ -146,7 +153,7 @@ func fatalf(format string, args ...any) {
 func resetAppState(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
-	_ = env.store.ReleaseLock(ctx, env.app)
+	_ = env.store.ReleaseLock(ctx, env.environment, env.app)
 	deploys, err := env.store.GetAll(ctx)
 	if err != nil {
 		t.Fatalf("resetAppState: get all deploys: %v", err)
@@ -216,7 +223,7 @@ func cleanupPRWithTag(t *testing.T, prNumber int, tag string) {
 	if err := env.ghClient.ClosePR(ctx, prNumber); err != nil {
 		t.Logf("cleanup: close PR #%d: %v (may already be closed)", prNumber, err)
 	}
-	branch := deployBranch(env.app, tag)
+	branch := deployBranch(env.environment, env.app, tag)
 	if err := env.ghClient.DeleteBranch(ctx, branch); err != nil {
 		t.Logf("cleanup: delete branch %s: %v (may already be deleted)", branch, err)
 	}
@@ -224,9 +231,9 @@ func cleanupPRWithTag(t *testing.T, prNumber int, tag string) {
 
 // deployBranch reconstructs the branch name the bot creates for a deploy.
 // Must stay in sync with sanitizeBranchName in internal/github/pr.go.
-func deployBranch(app, tag string) string {
+func deployBranch(env, app, tag string) string {
 	r := strings.NewReplacer("/", "-", ":", "-", "+", "-", " ", "-")
-	return "deploy/" + app + "-" + r.Replace(tag)
+	return "deploy/" + env + "-" + app + "-" + r.Replace(tag)
 }
 
 // injectDeployRequest enqueues a deploy modal submission directly to Redis,

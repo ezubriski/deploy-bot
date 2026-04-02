@@ -144,7 +144,7 @@ func TestProfiling(t *testing.T) {
 func resetAppStateFor(t *testing.T, app string) {
 	t.Helper()
 	ctx := context.Background()
-	_ = env.store.ReleaseLock(ctx, app)
+	_ = env.store.ReleaseLock(ctx, env.environment, app)
 	deploys, err := env.store.GetAll(ctx)
 	if err != nil {
 		t.Fatalf("resetAppStateFor %s: %v", app, err)
@@ -197,7 +197,7 @@ func injectDeployRequestFor(t *testing.T, app, tag, reason string) {
 // GitHub from a previous failed run. Errors are ignored — the branch may not exist.
 func purgeStaleBranch(t *testing.T, app, tag string) {
 	t.Helper()
-	branch := deployBranch(app, tag)
+	branch := deployBranch(env.environment, app, tag)
 	if err := env.ghClient.DeleteBranch(context.Background(), branch); err != nil {
 		t.Logf("purgeStaleBranch: %s: %v (may not exist)", branch, err)
 	}
