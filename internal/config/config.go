@@ -132,6 +132,10 @@ type AppConfig struct {
 	KustomizePath string `json:"kustomize_path"`
 	ECRRepo       string `json:"ecr_repo"`
 	TagPattern    string `json:"tag_pattern"`
+	// AutoDeployApproverGroup is the Slack ID to notify for ECR-triggered deploys
+	// and no-op notifications. Use a channel ID (C…) to post there directly, or
+	// a user group ID (S…) to @mention the group in the deploy channel.
+	AutoDeployApproverGroup string `json:"auto_deploy_approver_group,omitempty"`
 
 	compiledPattern *regexp.Regexp
 }

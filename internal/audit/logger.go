@@ -23,6 +23,7 @@ const (
 	EventRejected  = "rejected"
 	EventExpired   = "expired"
 	EventCancelled = "cancelled"
+	EventNoop      = "noop"
 )
 
 type AuditEvent struct {
@@ -31,22 +32,31 @@ type AuditEvent struct {
 	App         string    `json:"app"`
 	Environment string    `json:"environment"`
 	Tag         string    `json:"tag"`
-	PRNumber  int       `json:"pr_number"`
-	PRURL     string    `json:"pr_url"`
-	Requester string    `json:"requester"`
-	Approver  string    `json:"approver"`
-	Reason    string    `json:"reason"`
-	Rejection string    `json:"rejection"`
-	SlackTeam string    `json:"slack_team"`
+	PRNumber    int       `json:"pr_number"`
+	PRURL       string    `json:"pr_url"`
+	Requester   string    `json:"requester"`
+	Approver    string    `json:"approver"`
+	Reason      string    `json:"reason"`
+	Rejection   string    `json:"rejection"`
+	SlackTeam   string    `json:"slack_team"`
 }
 
-type Logger struct {
-	s3     *s3.Client
-	bucket string
-	log    *zap.Logger
+// Logger is the interface satisfied by both the S3-backed logger and the
+// zap fallback used when no audit bucket is configured.
+type Logger interface {
+	Log(ctx context.Context, event AuditEvent) error
 }
 
-func NewLogger(ctx context.Context, cfg *config.Config, log *zap.Logger) (*Logger, error) {
+// NewLogger returns an S3-backed Logger when cfg.AWS.AuditBucket is set, and
+// a zap-based Logger otherwise. The zap fallback writes structured audit
+// entries at INFO level, which is useful in dev/staging environments that
+// don't have an S3 bucket configured.
+func NewLogger(ctx context.Context, cfg *config.Config, log *zap.Logger) (Logger, error) {
+	if cfg.AWS.AuditBucket == "" {
+		log.Info("audit: no bucket configured, writing audit events to application log")
+		return &zapLogger{log: log}, nil
+	}
+
 	baseCfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
@@ -61,14 +71,21 @@ func NewLogger(ctx context.Context, cfg *config.Config, log *zap.Logger) (*Logge
 
 	s3Client := s3.NewFromConfig(clientCfg)
 
-	return &Logger{
+	return &s3Logger{
 		s3:     s3Client,
 		bucket: cfg.AWS.AuditBucket,
 		log:    log,
 	}, nil
 }
 
-func (l *Logger) Log(ctx context.Context, event AuditEvent) error {
+// s3Logger writes audit events as JSON objects to S3.
+type s3Logger struct {
+	s3     *s3.Client
+	bucket string
+	log    *zap.Logger
+}
+
+func (l *s3Logger) Log(ctx context.Context, event AuditEvent) error {
 	event.Timestamp = time.Now().UTC()
 
 	data, err := json.Marshal(event)
@@ -95,5 +112,29 @@ func (l *Logger) Log(ctx context.Context, event AuditEvent) error {
 	}
 
 	l.log.Info("audit event logged", zap.String("event", event.EventType), zap.String("key", key))
+	return nil
+}
+
+// zapLogger writes audit events as structured zap log entries. Used when no
+// S3 bucket is configured.
+type zapLogger struct {
+	log *zap.Logger
+}
+
+func (l *zapLogger) Log(_ context.Context, event AuditEvent) error {
+	event.Timestamp = time.Now().UTC()
+	l.log.Info("audit event",
+		zap.String("event_type", event.EventType),
+		zap.String("app", event.App),
+		zap.String("environment", event.Environment),
+		zap.String("tag", event.Tag),
+		zap.Int("pr_number", event.PRNumber),
+		zap.String("pr_url", event.PRURL),
+		zap.String("requester", event.Requester),
+		zap.String("approver", event.Approver),
+		zap.String("reason", event.Reason),
+		zap.String("rejection", event.Rejection),
+		zap.Time("timestamp", event.Timestamp),
+	)
 	return nil
 }

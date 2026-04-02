@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"strconv"
 	"time"
 
@@ -74,20 +75,76 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 		b.log.Error("update state to merging", zap.Error(err))
 	}
 
-	// Merge PR
-	if err := b.gh.MergePR(ctx, prNumber, b.cfg.Load().Deployment.MergeMethod); err != nil {
-		b.log.Error("merge PR", zap.Int("pr", prNumber), zap.Error(err))
-		_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
-		if errors.Is(err, githubPkg.ErrRateLimited) {
-			b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, fmt.Sprintf("GitHub rate limit reached. PR #%d is still open — please try approving again in a few minutes.", prNumber))
+	cfg := b.cfg.Load()
+
+	// First merge attempt
+	mergeErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
+	if mergeErr != nil {
+		if errors.Is(mergeErr, githubPkg.ErrMergeConflict) {
+			// Attempt to rebase the deploy branch onto current HEAD and retry.
+			appCfg, ok := cfg.AppByName(d.App)
+			if !ok {
+				b.log.Error("app config not found for rebase", zap.String("app", d.App))
+				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+				b.notifyConflictFailed(ctx, callback.Channel.ID, callback.User.ID, d, prNumber, approverID)
+				return
+			}
+			baseBranch, err := b.gh.GetDefaultBranch(ctx)
+			if err != nil {
+				b.log.Error("get default branch for rebase", zap.Error(err))
+				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+				b.notifyConflictFailed(ctx, callback.Channel.ID, callback.User.ID, d, prNumber, approverID)
+				return
+			}
+			rebaseErr := b.gh.RebaseDeployBranch(ctx, githubPkg.CreatePRParams{
+				App:           d.App,
+				Environment:   d.Environment,
+				Tag:           d.Tag,
+				KustomizePath: appCfg.KustomizePath,
+				BaseBranch:    baseBranch,
+			})
+			if rebaseErr != nil {
+				if errors.Is(rebaseErr, githubPkg.ErrNoChange) {
+					// Tag is already on the default branch; the deploy happened via
+					// another path. Close this PR as a no-op.
+					b.closeNoOpPR(ctx, d, prNumber)
+					return
+				}
+				b.log.Error("rebase deploy branch", zap.Int("pr", prNumber), zap.Error(rebaseErr))
+				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+				b.notifyConflictFailed(ctx, callback.Channel.ID, callback.User.ID, d, prNumber, approverID)
+				return
+			}
+
+			// Give GitHub a moment to recalculate mergeability after the force-push.
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(3 * time.Second):
+			}
+
+			// Retry merge once.
+			if retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod); retryErr != nil {
+				b.log.Error("merge PR after rebase", zap.Int("pr", prNumber), zap.Error(retryErr))
+				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+				b.notifyConflictFailed(ctx, callback.Channel.ID, callback.User.ID, d, prNumber, approverID)
+				return
+			}
+			// Merge succeeded after rebase — fall through to completion.
 		} else {
-			b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, fmt.Sprintf("Failed to merge PR #%d: %v", prNumber, err))
+			b.log.Error("merge PR", zap.Int("pr", prNumber), zap.Error(mergeErr))
+			_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+			if errors.Is(mergeErr, githubPkg.ErrRateLimited) {
+				b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, fmt.Sprintf("GitHub rate limit reached. PR #%d is still open — please try approving again in a few minutes.", prNumber))
+			} else {
+				b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, fmt.Sprintf("Failed to merge PR #%d: %v", prNumber, mergeErr))
+			}
+			return
 		}
-		return
 	}
 
 	_ = b.gh.CommentApproved(ctx, prNumber, ghLogin)
-	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
+	_ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel())
 	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
@@ -123,6 +180,40 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 		CompletedAt: time.Now(),
 	})
 	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
+}
+
+// notifyConflictFailed tells the approver and the deploy channel that the
+// merge failed due to an unresolvable conflict. The PR is left open and state
+// is reset to pending so the approver can retry after manual resolution.
+func (b *Bot) notifyConflictFailed(ctx context.Context, channelID, userID string, d *store.PendingDeploy, prNumber int, approverID string) {
+	b.replyEphemeral(ctx, channelID, userID,
+		fmt.Sprintf("Merge of PR #%d (`%s` `%s`) failed due to a conflict that could not be auto-resolved. "+
+			"The PR is still open — please check it on GitHub and re-approve once the branch is updated.",
+			prNumber, d.App, d.Tag),
+	)
+	deployChannel := b.cfg.Load().Slack.DeployChannel
+	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+		slack.MsgOptionText(fmt.Sprintf(
+			"Merge conflict on PR #%d (`%s` `%s` `%s`) — auto-resolution failed. Approver <@%s> notified.",
+			prNumber, d.App, d.Environment, d.Tag, approverID,
+		), false),
+	)
+	b.log.Warn("merge conflict unresolvable", zap.Int("pr", prNumber), zap.String("app", d.App))
+}
+
+// closeNoOpPR closes a PR that turned out to be a no-op (tag already on the
+// default branch) and notifies the deploy channel. Used when a rebase during
+// conflict resolution reveals the deploy already happened via another path.
+func (b *Bot) closeNoOpPR(ctx context.Context, d *store.PendingDeploy, prNumber int) {
+	_ = b.gh.ClosePR(ctx, prNumber)
+	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
+	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
+	_ = b.store.Delete(ctx, prNumber)
+
+	msg := fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy. PR #%d closed.",
+		d.App, d.Environment, d.Tag, prNumber)
+	b.postNoOpNotice(ctx, d.App, msg)
+	b.log.Info("deploy was no-op, PR closed", zap.Int("pr", prNumber), zap.String("app", d.App))
 }
 
 func (b *Bot) handleRejectButton(ctx context.Context, callback slack.InteractionCallback, action *slack.BlockAction) {
@@ -238,8 +329,22 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		Labels:           []string{cfg.DeployLabel(), cfg.PendingLabel()},
 	})
 	if err != nil {
-		b.log.Error("create deploy PR", zap.Error(err))
 		_ = b.store.ReleaseLock(ctx, env, appVal)
+		if errors.Is(err, githubPkg.ErrNoChange) {
+			noopMsg := fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy. No PR created.", appVal, env, tag)
+			b.postNoOpNotice(ctx, appVal, noopMsg)
+			b.dmUser(ctx, requesterID, noopMsg)
+			_ = b.auditLog.Log(ctx, audit.AuditEvent{
+				EventType:   audit.EventNoop,
+				App:         appVal,
+				Environment: env,
+				Tag:         tag,
+				Requester:   requesterGH,
+			})
+			b.log.Info("deploy no-op: tag already current", zap.String("app", appVal), zap.String("tag", tag))
+			return
+		}
+		b.log.Error("create deploy PR", zap.Error(err))
 		if errors.Is(err, githubPkg.ErrRateLimited) {
 			b.dmUser(ctx, requesterID, "GitHub rate limit reached. Please try again in a few minutes.")
 		} else {
@@ -306,6 +411,33 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
 	b.updatePendingGauge(ctx)
 	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber))
+}
+
+// postNoOpNotice posts a no-op notification to the appropriate Slack target.
+// If the app has an AutoDeployApproverGroup configured:
+//   - Group ID (S…): posts to deploy_channel with a <!subteam^S…> mention
+//   - Channel ID (C…): posts directly to that channel
+//
+// Otherwise posts to deploy_channel without a mention.
+func (b *Bot) postNoOpNotice(ctx context.Context, appName, msg string) {
+	cfg := b.cfg.Load()
+	appCfg, ok := cfg.AppByName(appName)
+	if !ok {
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, slack.MsgOptionText(msg, false))
+		return
+	}
+	group := appCfg.AutoDeployApproverGroup
+	switch {
+	case strings.HasPrefix(group, "S"):
+		// User group: mention in the deploy channel.
+		text := fmt.Sprintf("<!subteam^%s> %s", group, msg)
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, slack.MsgOptionText(text, false))
+	case strings.HasPrefix(group, "C"):
+		// Channel: post directly there.
+		_, _, _ = b.slack.PostMessageContext(ctx, group, slack.MsgOptionText(msg, false))
+	default:
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, slack.MsgOptionText(msg, false))
+	}
 }
 
 func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.InteractionCallback) {

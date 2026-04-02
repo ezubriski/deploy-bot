@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -304,5 +305,243 @@ func TestCreateDeployPR_BranchNameSanitized(t *testing.T) {
 	tagSuffix := strings.TrimPrefix(createdBranch, wantPrefix)
 	if strings.ContainsAny(tagSuffix, "/:") {
 		t.Errorf("tag portion of branch name %q contains illegal characters (/ or :)", createdBranch)
+	}
+}
+
+// TestCreateDeployPR_NoChange verifies that CreateDeployPR returns ErrNoChange
+// (and deletes the created branch) when the kustomization file already contains
+// the requested tag.
+func TestCreateDeployPR_NoChange(t *testing.T) {
+	const (
+		org           = "test-org"
+		repo          = "test-repo"
+		kustomizePath = "apps/myapp/kustomization.yaml"
+		currentTag    = "v2.0.0"
+	)
+
+	// Content already has the tag we're deploying.
+	alreadyCurrent := "images:\n  - name: nginx\n    newTag: " + currentTag + "\n"
+
+	var branchCreated, branchDeleted bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(path, "/git/ref/heads/"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ref":    "refs/heads/main",
+				"object": map[string]interface{}{"sha": "abc", "type": "commit"},
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/refs"):
+			branchCreated = true
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ref":    "refs/heads/deploy/dev-myapp-v2.0.0",
+				"object": map[string]interface{}{"sha": "abc"},
+			})
+		case r.Method == http.MethodGet && strings.Contains(path, "/contents/"):
+			encoded := base64.StdEncoding.EncodeToString([]byte(alreadyCurrent))
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"type": "file", "encoding": "base64",
+				"content": encoded, "sha": "sha1",
+			})
+		case r.Method == http.MethodDelete && strings.Contains(path, "/git/refs/"):
+			branchDeleted = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", org, repo)
+	_, _, err := client.CreateDeployPR(context.Background(), CreatePRParams{
+		App: "myapp", Environment: "dev", Tag: currentTag,
+		KustomizePath: kustomizePath, BaseBranch: "main",
+	})
+
+	if !errors.Is(err, ErrNoChange) {
+		t.Errorf("expected ErrNoChange, got %v", err)
+	}
+	if !branchCreated {
+		t.Error("expected branch to be created before no-op detection")
+	}
+	if !branchDeleted {
+		t.Error("expected created branch to be deleted on no-op")
+	}
+}
+
+// TestMergePR_ConflictReturnsErrMergeConflict verifies that MergePR wraps a
+// GitHub 405 response as ErrMergeConflict.
+func TestMergePR_ConflictReturnsErrMergeConflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") && strings.HasSuffix(r.URL.Path, "/merge") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusMethodNotAllowed) // 405
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"message": "Pull Request is not mergeable",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
+	err := client.MergePR(context.Background(), 1, "squash")
+	if !errors.Is(err, ErrMergeConflict) {
+		t.Errorf("expected ErrMergeConflict, got %v", err)
+	}
+}
+
+// TestRebaseDeployBranch_Success verifies that RebaseDeployBranch calls the
+// full Git Data API sequence and force-updates the deploy branch ref.
+func TestRebaseDeployBranch_Success(t *testing.T) {
+	const (
+		org           = "test-org"
+		repo          = "test-repo"
+		kustomizePath = "apps/myapp/kustomization.yaml"
+		headSHA       = "headsha"
+		treeSHA       = "treesha"
+		blobSHA       = "blobsha"
+		newTreeSHA    = "newtreesha"
+		newCommitSHA  = "newcommitsha"
+	)
+
+	currentContent := "newTag: v1.0.0\n"
+	targetTag := "v2.0.0"
+
+	var (
+		blobCreated   bool
+		treeCreated   bool
+		commitCreated bool
+		refUpdated    bool
+		forceUpdate   bool
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+		switch {
+		// GetRef — base branch HEAD
+		case r.Method == http.MethodGet && strings.Contains(path, "/git/ref/heads/"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ref":    "refs/heads/main",
+				"object": map[string]interface{}{"sha": headSHA, "type": "commit"},
+			})
+
+		// GetContents — current file at base branch
+		case r.Method == http.MethodGet && strings.Contains(path, "/contents/"):
+			encoded := base64.StdEncoding.EncodeToString([]byte(currentContent))
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"type": "file", "encoding": "base64",
+				"content": encoded, "sha": "filesha",
+			})
+
+		// CreateBlob
+		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/blobs"):
+			blobCreated = true
+			json.NewEncoder(w).Encode(map[string]interface{}{"sha": blobSHA})
+
+		// GetCommit
+		case r.Method == http.MethodGet && strings.Contains(path, "/git/commits/"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"sha":  headSHA,
+				"tree": map[string]interface{}{"sha": treeSHA},
+			})
+
+		// CreateTree
+		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/trees"):
+			treeCreated = true
+			json.NewEncoder(w).Encode(map[string]interface{}{"sha": newTreeSHA})
+
+		// CreateCommit
+		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/commits"):
+			commitCreated = true
+			json.NewEncoder(w).Encode(map[string]interface{}{"sha": newCommitSHA})
+
+		// UpdateRef (PATCH)
+		case r.Method == http.MethodPatch && strings.Contains(path, "/git/refs/"):
+			refUpdated = true
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			if b, ok := body["force"].(bool); ok && b {
+				forceUpdate = true
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ref":    "refs/heads/deploy/dev-myapp-v2.0.0",
+				"object": map[string]interface{}{"sha": newCommitSHA},
+			})
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", org, repo)
+	err := client.RebaseDeployBranch(context.Background(), CreatePRParams{
+		App: "myapp", Environment: "dev", Tag: targetTag,
+		KustomizePath: kustomizePath, BaseBranch: "main",
+	})
+	if err != nil {
+		t.Fatalf("RebaseDeployBranch: %v", err)
+	}
+
+	if !blobCreated {
+		t.Error("expected CreateBlob to be called")
+	}
+	if !treeCreated {
+		t.Error("expected CreateTree to be called")
+	}
+	if !commitCreated {
+		t.Error("expected CreateCommit to be called")
+	}
+	if !refUpdated {
+		t.Error("expected UpdateRef to be called")
+	}
+	if !forceUpdate {
+		t.Error("expected force=true on UpdateRef")
+	}
+}
+
+// TestRebaseDeployBranch_AlreadyCurrent verifies that RebaseDeployBranch returns
+// ErrNoChange when the target tag is already on the base branch.
+func TestRebaseDeployBranch_AlreadyCurrent(t *testing.T) {
+	const currentTag = "v2.0.0"
+	alreadyCurrent := "newTag: " + currentTag + "\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		path := r.URL.Path
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(path, "/git/ref/heads/"):
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ref":    "refs/heads/main",
+				"object": map[string]interface{}{"sha": "abc", "type": "commit"},
+			})
+		case r.Method == http.MethodGet && strings.Contains(path, "/contents/"):
+			encoded := base64.StdEncoding.EncodeToString([]byte(alreadyCurrent))
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"type": "file", "encoding": "base64",
+				"content": encoded, "sha": "sha1",
+			})
+		default:
+			// No blob/tree/commit/ref calls should happen.
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
+	err := client.RebaseDeployBranch(context.Background(), CreatePRParams{
+		App: "myapp", Environment: "dev", Tag: currentTag,
+		KustomizePath: "kustomization.yaml", BaseBranch: "main",
+	})
+	if !errors.Is(err, ErrNoChange) {
+		t.Errorf("expected ErrNoChange, got %v", err)
 	}
 }

@@ -191,7 +191,7 @@ type Sweeper struct {
 	store   *store.Store
 	gh      *github.Client
 	slack   slackclient.Poster
-	audit   *audit.Logger
+	audit   audit.Logger
 	metrics *metrics.Metrics
 	cfg     *config.Holder
 	log     *zap.Logger
@@ -201,7 +201,7 @@ func New(
 	store *store.Store,
 	gh *github.Client,
 	slackClient slackclient.Poster,
-	auditLog *audit.Logger,
+	auditLog audit.Logger,
 	m *metrics.Metrics,
 	cfg *config.Holder,
 	log *zap.Logger,
