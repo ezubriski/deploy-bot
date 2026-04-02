@@ -238,6 +238,70 @@ func TestWorker_AcksAfterHandle(t *testing.T) {
 	}
 }
 
+// TestTwoWorkers_NoDoubleDelivery starts two workers with distinct consumer
+// names against the same stream and verifies that N enqueued events are each
+// handled exactly once (no double delivery, no dropped messages).
+func TestTwoWorkers_NoDoubleDelivery(t *testing.T) {
+	const n = 20
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("start miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	w1 := NewWorkerWithName(rdb, "worker-1", zap.NewNop())
+	w2 := NewWorkerWithName(rdb, "worker-2", zap.NewNop())
+
+	if err := w1.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Enqueue all events before starting the workers.
+	for i := 0; i < n; i++ {
+		if err := Enqueue(ctx, rdb, socketmode.Event{
+			Type: socketmode.EventTypeSlashCommand,
+			Data: slack.SlashCommand{Command: "/deploy", Text: "status"},
+		}); err != nil {
+			t.Fatalf("Enqueue %d: %v", i, err)
+		}
+	}
+
+	var total atomic.Int32
+	handle := func(_ context.Context, _ socketmode.Event) {
+		if total.Add(1) == n {
+			cancel() // stop both workers once all events are accounted for
+		}
+	}
+
+	go w1.Run(ctx, handle)
+	go w2.Run(ctx, handle)
+
+	select {
+	case <-ctx.Done():
+		// all n events handled
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out: only %d of %d events handled", total.Load(), n)
+	}
+
+	if got := total.Load(); got != n {
+		t.Errorf("handle called %d times, want %d (no double delivery, no drops)", got, n)
+	}
+
+	// Verify the PEL is empty — all messages ACKed.
+	time.Sleep(50 * time.Millisecond)
+	pending, err := rdb.XPending(context.Background(), StreamKey, ConsumerGroup).Result()
+	if err != nil {
+		t.Fatalf("xpending: %v", err)
+	}
+	if pending.Count != 0 {
+		t.Errorf("pending count = %d after all events handled, want 0", pending.Count)
+	}
+}
+
 func TestWorker_MalformedMessageIsAckedAndSkipped(t *testing.T) {
 	rdb := newTestClient(t)
 	w := newTestWorker(t, rdb)

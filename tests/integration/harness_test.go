@@ -34,6 +34,7 @@ type testEnv struct {
 	cancel           context.CancelFunc
 	store            *store.Store
 	ghClient         *githubpkg.Client
+	bot              *bot.Bot
 	requesterID      string
 	requesterUsername string
 	approverID       string
@@ -119,6 +120,7 @@ func TestMain(m *testing.M) {
 		cancel:           cancel,
 		store:            redisStore,
 		ghClient:         ghClient,
+		bot:              b,
 		requesterID:      requesterID,
 		requesterUsername: requesterUsername,
 		approverID:       approverID,
@@ -244,6 +246,22 @@ func cleanupPRForApp(t *testing.T, prNumber int, app, tag string) {
 func deployBranch(env, app, tag string) string {
 	r := strings.NewReplacer("/", "-", ":", "-", "+", "-", " ", "-")
 	return "deploy/" + env + "-" + app + "-" + r.Replace(tag)
+}
+
+// startExtraWorker creates a second queue worker with a distinct consumer name
+// and runs it for the lifetime of the test. Use this to simulate multi-worker
+// deployments. The worker uses the same bot instance as the primary worker, so
+// it processes events identically.
+func startExtraWorker(t *testing.T, name string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(env.ctx)
+	t.Cleanup(cancel)
+	w := queue.NewWorkerWithName(env.store.Redis(), name, env.log)
+	// Init is idempotent — the consumer group already exists.
+	if err := w.Init(ctx); err != nil {
+		t.Fatalf("startExtraWorker %s: init: %v", name, err)
+	}
+	go w.Run(ctx, env.bot.HandleEvent)
 }
 
 // injectDeployRequest enqueues a deploy modal submission directly to Redis,

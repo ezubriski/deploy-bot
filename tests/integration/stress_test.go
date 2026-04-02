@@ -218,3 +218,108 @@ func TestConcurrentDifferentApps(t *testing.T) {
 
 	t.Logf("all %d concurrent deploys completed", len(apps))
 }
+
+// TestMultiWorker_LockContention runs the same lock-contention scenario as
+// TestConcurrentLockContention but with two workers racing to process events.
+// This verifies that the deploy lock holds correctly even when events land on
+// different worker goroutines simultaneously.
+func TestMultiWorker_LockContention(t *testing.T) {
+	const n = 10
+	startExtraWorker(t, "stress-worker-2")
+	resetAppState(t)
+
+	events := make([]socketmode.Event, n)
+	for i := range events {
+		events[i] = buildDeployEvent(env.app, env.tag,
+			fmt.Sprintf("multi-worker: concurrent request %d", i))
+	}
+
+	if errs := enqueueConcurrent(events); len(errs) > 0 {
+		t.Fatalf("enqueue errors: %v", errs)
+	}
+
+	var firstPR int
+	if !poll(t, 60*time.Second, func() bool {
+		deploys, _ := env.store.GetAll(context.Background())
+		for _, d := range deploys {
+			if d.App == env.app {
+				firstPR = d.PRNumber
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("timed out waiting for any deploy PR to appear")
+	}
+	t.Cleanup(func() { cleanupPR(t, firstPR) })
+
+	// Allow time for both workers to drain remaining events.
+	time.Sleep(15 * time.Second)
+
+	deploys, err := env.store.GetAll(context.Background())
+	if err != nil {
+		t.Fatalf("get all deploys: %v", err)
+	}
+	var appDeploys []*store.PendingDeploy
+	for _, d := range deploys {
+		if d.App == env.app {
+			appDeploys = append(appDeploys, d)
+		}
+	}
+	if len(appDeploys) != 1 {
+		t.Errorf("expected exactly 1 pending deploy for %s with 2 workers, got %d",
+			env.app, len(appDeploys))
+	}
+
+	t.Logf("multi-worker lock held correctly: 1 PR (#%d) from %d concurrent requests across 2 workers",
+		firstPR, n)
+
+	injectApprove(t, firstPR)
+	if !poll(t, 30*time.Second, func() bool {
+		d, _ := env.store.Get(context.Background(), firstPR)
+		return d == nil
+	}) {
+		t.Fatal("timed out waiting for approved deploy to complete")
+	}
+}
+
+// TestMultiWorker_NoDoubleDelivery enqueues a single deploy event with two
+// workers running and verifies it is processed exactly once — no duplicate PRs.
+func TestMultiWorker_NoDoubleDelivery(t *testing.T) {
+	startExtraWorker(t, "delivery-worker-2")
+	resetAppState(t)
+	purgeStaleBranch(t, env.app, env.tag)
+
+	injectDeployRequest(t, "multi-worker: single event delivery test")
+
+	prNumber := waitForPR(t)
+	t.Cleanup(func() { cleanupPR(t, prNumber) })
+
+	// Give both workers time to potentially process the same message again.
+	time.Sleep(10 * time.Second)
+
+	deploys, err := env.store.GetAll(context.Background())
+	if err != nil {
+		t.Fatalf("get all deploys: %v", err)
+	}
+	var appDeploys []*store.PendingDeploy
+	for _, d := range deploys {
+		if d.App == env.app {
+			appDeploys = append(appDeploys, d)
+		}
+	}
+	if len(appDeploys) != 1 {
+		t.Errorf("expected exactly 1 pending deploy with 2 workers, got %d (possible double delivery)",
+			len(appDeploys))
+	}
+
+	t.Logf("single event delivered exactly once: PR #%d", prNumber)
+
+	injectApprove(t, prNumber)
+	if !poll(t, 30*time.Second, func() bool {
+		d, _ := env.store.Get(context.Background(), prNumber)
+		return d == nil
+	}) {
+		t.Fatal("timed out waiting for approved deploy to complete")
+	}
+}

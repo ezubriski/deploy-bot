@@ -91,7 +91,14 @@ func NewWorker(rdb *redis.Client, log *zap.Logger) *Worker {
 	if consumer == "" {
 		consumer = "worker"
 	}
-	return &Worker{rdb: rdb, consumer: consumer, log: log}
+	return NewWorkerWithName(rdb, consumer, log)
+}
+
+// NewWorkerWithName creates a Worker with an explicit consumer name. Useful
+// when running multiple workers in the same process (e.g. tests) where
+// os.Hostname would produce the same name for all of them.
+func NewWorkerWithName(rdb *redis.Client, name string, log *zap.Logger) *Worker {
+	return &Worker{rdb: rdb, consumer: name, log: log}
 }
 
 // Init creates the consumer group, tolerating the error if it already exists.
