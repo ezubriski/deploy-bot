@@ -395,6 +395,68 @@ func TestMergePR_ConflictReturnsErrMergeConflict(t *testing.T) {
 	}
 }
 
+// TestMergePR_405MessageParsing verifies that the 405 message field is used to
+// distinguish ErrCINotPassed, ErrDraftPR, and ErrMergeConflict.
+func TestMergePR_405MessageParsing(t *testing.T) {
+	cases := []struct {
+		name    string
+		message string
+		wantErr error
+	}{
+		{"status check keyword", "Required status check has not passed", ErrCINotPassed},
+		{"required keyword", "1 required status check is failing", ErrCINotPassed},
+		{"draft keyword", "Pull request is in draft state", ErrDraftPR},
+		{"conflict default", "Pull Request is not mergeable", ErrMergeConflict},
+		{"branch out of date", "Base branch is out of date", ErrMergeConflict},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.Contains(r.URL.Path, "/pulls/") && strings.HasSuffix(r.URL.Path, "/merge") {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusMethodNotAllowed) // 405
+					json.NewEncoder(w).Encode(map[string]interface{}{
+						"message": tc.message,
+					})
+					return
+				}
+				http.NotFound(w, r)
+			}))
+			t.Cleanup(server.Close)
+
+			client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
+			err := client.MergePR(context.Background(), 1, "squash")
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("message %q: expected %v, got %v", tc.message, tc.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestMergePR_409ReturnsErrHeadModified verifies that a 409 response maps to
+// ErrHeadModified.
+func TestMergePR_409ReturnsErrHeadModified(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") && strings.HasSuffix(r.URL.Path, "/merge") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict) // 409
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"message": "Head branch was modified. Review and try the merge again.",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
+	err := client.MergePR(context.Background(), 1, "squash")
+	if !errors.Is(err, ErrHeadModified) {
+		t.Errorf("expected ErrHeadModified, got %v", err)
+	}
+}
+
 // TestRebaseDeployBranch_Success verifies that RebaseDeployBranch calls the
 // full Git Data API sequence and force-updates the deploy branch ref.
 func TestRebaseDeployBranch_Success(t *testing.T) {
@@ -543,5 +605,41 @@ func TestRebaseDeployBranch_AlreadyCurrent(t *testing.T) {
 	})
 	if !errors.Is(err, ErrNoChange) {
 		t.Errorf("expected ErrNoChange, got %v", err)
+	}
+}
+
+// TestClosePR_AlreadyClosed verifies that ClosePR returns nil on 404 and 422
+// responses (PR already closed or not found — goal already achieved).
+func TestClosePR_AlreadyClosed(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusUnprocessableEntity} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(status)
+				json.NewEncoder(w).Encode(map[string]string{"message": "already closed"})
+			}))
+			t.Cleanup(server.Close)
+
+			client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
+			if err := client.ClosePR(context.Background(), 42); err != nil {
+				t.Errorf("status %d: expected nil, got %v", status, err)
+			}
+		})
+	}
+}
+
+// TestDeleteBranch_AlreadyGone verifies that DeleteBranch returns nil on 422
+// (GitHub "Reference does not exist" — branch already deleted).
+func TestDeleteBranch_AlreadyGone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity) // 422
+		json.NewEncoder(w).Encode(map[string]string{"message": "Reference does not exist"})
+	}))
+	t.Cleanup(server.Close)
+
+	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
+	if err := client.DeleteBranch(context.Background(), "deploy/prod-myapp-v1.0.0"); err != nil {
+		t.Errorf("expected nil, got %v", err)
 	}
 }

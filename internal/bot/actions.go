@@ -80,7 +80,8 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	// First merge attempt
 	mergeErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
 	if mergeErr != nil {
-		if errors.Is(mergeErr, githubPkg.ErrMergeConflict) {
+		switch {
+		case errors.Is(mergeErr, githubPkg.ErrMergeConflict):
 			// Attempt to rebase the deploy branch onto current HEAD and retry.
 			appCfg, ok := cfg.AppByName(d.App)
 			if !ok {
@@ -131,7 +132,47 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 				return
 			}
 			// Merge succeeded after rebase — fall through to completion.
-		} else {
+
+		case errors.Is(mergeErr, githubPkg.ErrCINotPassed):
+			// CI is blocking — leave the PR open so CI can finish, then re-approve.
+			b.log.Warn("merge blocked by CI", zap.Int("pr", prNumber))
+			_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+			b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID,
+				fmt.Sprintf("PR #%d cannot be merged yet — a required status check has not passed. "+
+					"Re-approve once CI is green.", prNumber),
+			)
+			return
+
+		case errors.Is(mergeErr, githubPkg.ErrDraftPR):
+			// Shouldn't normally happen (drafts can't be selected in the modal),
+			// but handle gracefully.
+			b.log.Warn("merge blocked: PR is a draft", zap.Int("pr", prNumber))
+			_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+			b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID,
+				fmt.Sprintf("PR #%d is still in draft state. Ask the requester to mark it ready, then re-approve.", prNumber),
+			)
+			return
+
+		case errors.Is(mergeErr, githubPkg.ErrHeadModified):
+			// Race: head was updated between mergeability check and merge attempt.
+			// A brief wait + direct retry (no rebase) is usually sufficient.
+			b.log.Info("merge race: head modified, retrying", zap.Int("pr", prNumber))
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+			if retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod); retryErr != nil {
+				b.log.Error("merge PR after head-modified retry", zap.Int("pr", prNumber), zap.Error(retryErr))
+				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+				b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID,
+					fmt.Sprintf("PR #%d could not be merged after a concurrent update (409). Please try approving again.", prNumber),
+				)
+				return
+			}
+			// Merge succeeded — fall through to completion.
+
+		default:
 			b.log.Error("merge PR", zap.Int("pr", prNumber), zap.Error(mergeErr))
 			_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
 			if errors.Is(mergeErr, githubPkg.ErrRateLimited) {

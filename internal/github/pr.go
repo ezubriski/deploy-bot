@@ -13,6 +13,21 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// ErrCINotPassed is returned by MergePR when GitHub blocks the merge because a
+// required status check has not passed. The PR cannot be merged until CI
+// succeeds; callers should notify the approver and leave the PR open.
+var ErrCINotPassed = errors.New("required status check has not passed")
+
+// ErrDraftPR is returned by MergePR when the pull request is still in draft
+// state. The author must mark it ready for review before it can be merged.
+var ErrDraftPR = errors.New("pull request is in draft state")
+
+// ErrHeadModified is returned by MergePR when GitHub returns HTTP 409,
+// indicating the head branch was modified between when we checked mergeability
+// and when we attempted the merge. Retrying the merge directly (without
+// rebasing) is usually sufficient.
+var ErrHeadModified = errors.New("head branch was modified; retry the merge")
+
 // ErrNoChange is returned by CreateDeployPR and RebaseDeployBranch when the
 // requested tag is already the current value in the kustomization file. No PR
 // is created and no branch is left behind.
@@ -166,8 +181,21 @@ func (c *Client) MergePR(ctx context.Context, prNumber int, mergeMethod string) 
 		})
 		if err != nil {
 			var ghErr *gh.ErrorResponse
-			if errors.As(err, &ghErr) && ghErr.Response != nil && ghErr.Response.StatusCode == 405 {
-				return ErrMergeConflict
+			if errors.As(err, &ghErr) && ghErr.Response != nil {
+				switch ghErr.Response.StatusCode {
+				case 405:
+					msg := strings.ToLower(ghErr.Message)
+					switch {
+					case strings.Contains(msg, "status check") || strings.Contains(msg, "required"):
+						return ErrCINotPassed
+					case strings.Contains(msg, "draft"):
+						return ErrDraftPR
+					default: // conflict or branch out of date
+						return ErrMergeConflict
+					}
+				case 409:
+					return ErrHeadModified
+				}
 			}
 			return fmt.Errorf("merge PR: %w", err)
 		}
@@ -295,25 +323,33 @@ func (c *Client) RebaseDeployBranch(ctx context.Context, params CreatePRParams) 
 	return nil
 }
 
-// ClosePR closes a pull request without merging.
+// ClosePR closes a pull request without merging. Returns nil if the PR is
+// already closed or does not exist (422/404 — goal already achieved).
 func (c *Client) ClosePR(ctx context.Context, prNumber int) error {
 	state := "closed"
 	return c.retryOnRateLimit(ctx, func() error {
-		_, _, err := c.gh.PullRequests.Edit(ctx, c.org, c.repo, prNumber, &gh.PullRequest{
+		_, resp, err := c.gh.PullRequests.Edit(ctx, c.org, c.repo, prNumber, &gh.PullRequest{
 			State: &state,
 		})
 		if err != nil {
+			if resp != nil && (resp.StatusCode == 404 || resp.StatusCode == 422) {
+				return nil // already closed or not found
+			}
 			return fmt.Errorf("close PR: %w", err)
 		}
 		return nil
 	})
 }
 
-// DeleteBranch deletes a git branch from the repository.
+// DeleteBranch deletes a git branch from the repository. Returns nil if the
+// branch does not exist (422 "Reference does not exist" — goal already achieved).
 func (c *Client) DeleteBranch(ctx context.Context, branch string) error {
 	return c.retryOnRateLimit(ctx, func() error {
-		_, err := c.gh.Git.DeleteRef(ctx, c.org, c.repo, "refs/heads/"+branch)
+		resp, err := c.gh.Git.DeleteRef(ctx, c.org, c.repo, "refs/heads/"+branch)
 		if err != nil {
+			if resp != nil && resp.StatusCode == 422 {
+				return nil // branch already gone
+			}
 			return fmt.Errorf("delete branch %s: %w", branch, err)
 		}
 		return nil
