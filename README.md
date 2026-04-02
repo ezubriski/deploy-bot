@@ -203,8 +203,10 @@ kubectl apply -f deploy/
 Update the image tag in `deploy/deployment.yaml` to match the version you want to run. The ECR image is:
 
 ```
-123456789012.dkr.ecr.us-west-2.amazonaws.com/deploy-bot:<tag>
+ghcr.io/ezubriski/deploy-bot:<tag>
 ```
+
+A public image is available on GitHub Container Registry (free, unlimited pulls). To use your own ECR build instead, update the image field in `deploy/deployment.yaml`.
 
 ### Endpoints
 
@@ -246,7 +248,7 @@ make clean              # remove ./bin
 
 Override the image tag: `make push TAG=v1.2.3`
 
-Integration tests require a `.env.integration` file with `AWS_SECRET_NAME`, `AWS_REGION`, `INTEGRATION_REQUESTER_ID`, `INTEGRATION_APPROVER_ID`, `INTEGRATION_APP`, `INTEGRATION_TAG`, and `CONFIG_PATH`.
+Integration tests require a `.env.integration` file with `AWS_SECRET_NAME`, `AWS_REGION`, `INTEGRATION_REQUESTER_ID`, `INTEGRATION_REQUESTER_USERNAME`, `INTEGRATION_APPROVER_ID`, `INTEGRATION_APP`, `INTEGRATION_TAG`, and `CONFIG_PATH`.
 
 ## Monitoring
 
@@ -305,9 +307,9 @@ spec:
 
 ## CI
 
-GitHub Actions runs on every push to `main` and on version tags (`v*`):
+GitHub Actions runs on pull requests and pushes to `main` and version tags (`v*`):
 
-1. **Test** — runs `make test` (unit tests only; no external dependencies)
-2. **Build** (only if tests pass) — runs `make push` with Podman, tagging the image with the short SHA (`main` pushes) or the version (`v*` tags), plus `latest`
+1. **Test** — runs `make test` (unit tests only; no external dependencies). Runs on all triggers including PRs from forks.
+2. **Build** (push events only, only if tests pass) — builds with Podman and pushes to ghcr.io, tagged with the short SHA (`main` pushes) or the version (`v*` tags), plus `latest`. Also pushes to ECR if the `ECR_REGISTRY` repository secret is set.
 
-Requires `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` repository secrets scoped to the `deploy-bot` ECR repository.
+Required repository secrets for ECR push: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `ECR_REGISTRY`. The ghcr.io push uses the built-in `GITHUB_TOKEN` and requires no extra secrets.

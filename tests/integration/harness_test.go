@@ -30,26 +30,28 @@ import (
 var env *testEnv
 
 type testEnv struct {
-	ctx           context.Context
-	cancel        context.CancelFunc
-	store         *store.Store
-	ghClient      *githubpkg.Client
-	requesterID   string
-	approverID    string
-	app           string
-	environment   string
-	tag           string
-	deployChannel string
-	cfg           *config.Config
-	metrics       *metrics.Metrics
-	log           *zap.Logger
+	ctx              context.Context
+	cancel           context.CancelFunc
+	store            *store.Store
+	ghClient         *githubpkg.Client
+	requesterID      string
+	requesterUsername string
+	approverID       string
+	app              string
+	environment      string
+	tag              string
+	deployChannel    string
+	cfg              *config.Config
+	metrics          *metrics.Metrics
+	log              *zap.Logger
 }
 
 func TestMain(m *testing.M) {
-	requesterID := requireEnv("INTEGRATION_REQUESTER_ID")
-	approverID  := requireEnv("INTEGRATION_APPROVER_ID")
-	app         := requireEnv("INTEGRATION_APP")
-	tag         := requireEnv("INTEGRATION_TAG")
+	requesterID       := requireEnv("INTEGRATION_REQUESTER_ID")
+	requesterUsername := requireEnv("INTEGRATION_REQUESTER_USERNAME")
+	approverID        := requireEnv("INTEGRATION_APPROVER_ID")
+	app               := requireEnv("INTEGRATION_APP")
+	tag               := requireEnv("INTEGRATION_TAG")
 
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
@@ -113,19 +115,20 @@ func TestMain(m *testing.M) {
 	}
 
 	env = &testEnv{
-		ctx:           ctx,
-		cancel:        cancel,
-		store:         redisStore,
-		ghClient:      ghClient,
-		requesterID:   requesterID,
-		approverID:    approverID,
-		app:           app,
-		environment:   appCfg.Environment,
-		tag:           tag,
-		deployChannel: cfg.Slack.DeployChannel,
-		cfg:           cfg,
-		metrics:       m2,
-		log:           log,
+		ctx:              ctx,
+		cancel:           cancel,
+		store:            redisStore,
+		ghClient:         ghClient,
+		requesterID:      requesterID,
+		requesterUsername: requesterUsername,
+		approverID:       approverID,
+		app:              app,
+		environment:      appCfg.Environment,
+		tag:              tag,
+		deployChannel:    cfg.Slack.DeployChannel,
+		cfg:              cfg,
+		metrics:          m2,
+		log:              log,
 	}
 
 	code := m.Run()
@@ -289,7 +292,7 @@ func injectSlashCommand(t *testing.T, text string) {
 			Command:   "/deploy",
 			Text:      text,
 			UserID:    env.requesterID,
-			UserName:  "ezubriski",
+			UserName:  env.requesterUsername,
 			ChannelID: env.deployChannel,
 		},
 	}

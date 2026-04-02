@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: receiver
-          image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/deploy-bot:latest
+          image: ghcr.io/ezubriski/deploy-bot:latest
           command: ["/receiver"]
           env:
             - name: CONFIG_PATH
@@ -87,7 +87,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: worker
-          image: 123456789012.dkr.ecr.us-west-2.amazonaws.com/deploy-bot:latest
+          image: ghcr.io/ezubriski/deploy-bot:latest
           command: ["/bot"]
           env:
             - name: CONFIG_PATH

@@ -1,7 +1,7 @@
-REGISTRY := 123456789012.dkr.ecr.us-west-2.amazonaws.com
+REGISTRY ?= ## Set to your ECR registry, e.g. 123456789012.dkr.ecr.us-west-2.amazonaws.com
 IMAGE    := $(REGISTRY)/deploy-bot
 TAG      ?= $(shell git rev-parse --short HEAD)
-REGION   := us-west-2
+REGION   ?= us-west-2
 
 # Integration test settings
 ENV_FILE        ?= .env.integration
