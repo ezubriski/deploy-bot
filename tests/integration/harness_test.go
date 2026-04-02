@@ -219,6 +219,13 @@ func cleanupPR(t *testing.T, prNumber int) {
 // branch name. Use this when the PR was created for a tag other than env.tag.
 func cleanupPRWithTag(t *testing.T, prNumber int, tag string) {
 	t.Helper()
+	cleanupPRForApp(t, prNumber, env.app, tag)
+}
+
+// cleanupPRForApp closes a PR and deletes its branch for a specific app.
+// Use this when the PR was created for an app other than env.app.
+func cleanupPRForApp(t *testing.T, prNumber int, app, tag string) {
+	t.Helper()
 	if prNumber == 0 {
 		return
 	}
@@ -226,7 +233,7 @@ func cleanupPRWithTag(t *testing.T, prNumber int, tag string) {
 	if err := env.ghClient.ClosePR(ctx, prNumber); err != nil {
 		t.Logf("cleanup: close PR #%d: %v (may already be closed)", prNumber, err)
 	}
-	branch := deployBranch(env.environment, env.app, tag)
+	branch := deployBranch(env.environment, app, tag)
 	if err := env.ghClient.DeleteBranch(ctx, branch); err != nil {
 		t.Logf("cleanup: delete branch %s: %v (may already be deleted)", branch, err)
 	}
