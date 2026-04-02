@@ -3,9 +3,17 @@ IMAGE    := $(REGISTRY)/deploy-bot
 TAG      ?= $(shell git rev-parse --short HEAD)
 REGION   := us-west-2
 
+# Integration test settings
+ENV_FILE        ?= .env.integration
+INTEG_TIMEOUT   ?= 10m
+INTEG_RUN       ?=  # empty = run all; set to -run TestFoo to filter
+
 .DEFAULT_GOAL := build
 
-.PHONY: build bot receiver test lint docker-build docker-push ecr-login clean help
+.PHONY: build bot receiver test test-unit test-pkg test-integ test-integ-single \
+        lint image push ecr-login clean help
+
+# --- build ---
 
 build: bot receiver ## Build both binaries to ./bin
 
@@ -15,26 +23,47 @@ bot: ## Build cmd/bot -> bin/bot
 receiver: ## Build cmd/receiver -> bin/receiver
 	go build -trimpath -o bin/receiver ./cmd/receiver
 
-test: ## Run all tests
+# --- test ---
+
+test: test-unit ## Run unit tests (alias for test-unit)
+
+test-unit: ## Run all unit tests (no integration tag)
 	go test ./...
+
+test-pkg: ## Run tests for a single package: make test-pkg PKG=./internal/store/...
+	go test $(PKG)
+
+test-integ: ## Run all integration tests (loads $(ENV_FILE))
+	set -a && . $(ENV_FILE) && set +a && \
+	go test -tags=integration -v -count=1 -timeout=$(INTEG_TIMEOUT) ./tests/integration/...
+
+test-integ-single: ## Run one integration test: make test-integ-single RUN=TestDeployAndApprove
+	set -a && . $(ENV_FILE) && set +a && \
+	go test -tags=integration -v -count=1 -timeout=$(INTEG_TIMEOUT) -run $(RUN) ./tests/integration/...
+
+# --- lint ---
 
 lint: ## Run golangci-lint
 	golangci-lint run
 
-docker-build: ## Build Docker image (TAG defaults to git short SHA)
-	docker build -t $(IMAGE):$(TAG) -t $(IMAGE):latest .
+# --- image ---
 
-docker-push: docker-build ## Build and push image to ECR
-	docker push $(IMAGE):$(TAG)
-	docker push $(IMAGE):latest
+image: ## Build container image with Podman (TAG defaults to git short SHA)
+	podman build -t $(IMAGE):$(TAG) -t $(IMAGE):latest .
 
-ecr-login: ## Authenticate Docker to ECR
+push: image ## Build and push image to ECR
+	podman push $(IMAGE):$(TAG)
+	podman push $(IMAGE):latest
+
+ecr-login: ## Authenticate Podman to ECR
 	aws ecr get-login-password --region $(REGION) | \
-		docker login --username AWS --password-stdin $(REGISTRY)
+		podman login --username AWS --password-stdin $(REGISTRY)
+
+# --- misc ---
 
 clean: ## Remove build artifacts
 	rm -rf bin/
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
