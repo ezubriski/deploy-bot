@@ -104,19 +104,20 @@ Each app entry:
 ```json
 {
   "app": "myapp",
+  "environment": "prod",
   "kustomize_path": "apps/myapp/kustomization.yaml",
   "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",
   "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
 }
 ```
 
+`environment` is required. It is included in lock keys (`lock:<env>/<app>`), branch names (`deploy/<env>-<app>-<tag>`), PR titles, and all user-facing Slack messages so that deployments across environments are unambiguous.
+
 ## Deployment
 
 ### IAM
 
-The bot uses three IAM roles:
-
-**Bot role** — attached to the `deploy-bot` Kubernetes ServiceAccount via IRSA (`deploy/rbac.yaml`). Needs permission to read its own secret and to assume the two cross-account roles:
+The bot role is attached to the `deploy-bot` Kubernetes ServiceAccount via IRSA (`deploy/rbac.yaml`). It needs permission to read its own secret, plus ECR and S3 permissions for the pod identity directly:
 
 ```json
 {
@@ -129,65 +130,29 @@ The bot uses three IAM roles:
       "Resource": "arn:aws:secretsmanager:<region>:<account>:secret:deploy-bot/secrets-*"
     },
     {
-      "Sid": "AssumeServiceRoles",
+      "Sid": "ReadECR",
       "Effect": "Allow",
-      "Action": "sts:AssumeRole",
-      "Resource": [
-        "<ecr_role_arn>",
-        "<audit_role_arn>"
-      ]
+      "Action": [
+        "ecr:GetAuthorizationToken",
+        "ecr:DescribeImages",
+        "ecr:BatchGetImage",
+        "ecr:ListImages"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "WriteAuditLog",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::<audit_bucket>/deploy-bot/*"
     }
   ]
 }
 ```
 
-**ECR role** (`ecr_role_arn`) — assumed by the worker to read app image repositories. Attach this trust policy to the role so the bot role can assume it:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": { "AWS": "<bot-role-arn>" },
-    "Action": "sts:AssumeRole"
-  }]
-}
-```
-
-And grant these permissions:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Sid": "ReadECR",
-    "Effect": "Allow",
-    "Action": [
-      "ecr:GetAuthorizationToken",
-      "ecr:DescribeImages",
-      "ecr:BatchGetImage",
-      "ecr:ListImages"
-    ],
-    "Resource": "*"
-  }]
-}
-```
-
 > `ecr:GetAuthorizationToken` requires `Resource: "*"` — it cannot be scoped to a repository ARN.
 
-**Audit role** (`audit_role_arn`) — assumed by the worker to write audit log entries. Same trust policy pattern as above, with:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Sid": "WriteAuditLog",
-    "Effect": "Allow",
-    "Action": "s3:PutObject",
-    "Resource": "arn:aws:s3:::<audit_bucket>/deploy-bot/*"
-  }]
-}
-```
+The `aws.ecr_role_arn` and `aws.audit_role_arn` config fields are optional. Omit them to use the pod identity directly (as above). Set them only if ECR or S3 live in a separate AWS account that requires cross-account role assumption.
 
 ### Slack app setup
 
@@ -267,16 +232,21 @@ The worker's `/readyz` returns 503 until the ECR cache has completed its first p
 ## Development
 
 ```bash
-make build        # build both binaries to ./bin
-make test         # run all tests
-make lint         # run golangci-lint
-make docker-build # build image (tagged with git short SHA)
-make ecr-login    # authenticate Docker to ECR
-make docker-push  # build and push to ECR
-make clean        # remove ./bin
+make build              # build both binaries to ./bin
+make test               # run unit tests
+make test-pkg PKG=./internal/store/...  # single package
+make test-integ         # integration tests (requires .env.integration)
+make test-integ-single RUN=TestDeployAndApprove  # single integration test
+make lint               # run golangci-lint
+make image              # build container image with Podman (git short SHA)
+make ecr-login          # authenticate Podman to ECR
+make push               # build and push to ECR
+make clean              # remove ./bin
 ```
 
-Override the image tag: `make docker-push TAG=v1.2.3`
+Override the image tag: `make push TAG=v1.2.3`
+
+Integration tests require a `.env.integration` file with `AWS_SECRET_NAME`, `AWS_REGION`, `INTEGRATION_REQUESTER_ID`, `INTEGRATION_APPROVER_ID`, `INTEGRATION_APP`, `INTEGRATION_TAG`, and `CONFIG_PATH`.
 
 ## Monitoring
 
@@ -335,4 +305,9 @@ spec:
 
 ## CI
 
-GitHub Actions builds and pushes to ECR on every push to `main` (tagged with the short SHA and `latest`) and on version tags (`v*`, tagged with the version). Requires `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` repository secrets scoped to the `deploy-bot` ECR repository.
+GitHub Actions runs on every push to `main` and on version tags (`v*`):
+
+1. **Test** — runs `make test` (unit tests only; no external dependencies)
+2. **Build** (only if tests pass) — runs `make push` with Podman, tagging the image with the short SHA (`main` pushes) or the version (`v*` tags), plus `latest`
+
+Requires `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` repository secrets scoped to the `deploy-bot` ECR repository.
