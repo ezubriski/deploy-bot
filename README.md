@@ -1,5 +1,7 @@
 # deploy-bot
 
+> This project was largely built with [Claude Code](https://claude.ai/code). Human contributors are welcome.
+
 A Slack bot that gates Kubernetes deployments behind an approval workflow. Developers request deployments via `/deploy`, approvers approve or reject via Slack buttons, and the bot creates and merges GitHub PRs that update kustomize image tags in a GitOps repo. Argo CD picks up merged PRs and deploys.
 
 ## How it works
