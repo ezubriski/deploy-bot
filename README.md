@@ -56,6 +56,14 @@ Two processes share a single container image:
 - **receiver** -- connects to Slack via Socket Mode, validates incoming events, and enqueues them to a Redis Stream. Also polls SQS for ECR push events and scans repos for app config (when enabled). Stateless; run 2+ replicas.
 - **worker** -- consumes events from the stream, runs all business logic (GitHub API, ECR, audit logging). Run 2+ replicas; Redis Streams consumer groups ensure each event is processed once.
 
+### Redis
+
+deploy-bot relies heavily on Redis for event streaming, deploy state, per-app locks, and history. **Redis must be available for the bot to function.** For production, use ElastiCache for Redis (or an equivalent managed service) with Multi-AZ automatic failover and AOF persistence enabled. This gives you durability across restarts and high availability during node failures.
+
+The bot tolerates brief Redis connectivity interruptions -- the in-memory buffer absorbs events during outages and replays them on reconnection. It also recovers from complete Redis data loss by reconciling against GitHub (closing orphaned PRs, releasing stale locks). However, performance degrades during outages and deploy requests will queue rather than process.
+
+An in-cluster Redis deployment (e.g. the `redis.yaml` in `deploy/`) works for development and low-volume environments, but lacks the persistence and failover guarantees that matter when deployments are business-critical. See [docs/redis-resilience.md](docs/redis-resilience.md) for detailed behaviour during outages and recovery.
+
 ## Security
 
 - **Minimal container image** -- built `FROM scratch`. No shell, no package manager, no OS. Just the binary and CA certificates.
