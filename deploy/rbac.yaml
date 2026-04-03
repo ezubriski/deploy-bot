@@ -1,11 +1,20 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: deploy-bot
+  name: deploy-bot-worker
   namespace: deploy-bot
   annotations:
-    # Replace with your IAM role ARN. See terraform/README.md for setup.
-    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/deploy-bot
+    # Replace with your bot_role_arn output. See terraform/README.md for setup.
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/deploy-bot-bot
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deploy-bot-receiver
+  namespace: deploy-bot
+  annotations:
+    # Replace with your receiver_role_arn output. See terraform/README.md for setup.
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/deploy-bot-receiver
 ---
 # Allows the receiver to write discovered app configs to its own ConfigMap.
 # The ConfigMap is not version-controlled -- it is managed by the repo scanner.
@@ -34,5 +43,5 @@ roleRef:
   name: deploy-bot-discovered
 subjects:
   - kind: ServiceAccount
-    name: deploy-bot
+    name: deploy-bot-receiver
     namespace: deploy-bot

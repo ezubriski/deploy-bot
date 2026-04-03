@@ -6,7 +6,6 @@ namespace: deploy-bot
 resources:
   - namespace.yaml
   - rbac.yaml
-  - configmap.yaml
   - deployment.yaml
   - service.yaml
 
@@ -14,3 +13,11 @@ resources:
 # In production, use a managed Redis service (e.g. ElastiCache).
 # Uncomment the following line to include the in-cluster Redis:
 # - redis.yaml
+
+configMapGenerator:
+  - name: deploy-bot-config
+    files:
+      - config.json
+
+generatorOptions:
+  disableNameSuffixHash: true

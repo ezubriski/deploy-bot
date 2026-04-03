@@ -1,6 +1,11 @@
-output "role_arn" {
-  description = "IAM role ARN to set in the ServiceAccount annotation"
+output "bot_role_arn" {
+  description = "IAM role ARN for the bot (worker) ServiceAccount annotation"
   value       = aws_iam_role.bot.arn
+}
+
+output "receiver_role_arn" {
+  description = "IAM role ARN for the receiver ServiceAccount annotation"
+  value       = aws_iam_role.receiver.arn
 }
 
 output "sqs_queue_url" {

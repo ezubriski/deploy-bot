@@ -30,10 +30,16 @@ variable "namespace" {
   default     = "deploy-bot"
 }
 
-variable "service_account_name" {
-  description = "Kubernetes ServiceAccount name"
+variable "bot_service_account_name" {
+  description = "Kubernetes ServiceAccount name for the bot (worker) component"
   type        = string
-  default     = "deploy-bot"
+  default     = "deploy-bot-worker"
+}
+
+variable "receiver_service_account_name" {
+  description = "Kubernetes ServiceAccount name for the receiver component"
+  type        = string
+  default     = "deploy-bot-receiver"
 }
 
 variable "secrets_manager_secret_name" {

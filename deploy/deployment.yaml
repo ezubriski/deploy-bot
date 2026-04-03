@@ -13,7 +13,7 @@ spec:
       labels:
         app: deploy-bot-receiver
     spec:
-      serviceAccountName: deploy-bot
+      serviceAccountName: deploy-bot-receiver
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
@@ -87,7 +87,7 @@ spec:
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: deploy-bot
+      serviceAccountName: deploy-bot-worker
       securityContext:
         runAsNonRoot: true
         runAsUser: 65534
