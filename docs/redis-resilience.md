@@ -1,8 +1,11 @@
 # Redis resilience
 
-deploy-bot requires Redis to function. Both the receiver and worker will refuse
-to start if Redis is unreachable — the startup ping will fail and the process
-will exit. There is no degraded mode; Redis is not optional.
+deploy-bot requires Redis to function. On startup, both the receiver and worker
+attempt to connect to Redis with retries every 5 seconds for up to 60 seconds.
+During this window the pod is alive (`/healthz` returns 200) but not ready
+(`/readyz` returns 503), so Kubernetes will not route traffic to it. If Redis
+is still unreachable after 60 seconds, the process exits. There is no degraded
+mode; Redis is not optional.
 
 ## What Redis holds
 
