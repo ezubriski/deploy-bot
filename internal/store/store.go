@@ -35,6 +35,31 @@ func (s *Store) Ping(ctx context.Context) error {
 	return s.rdb.Ping(ctx).Err()
 }
 
+// WaitForRedis attempts to ping Redis with retries over the given timeout.
+// It pings immediately, then every 5 seconds until success or timeout.
+func (s *Store) WaitForRedis(ctx context.Context, timeout time.Duration) error {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	if err := s.Ping(ctx); err == nil {
+		return nil
+	}
+
+	for {
+		select {
+		case <-deadline:
+			return fmt.Errorf("redis not available after %s", timeout)
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if err := s.Ping(ctx); err == nil {
+				return nil
+			}
+		}
+	}
+}
+
 // Redis returns the underlying Redis client, used by components that need
 // direct access (e.g. the queue worker).
 func (s *Store) Redis() *redis.Client {

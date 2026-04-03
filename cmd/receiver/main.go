@@ -69,11 +69,13 @@ func main() {
 		log.Fatal("slack_app_token is required for the receiver (Socket Mode)")
 	}
 
-	rdb := redis.NewClient(&redis.Options{Addr: secrets.RedisAddr, Password: secrets.RedisToken})
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatal("redis ping", zap.Error(err))
-	}
 	redisStore := store.New(secrets.RedisAddr, secrets.RedisToken)
+	log.Info("waiting for redis", zap.String("addr", secrets.RedisAddr))
+	if err := redisStore.WaitForRedis(ctx, time.Minute); err != nil {
+		log.Fatal("redis not available", zap.Error(err))
+	}
+	log.Info("redis connected")
+	rdb := redisStore.Redis()
 
 	slackClient := slack.New(secrets.SlackBotToken,
 		slack.OptionAppLevelToken(secrets.SlackAppToken),

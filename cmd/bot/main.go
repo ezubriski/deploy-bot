@@ -98,9 +98,11 @@ func main() {
 	}()
 
 	redisStore := store.New(secrets.RedisAddr, secrets.RedisToken)
-	if err := redisStore.Ping(ctx); err != nil {
-		log.Fatal("redis ping", zap.Error(err))
+	log.Info("waiting for redis", zap.String("addr", secrets.RedisAddr))
+	if err := redisStore.WaitForRedis(ctx, time.Minute); err != nil {
+		log.Fatal("redis not available", zap.Error(err))
 	}
+	log.Info("redis connected")
 
 	maxRetries, retryWait := cfgHolder.Load().GitHub.RateLimitConfig()
 	ghClient := githubPkg.NewClient(secrets.GitHubToken, cfgHolder.Load().GitHub.Org, cfgHolder.Load().GitHub.Repo, log, githubPkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
