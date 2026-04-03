@@ -122,6 +122,50 @@ func TestParseRepoConfig_EmptyApps(t *testing.T) {
 	}
 }
 
+func TestParseRepoConfig_WithAPIVersion(t *testing.T) {
+	data := []byte(`{
+		"apiVersion": "deploy-bot/v1",
+		"apps": [
+			{
+				"app": "myapp",
+				"environment": "dev",
+				"kustomize_path": "path",
+				"ecr_repo": "repo"
+			}
+		]
+	}`)
+
+	apps, errs := parseRepoConfig(data, "org/repo")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(apps))
+	}
+}
+
+func TestParseRepoConfig_UnknownAPIVersion(t *testing.T) {
+	data := []byte(`{
+		"apiVersion": "deploy-bot/v99",
+		"apps": [
+			{
+				"app": "myapp",
+				"environment": "dev",
+				"kustomize_path": "path",
+				"ecr_repo": "repo"
+			}
+		]
+	}`)
+
+	apps, errs := parseRepoConfig(data, "org/repo")
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if len(apps) != 0 {
+		t.Fatalf("expected 0 apps, got %d", len(apps))
+	}
+}
+
 func TestParseRepoConfig_AutoDeployFields(t *testing.T) {
 	data := []byte(`{
 		"apps": [

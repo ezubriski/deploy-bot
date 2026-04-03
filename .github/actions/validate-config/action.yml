@@ -1,0 +1,35 @@
+name: "deploy-bot config validate"
+description: "Validate .deploy-bot.json configuration files for deploy-bot repo-sourced app discovery"
+
+inputs:
+  config-file:
+    description: "Path to the .deploy-bot.json file to validate"
+    required: false
+    default: ".deploy-bot.json"
+  version:
+    description: "deploy-bot git ref to build the validator from"
+    required: false
+    default: "main"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout deploy-bot
+      uses: actions/checkout@v4
+      with:
+        repository: ezubriski/deploy-bot
+        ref: ${{ inputs.version }}
+        path: .deploy-bot-tool
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: .deploy-bot-tool/go.mod
+
+    - name: Build validator
+      shell: bash
+      run: cd .deploy-bot-tool && go build -trimpath -o ../deploy-bot-config ./cmd/deploy-bot-config
+
+    - name: Validate config
+      shell: bash
+      run: ./deploy-bot-config --file "${{ inputs.config-file }}"

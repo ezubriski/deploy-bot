@@ -10,18 +10,21 @@ INTEG_RUN       ?=  # empty = run all; set to -run TestFoo to filter
 
 .DEFAULT_GOAL := build
 
-.PHONY: build bot receiver test test-unit test-pkg test-integ test-integ-single \
+.PHONY: build bot receiver deploy-bot-config test test-unit test-pkg test-integ test-integ-single \
         lint image push ecr-login clean help
 
 # --- build ---
 
-build: bot receiver ## Build both binaries to ./bin
+build: bot receiver deploy-bot-config ## Build all binaries to ./bin
 
 bot: ## Build cmd/bot -> bin/bot
 	go build -trimpath -o bin/bot ./cmd/bot
 
 receiver: ## Build cmd/receiver -> bin/receiver
 	go build -trimpath -o bin/receiver ./cmd/receiver
+
+deploy-bot-config: ## Build cmd/deploy-bot-config -> bin/deploy-bot-config
+	go build -trimpath -o bin/deploy-bot-config ./cmd/deploy-bot-config
 
 # --- test ---
 
