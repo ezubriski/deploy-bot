@@ -2,22 +2,23 @@
 
 ## Overview
 
-Allow applications to declare their deploy-bot configuration in their own
-repositories. A collector goroutine in the receiver periodically scans
+Applications can declare their deploy-bot configuration in their own
+repositories instead of requiring an operator to add entries to the central
+`config.json`. A collector goroutine in the receiver periodically scans
 repositories in the configured GitHub org, fetches and validates each config
-file, detects conflicts with operator-managed config, and writes the merged
-result to a Kubernetes ConfigMap. The bot watches the projected file for
-changes via its existing `config.Watch` mechanism.
+file, detects conflicts with operator-managed config, and writes the results
+to a Kubernetes ConfigMap. The bot watches this file for changes via its
+existing config hot-reload mechanism.
 
 ## Repository Config File
 
-Each repository may place a config file (name is configurable — defaults to
-`.deploy-bot.json`) in the root of its default branch. The filename is
-configurable because the bot may be installed under different names. A single
-file can declare multiple apps (e.g. one per environment):
+Each repository may place a config file (name is configurable -- defaults to
+`.deploy-bot.json`) in the root of its default branch. A single file can
+declare multiple apps (e.g. one per environment):
 
 ```json
 {
+  "apiVersion": "deploy-bot/v1",
   "apps": [
     {
       "app": "myapp",
@@ -40,9 +41,17 @@ file can declare multiple apps (e.g. one per environment):
 }
 ```
 
-Fields mirror `AppConfig` in the bot's primary config. The collector validates
-each entry against the same schema rules (e.g. `environment` is required,
-`tag_pattern` compiles as a regex).
+The `apiVersion` field should be set to `"deploy-bot/v1"`. If omitted, it
+defaults to `v1`. Fields mirror the per-app config in the bot's primary
+config. The collector validates each entry against the same schema rules
+(e.g. `environment` is required, `tag_pattern` compiles as a regex).
+
+### Validating config before commit
+
+Teams can validate their `.deploy-bot.json` before it is scraped by the
+collector using the `deploy-bot-config` CLI tool or the corresponding GitHub
+Action. Running validation in CI catches schema errors and conflict issues
+before they reach the scanner, reducing noise in Slack.
 
 ### Fields NOT settable from repos
 
@@ -55,45 +64,42 @@ unrecognised top-level keys are ignored with a warning.
 **Operator config always wins.** If the operator's `config.json` defines an
 app with the same `(app, environment)` pair as a repo-sourced entry, the
 repo-sourced entry is discarded and a conflict warning is emitted. This is a
-hard rule with no override mechanism — the operator must remove the entry from
+hard rule with no override mechanism -- the operator must remove the entry from
 their config for the repo-sourced version to take effect.
 
-## Collector
+## Scan Behavior
 
-The collector runs as a goroutine in the receiver process. It shares the
-receiver's GitHub token and Slack client.
+The collector runs as a goroutine in the receiver process.
 
 ### Scan loop
 
 ```
-startup → full scan → sleep(poll_interval) → full scan → ...
+startup -> full scan -> sleep(poll_interval) -> full scan -> ...
 ```
 
 Each scan:
 
-1. **List repos.** `Repositories.ListByOrg` with pagination. If
-   `repo_prefix` is set, skip repos whose name does not start with the prefix.
-2. **Fetch config file.** `Repositories.GetContents` for the config file path
-   on the repo's default branch. Uses conditional requests (`If-None-Match`
-   with the ETag from the previous scan) so unchanged files return 304 and
-   don't count against the rate limit.
-3. **Parse and validate.** Unmarshal JSON, validate each app entry (required
+1. **List repos.** Paginated org listing. If `repo_prefix` is set, repos
+   whose name does not start with the prefix are skipped.
+2. **Fetch config file.** Reads the config file path from each repo's default
+   branch. Uses conditional requests (ETags from the previous scan) so
+   unchanged files return 304 and do not count against the rate limit.
+3. **Parse and validate.** Unmarshals JSON, validates each app entry (required
    fields, regex compilation, environment not empty). Invalid entries are
-   logged and skipped — one bad entry does not invalidate the entire file.
-4. **Conflict check.** For each `(app, environment)` pair, check whether it
+   logged and skipped -- one bad entry does not invalidate the entire file.
+4. **Conflict check.** For each `(app, environment)` pair, checks whether it
    exists in the operator's primary config. Conflicts are collected for
    warning.
 5. **Emit warnings.** See [Conflict Warnings](#conflict-warnings).
-6. **Build merged config.** Start with the operator's `apps[]` list. Append
-   all non-conflicting repo-sourced entries. The merged list is the final
-   apps config.
-7. **Update ConfigMap.** Serialise the merged config to JSON and patch the
-   target ConfigMap. Only write if the content has changed (compare SHA-256
+6. **Build merged config.** Starts with the operator's `apps[]` list. Appends
+   all non-conflicting repo-sourced entries.
+7. **Update ConfigMap.** Serializes the merged config to JSON and patches the
+   target ConfigMap. Only writes if the content has changed (compares SHA-256
    of new vs current data key).
 
 ### Rate limit awareness
 
-- Conditional requests (ETags) for file fetches — 304s are free.
+- Conditional requests (ETags) for file fetches -- 304s are free.
 - `ListByOrg` pages are cached; on subsequent scans only repos with a
   `pushed_at` newer than the last scan are re-fetched for their config file.
 - If the remaining rate limit drops below a configurable floor (default 500),
@@ -103,10 +109,10 @@ Each scan:
 ### Stale repo handling
 
 If a repo that previously contributed apps is deleted, archived, or has its
-config file removed, the collector notices on the next scan (404 on
-`GetContents` or repo no longer listed). The apps from that repo are dropped
-from the merged config, and the ConfigMap is updated. The bot sees the file
-change and reloads — effectively removing those apps.
+config file removed, the collector notices on the next scan (404 on file
+fetch or repo no longer listed). The apps from that repo are dropped from the
+merged config, and the ConfigMap is updated. The bot sees the file change and
+reloads -- effectively removing those apps.
 
 ## Conflict Warnings
 
@@ -140,7 +146,7 @@ sets the status to `success`:
 
 This gives repo owners visibility without requiring them to watch the Slack
 deploy channel. Teams can optionally add `deploy-bot/config` as a required
-status check to prevent merging config changes that won't take effect.
+status check to prevent merging config changes that will not take effect.
 
 ## ConfigMap Output
 
@@ -150,23 +156,22 @@ The bot mounts both:
 | ConfigMap | Mount path | Contents |
 |---|---|---|
 | `deploy-bot-config` (operator) | `/etc/deploy-bot/config.json` | Full config with global settings + operator-managed apps |
-| `deploy-bot-discovered` (collector) | `/etc/deploy-bot/discovered.json` | `{"apps": [...]}` — only the repo-sourced apps list |
+| `deploy-bot-discovered` (collector) | `/etc/deploy-bot/discovered.json` | `{"apps": [...]}` -- only the repo-sourced apps list |
 
 The bot's config loader merges both at load time: it reads the primary config,
 then appends apps from the discovered file, skipping any `(app, environment)`
-pairs already present in the primary. This merge happens on every reload
-triggered by `config.Watch`.
+pairs already present in the primary. This merge happens on every reload.
 
 ### Why a separate ConfigMap?
 
-- Operator config is never modified by automation — no risk of the collector
+- Operator config is never modified by automation -- no risk of the collector
   clobbering manual changes.
 - Clear ownership: operators own `deploy-bot-config`, the collector owns
   `deploy-bot-discovered`.
 - If the collector is broken or disabled, the bot falls back to operator
   config only.
 
-## Bot Config Changes
+## Configuration Reference
 
 ### Primary config (`config.json` top level)
 
@@ -216,33 +221,8 @@ triggered by `config.Watch`.
 }
 ```
 
-The `_source_repo` field is metadata for debugging and audit — it records
+The `_source_repo` field is metadata for debugging and audit -- it records
 which repo contributed each entry. The bot's config loader ignores it.
-
-## Bot Config Merge
-
-`config.Load` gains an optional second path (`discoveredPath`). If the file
-exists and is non-empty:
-
-1. Parse it as `{"apps": [...]}`
-2. Build a set of `(app, environment)` pairs from the primary config's apps
-3. For each discovered app, skip if the pair exists in the primary set;
-   otherwise append
-4. Return the merged config
-
-`config.Watch` watches both files. A change to either triggers a reload.
-
-## New / Modified Packages
-
-| Path | Change | Purpose |
-|---|---|---|
-| `internal/reposcanner/scanner.go` | New | Scan loop: list repos, fetch+parse config files, build discovered apps list |
-| `internal/reposcanner/validate.go` | New | Validate repo-sourced app entries (required fields, regex, etc.) |
-| `internal/reposcanner/configmap.go` | New | K8s ConfigMap patch logic (client-go) |
-| `internal/reposcanner/conflict.go` | New | Conflict detection, Slack warning (debounced), GitHub commit status |
-| `internal/config/config.go` | Modify | Add `RepoDiscovery` config struct; `Load` gains discovered-path merge |
-| `internal/config/holder.go` | Modify | `Watch` monitors both primary and discovered paths |
-| `cmd/receiver/main.go` | Modify | Start scanner goroutine when `repo_discovery.enabled` is true |
 
 ## Kubernetes RBAC
 
@@ -257,27 +237,3 @@ rules:
 ```
 
 Scoped to the single ConfigMap by `resourceNames`.
-
-## Dependencies
-
-- `k8s.io/client-go` — for ConfigMap patching. The receiver uses in-cluster
-  config (`rest.InClusterConfig()`), so no kubeconfig is needed.
-
-## Implementation Order
-
-1. **Config additions** — `RepoDiscovery` struct on `Config`; `Load` gains
-   discovered-path merge; `Watch` monitors both files.
-2. **Validation** — `reposcanner/validate.go`: validate a parsed repo config
-   against the same rules as `config.Load` (required fields, regex, etc.).
-3. **Scanner core** — `reposcanner/scanner.go`: list repos, fetch files with
-   ETags, parse JSON, filter by prefix, build discovered apps list.
-4. **Conflict detection** — `reposcanner/conflict.go`: detect
-   `(app, environment)` collisions with operator config; Slack warning with
-   debounce; GitHub commit status.
-5. **ConfigMap writer** — `reposcanner/configmap.go`: patch the target
-   ConfigMap with the serialised discovered apps JSON. Skip if unchanged.
-6. **Wire into receiver** — start scanner goroutine in `cmd/receiver/main.go`
-   when enabled.
-7. **Unit tests** — validation, conflict detection, merge logic, ETag caching.
-8. **Integration test** — scanner against a test repo with known config; verify
-   ConfigMap contents and conflict warnings.

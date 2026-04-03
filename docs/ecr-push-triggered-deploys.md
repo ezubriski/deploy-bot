@@ -2,22 +2,30 @@
 
 ## Overview
 
-Allow the bot to receive ECR image push notifications for configured applications and automatically initiate a deploy workflow — either requesting human approval or deploying autonomously depending on per-app and global configuration.
+The bot receives ECR image push notifications for configured applications and
+automatically initiates a deploy workflow -- either requesting human approval
+or deploying autonomously depending on per-app and global configuration.
 
 ## Event Pipeline
 
 ECR push events flow through the same Redis Stream pipeline as Slack events:
 
 ```
-EventBridge → SQS → ecrpoller (leader) → buffer → Redis Stream → worker → bot.HandleEvent
+EventBridge -> SQS -> ecrpoller (receiver) -> buffer -> Redis Stream -> worker -> bot handler
 ```
 
 This gives ECR-triggered deploys the same delivery guarantees as Slack events:
-- If Redis is temporarily unavailable, the buffer retries with backoff until the SQS visibility timeout would expire (configurable per queue; default 30s is too short — set to several minutes).
-- The worker's consumer group ensures each event is processed exactly once even with multiple worker replicas.
+- If Redis is temporarily unavailable, the buffer retries with backoff until
+  the SQS visibility timeout expires.
+- The worker's consumer group ensures each event is processed exactly once
+  even with multiple worker replicas.
 - Crashed workers are recovered via `XAUTOCLAIM`.
 
-The `ecrpoller` is the "receiver" for ECR events, analogous to `cmd/receiver` for Slack events. It runs in the worker process under the leader context (only one pod polls SQS at a time). SQS messages are deleted only after the event has been successfully written to Redis (or buffered).
+SQS messages are deleted only after the event has been successfully written to
+Redis (or buffered). The SQS message visibility timeout should be set to at
+least the buffer's maximum retry window (e.g. 5 minutes) so that a Redis
+outage does not cause SQS to redeliver the message before the first has been
+buffered.
 
 ### EventBridge Rule
 
@@ -33,32 +41,12 @@ The `ecrpoller` is the "receiver" for ECR events, analogous to `cmd/receiver` fo
 ```
 
 Relevant fields in the event `detail`:
-- `repository-name` — matched against the short name portion of `ecr_repo`
-- `image-tag` — validated against `tag_pattern`; non-matching tags are discarded before enqueueing
-- `registry-id` — AWS account ID (sanity check, optional)
+- `repository-name` -- matched against the short name portion of `ecr_repo`
+- `image-tag` -- validated against `tag_pattern`; non-matching tags are
+  discarded before enqueueing
+- `registry-id` -- AWS account ID (sanity check, optional)
 
-## Queue Changes
-
-### New Envelope Type
-
-Add `EventTypeECRPush = "ecr_push"` to the queue package's event type constants. The envelope `Data` field carries a new `ECRPushEvent` struct:
-
-```go
-// internal/queue/ecrevent.go
-type ECRPushEvent struct {
-    App        string `json:"app"`         // matched app name from config
-    Tag        string `json:"tag"`         // pushed image tag
-    Repository string `json:"repository"`  // full ECR repository URI
-}
-```
-
-`decode()` in `queue.go` gains a new case for `EventTypeECRPush` that unmarshals into `ECRPushEvent`.
-
-`bot.HandleEvent` gains a new dispatch branch for `EventTypeECRPush` that calls `bot.handleECRPush(ctx, ECRPushEvent)`.
-
-Tag matching and lock checks happen in the poller **before** enqueueing — discard-before-enqueue keeps the stream clean. The worker handler trusts that by the time it sees an `ecr_push` event, the tag matched and no lock was held at enqueue time. A second lock check in the handler handles the race where another deploy started between enqueue and processing.
-
-## Configuration Changes
+## Configuration
 
 ### Global (`config.json` top level)
 
@@ -87,71 +75,86 @@ Tag matching and lock checks happen in the poller **before** enqueueing — disc
   "app": "myapp",
   "environment": "prod",
   "auto_deploy": false,
-  "auto_deploy_approver_group": "C01234567",
-  ...
+  "auto_deploy_approver_group": "C01234567"
 }
 ```
 
 | Field | Default | Description |
 |---|---|---|
 | `auto_deploy` | `false` | When `true`, matching pushes deploy automatically without human approval. Subject to `allow_prod_auto_deploy` global guard |
-| `auto_deploy_approver_group` | `""` | Slack ID to @mention when requesting approval for an ECR-triggered deploy. Use a channel ID (`C…`) to post there, or a user group ID (`S…`) to mention the group in `deploy_channel`. Falls back to posting to `deploy_channel` without a mention if unset |
+| `auto_deploy_approver_group` | `""` | Slack ID to @mention when requesting approval for an ECR-triggered deploy. Use a channel ID (`C...`) to post there, or a user group ID (`S...`) to mention the group in `deploy_channel`. Falls back to posting to `deploy_channel` without a mention if unset |
 
 ## Behavior
 
-### Tag Matching (in poller, before enqueue)
+### Tag Matching
 
-On each SQS message:
-1. Parse the EventBridge envelope; extract `repository-name` and `image-tag`.
-2. Find the app config whose `ecr_repo` contains `repository-name` (suffix match).
-3. Validate `image-tag` against `tag_pattern`. Discard if no match (build intermediates, `latest`, cache layers, etc.).
-4. Check deploy lock (`IsLocked`). If already locked, discard and delete the SQS message — no point queuing a deploy that will immediately be rejected.
-5. Enqueue an `ECRPushEvent` to Redis (via buffer). Delete the SQS message only after successful enqueue.
+On each SQS message, the poller:
+1. Parses the EventBridge envelope and extracts `repository-name` and
+   `image-tag`.
+2. Finds the app config whose `ecr_repo` contains `repository-name` (suffix
+   match).
+3. Validates `image-tag` against `tag_pattern`. Discards if no match (build
+   intermediates, `latest`, cache layers, etc.).
+4. Checks the deploy lock. If already locked, discards and deletes the SQS
+   message -- there is no point queuing a deploy that will immediately be
+   rejected.
+5. Enqueues the event to Redis (via the buffer). Deletes the SQS message only
+   after successful enqueue.
 
 ### Worker Handler
 
-`bot.handleECRPush(ctx, evt ECRPushEvent)`:
-1. Re-check lock (race: another deploy may have started since enqueue). Bail if locked.
-2. Apply prod auto-deploy guard — if the app is prod and `allow_prod_auto_deploy` is false, force `auto_deploy = false`.
-3. Create GitHub PR (same as user-initiated).
-4. If `auto_deploy` is false: post Slack notification to `auto_deploy_approver_group` (or `deploy_channel`) requesting approval. Approval/rejection from here is identical to the existing interactive button flow.
-5. If `auto_deploy` is true: immediately merge the PR, post completion notification to `deploy_channel`, write audit log entry.
+When the worker processes an ECR push event:
+1. Re-checks the lock (another deploy may have started between enqueue and
+   processing). Bails if locked.
+2. Applies the prod auto-deploy guard -- if the app is prod and
+   `allow_prod_auto_deploy` is false, treats the deploy as approval-required
+   regardless of the app's `auto_deploy` setting.
+3. Creates a GitHub PR (same as user-initiated deploys).
+4. If `auto_deploy` is false: posts a Slack notification requesting approval.
+5. If `auto_deploy` is true: immediately merges the PR and posts a completion
+   notification.
 
 ### Approval-Required Path (default)
 
-Slack message posted to `auto_deploy_approver_group`:
+Slack message posted to `auto_deploy_approver_group` (or `deploy_channel`):
+
 > New image `myapp:v1.2.3` detected in ECR. Deploy PR #456 is ready for review. [Approve] [Reject]
 
-Requester identity uses a sentinel: Slack user ID `""`, display name `"ECR"`, so audit logs and Slack messages are clearly attributed as bot-initiated.
+Requester identity uses a sentinel (display name `"ECR"`), so audit logs and
+Slack messages are clearly attributed as bot-initiated. Approval and rejection
+from here follow the same interactive button flow as user-initiated deploys.
 
 ### Auto-Deploy Path (`auto_deploy: true`)
 
-1. Bot creates a GitHub PR.
-2. Bot immediately merges the PR (reuses the existing `approveDeploy` logic with the ECR sentinel as approver identity).
+1. The bot creates a GitHub PR.
+2. The bot immediately merges the PR.
 3. Posts to `deploy_channel`: `Auto-deployed myapp:v1.2.3 (ECR push). PR #456 merged.`
-4. Audit log: `trigger: "ecr-push"`, `auto_deploy: true`.
+4. Audit log entry includes `trigger: "ecr-push"`, `auto_deploy: true`.
 
 ### Production Guard
 
-On startup, for each app where `environment` is `"prod"` or `"production"` and `auto_deploy: true`:
-- If `allow_prod_auto_deploy` is false: log `WARN` and treat as approval-required at runtime.
-- If `allow_prod_auto_deploy` is true: log `INFO` listing all prod apps with auto-deploy active. Also written to audit log.
+On startup, for each app where `environment` is `"prod"` or `"production"`
+and `auto_deploy: true`:
+- If `allow_prod_auto_deploy` is false: logs `WARN` and treats the app as
+  approval-required at runtime.
+- If `allow_prod_auto_deploy` is true: logs `INFO` listing all prod apps with
+  auto-deploy active. Also written to the audit log.
 
 ### No-Op Pushes
 
 An ECR push may fire for a tag that is already the current value in
 kustomization.yaml (e.g. image re-pushed, or a manual deploy already applied
-it). `CreateDeployPR` detects this before writing to GitHub and returns
-`ErrNoChange`. The poller handler treats this identically to a lock-held
-discard: release lock, log, post a brief notice to the deploy channel. No PR
-is created, no Redis entry is written.
+it). The bot detects this before writing to GitHub. The deploy lock is
+released, a brief notice is posted to the deploy channel, and no PR is
+created.
 
-See [no-op-deploy-handling.md](no-op-deploy-handling.md) for the full design,
-including the user-initiated path and test plan.
+See [no-op-deploy-handling.md](no-op-deploy-handling.md) for full details.
 
 ### Duplicate / Rapid Push Protection
 
-The existing per-app deploy lock covers the primary case. The poller discards events when the lock is already held, so rapid successive pushes for the same app result in at most one pending deploy at a time.
+The existing per-app deploy lock covers the primary case. The poller discards
+events when the lock is already held, so rapid successive pushes for the same
+app result in at most one pending deploy at a time.
 
 ## Audit Logging
 
@@ -177,53 +180,6 @@ Startup listing of prod auto-deploy apps:
 
 ### Audit Log Fallback
 
-Currently the audit logger requires an S3 bucket. Change: if `aws.audit_bucket` is empty, the audit logger writes structured log lines via `zap` at `INFO` level instead of sending to S3. Makes audit logging usable in dev/staging without AWS infrastructure.
-
-Implementation: extract a `Logger` interface from the existing S3 implementation; provide a `zapLogger` that writes to the existing zap instance. `audit.NewLogger` returns the zap implementation when `audit_bucket` is empty.
-
-## New / Modified Packages
-
-| Path | Change | Purpose |
-|---|---|---|
-| `internal/ecrpoller/poller.go` | New | SQS long-poll loop; parses EventBridge ECR events, matches app config, validates tag, checks lock, enqueues to Redis via buffer |
-| `internal/ecrpoller/event.go` | New | EventBridge `ECR Image Action` event struct |
-| `internal/queue/ecrevent.go` | New | `ECRPushEvent` struct and `EventTypeECRPush` constant |
-| `internal/queue/queue.go` | Modify | Add `EventTypeECRPush` case to `decode()` |
-| `internal/bot/ecr.go` | New | `handleECRPush` method, prod-guard logic, auto-deploy merge path, Slack notifications |
-| `internal/bot/handler.go` | Modify | Dispatch `EventTypeECRPush` to `handleECRPush` |
-| `internal/audit/logger.go` | Modify | Extract interface; add `zapLogger` fallback |
-| `cmd/bot/main.go` | Modify | Start ecrpoller under leader context; startup prod-guard logging |
-
-The `ecrpoller` uses the existing `buffer.Buffer` for Redis backpressure, taking the same `*redis.Client` the rest of the process uses.
-
-## IAM Additions
-
-The bot role needs:
-
-```json
-{
-  "Sid": "ReceiveECREvents",
-  "Effect": "Allow",
-  "Action": [
-    "sqs:ReceiveMessage",
-    "sqs:DeleteMessage",
-    "sqs:GetQueueAttributes"
-  ],
-  "Resource": "arn:aws:sqs:<region>:<account>:deploy-bot-ecr-events"
-}
-```
-
-EventBridge sends to SQS via a queue resource policy (not the bot IAM policy). The SQS message visibility timeout should be set to at least the buffer's maximum retry window (e.g. 5 minutes) so that a Redis outage does not cause SQS to redeliver the message to a second leader before the first has buffered it.
-
-## Implementation Order
-
-1. **Audit log fallback** — extract `Logger` interface; add `zapLogger`; update `audit.NewLogger`. No config changes, no caller changes.
-2. **Queue envelope** — add `ECRPushEvent` struct and `EventTypeECRPush` constant; add decode case in `queue.go`; add dispatch case in `bot.HandleEvent`.
-3. **Config additions** — `AutoDeploy`, `AutoDeployApproverGroup` on `AppConfig`; `AllowProdAutoDeploy` on `DeploymentConfig`; `ECREvents` struct on top-level config.
-4. **Startup prod-guard logging** — iterate apps in `cmd/bot/main.go` after config load; log + audit.
-5. **`ecrpoller` package** — SQS poll loop, EventBridge envelope parsing, app/tag matching, lock check, enqueue via buffer.
-6. **`bot.handleECRPush`** — second lock check, prod guard, PR creation, auto-deploy or approval-request branch.
-7. **Slack notification templates** — approval-request message with Approve/Reject buttons; auto-deploy completion message.
-8. **Wire into `cmd/bot/main.go`** — construct buffer for poller, start poller goroutine under leader context.
-9. **Unit tests** — poller tag matching/filtering, `handleECRPush` with mocked store/github/slack; audit fallback.
-10. **Integration test** — call poller's enqueue path directly (no real SQS); verify PR creation and auto-deploy/approval flow end-to-end.
+If `aws.audit_bucket` is empty, the audit logger writes structured log lines
+via zap at `INFO` level instead of sending to S3. This makes audit logging
+usable in dev/staging without AWS infrastructure.
