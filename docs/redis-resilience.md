@@ -9,7 +9,7 @@ will exit. There is no degraded mode; Redis is not optional.
 | Data | Key pattern | TTL |
 |---|---|---|
 | Pending deployments | `pending:<pr_number>` | `stale_duration` (default 2h) |
-| Per-app deploy locks | `lock:<app>` | `lock_ttl` (default 5m) |
+| Per-app deploy locks | `lock:<env>/<app>` | `lock_ttl` (default 5m) |
 | System locks (sweeper, reconcile) | `syslock:<name>` | Varies |
 | Event stream | `slack:events` | MAXLEN ~10,000 entries |
 | Consumer group | (stream metadata) | Permanent until deleted |
@@ -82,18 +82,15 @@ of the concurrent requests so they can coordinate before re-requesting.
 > PRs (approved, rejected, cancelled, expired) retain only the `deploy-bot`
 > audit label and are never surfaced by reconciliation.
 
-### 4. History list
+### 4. History list reconstruction
 
-The deployment history (`/deploy history`) is empty after a flush. It is not
-automatically reconstructed. History can be manually recovered from git:
-
-```bash
-git log --oneline -- path/to/kustomization.yaml
-# or for full diffs:
-git log -p -- path/to/kustomization.yaml
-```
-
-Each deploy commit message follows the format `deploy(<app>): update image tag to <tag>`.
+The deployment history (`/deploy history`) is empty after a flush. On startup,
+the worker detects the empty history list and asynchronously reconstructs it
+from GitHub commit history (`ReconstructHistory`). It scans deploy commits
+for each configured app's kustomize path, extracts app/tag/environment from
+the commit message format `deploy(<env>/<app>): update image tag to <tag>`,
+and populates history entries. Reconstructed entries are missing requester IDs
+and PR links since those are not derivable from commit messages alone.
 
 ### Optional periodic reconciliation
 
