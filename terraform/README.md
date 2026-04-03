@@ -68,7 +68,7 @@ Both IAM roles are created and bound to their respective Kubernetes service acco
 
 ```hcl
 module "deploy_bot" {
-  source = "./terraform"
+  source = "github.com/ezubriski/deploy-bot//terraform"
 
   region     = "us-east-1"
   account_id = "123456789012"
@@ -109,7 +109,7 @@ Omit the OIDC variables. The module creates only the managed policies. Attach th
 
 ```hcl
 module "deploy_bot" {
-  source = "./terraform"
+  source = "github.com/ezubriski/deploy-bot//terraform"
 
   region     = "us-east-1"
   account_id = "123456789012"
@@ -140,7 +140,7 @@ Enable ECR push-triggered deploys by setting `ecr_events_enabled = true`. This c
 
 ```hcl
 module "deploy_bot" {
-  source = "./terraform"
+  source = "github.com/ezubriski/deploy-bot//terraform"
 
   region     = "us-east-1"
   account_id = "123456789012"

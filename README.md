@@ -118,7 +118,7 @@ Use the Terraform module in `terraform/`:
 
 ```hcl
 module "deploy_bot" {
-  source = "./terraform"
+  source = "github.com/ezubriski/deploy-bot//terraform"
 
   region                = "us-east-1"
   account_id            = "123456789012"
