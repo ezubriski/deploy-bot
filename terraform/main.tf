@@ -27,9 +27,10 @@ data "aws_iam_policy_document" "assume_role" {
 }
 
 resource "aws_iam_role" "bot" {
-  name               = var.name
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
-  tags               = var.tags
+  name                 = var.name
+  assume_role_policy   = data.aws_iam_policy_document.assume_role.json
+  permissions_boundary = var.permissions_boundary != "" ? var.permissions_boundary : null
+  tags                 = var.tags
 }
 
 # --- Secrets Manager ---

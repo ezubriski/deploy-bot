@@ -60,6 +60,12 @@ variable "ecr_events_visibility_timeout" {
   default     = 300
 }
 
+variable "permissions_boundary" {
+  description = "ARN of an IAM permissions boundary to attach to the bot role. Leave empty for no boundary"
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)
