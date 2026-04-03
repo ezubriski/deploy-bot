@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/slack-go/slack"
+	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
 
@@ -20,6 +22,8 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/ecrpoller"
 	"github.com/ezubriski/deploy-bot/internal/queue"
+	"github.com/ezubriski/deploy-bot/internal/reposcanner"
+	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
@@ -100,6 +104,25 @@ func main() {
 		go poller.Run(ctx)
 	}
 
+	// Start repo scanner if configured.
+	if cfg.RepoDiscovery.Enabled {
+		slackMaxRetries, slackRetryWait := cfg.Slack.RateLimitConfig()
+		scannerSlack := slackclient.New(slackClient, slackMaxRetries, slackRetryWait, log)
+		var cmWriter reposcanner.ConfigMapWriter
+		if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+			w, err := reposcanner.NewK8sConfigMapWriter()
+			if err != nil {
+				log.Fatal("init configmap writer", zap.Error(err))
+			}
+			cmWriter = w
+		} else {
+			log.Warn("reposcanner: not running in Kubernetes, ConfigMap writes disabled")
+		}
+		cfgHolder := config.NewHolder(cfg, configPath)
+		scanner := reposcanner.NewScanner(secrets.GitHubToken, cfg.GitHub.Org, scannerSlack, cmWriter, cfgHolder, log)
+		go scanner.Run(ctx)
+	}
+
 	sm := socketmode.New(slackClient)
 
 	log.Info("receiver starting")
@@ -143,6 +166,15 @@ func main() {
 				} else {
 					enqueueAndAck(ctx, sm, rdb, evtBuffer, evt, log)
 				}
+
+			case socketmode.EventTypeEventsAPI:
+				eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
+				if !ok {
+					sm.Ack(*evt.Request)
+					continue
+				}
+				sm.Ack(*evt.Request)
+				handleEventsAPI(ctx, rdb, evtBuffer, eventsAPIEvent, log)
 
 			case socketmode.EventTypeConnecting:
 				log.Info("connecting to Slack")
@@ -226,4 +258,42 @@ func validateAndDispatch(
 	}
 
 	enqueueAndAck(ctx, sm, rdb, buf, evt, log)
+}
+
+// handleEventsAPI processes Events API events received via socket mode.
+// Currently only app_mention is handled.
+func handleEventsAPI(ctx context.Context, rdb *redis.Client, buf *buffer.Buffer, apiEvent slackevents.EventsAPIEvent, log *zap.Logger) {
+	switch apiEvent.InnerEvent.Type {
+	case string(slackevents.AppMention):
+		mention, ok := apiEvent.InnerEvent.Data.(*slackevents.AppMentionEvent)
+		if !ok {
+			return
+		}
+		// Strip the <@BOTID> prefix from the text.
+		text := stripMentionPrefix(mention.Text)
+
+		evt := queue.NewAppMentionEvent(queue.AppMentionEvent{
+			UserID:   mention.User,
+			Channel:  mention.Channel,
+			Text:     text,
+			ThreadTS: mention.ThreadTimeStamp,
+		})
+		if err := queue.Enqueue(ctx, rdb, evt); err != nil {
+			log.Error("enqueue mention failed, buffering", zap.Error(err))
+			buf.Add(evt)
+		}
+
+	default:
+		log.Debug("receiver: unhandled events API type", zap.String("type", apiEvent.InnerEvent.Type))
+	}
+}
+
+// stripMentionPrefix removes the leading <@USERID> mention from the text,
+// returning the remainder trimmed of whitespace.
+func stripMentionPrefix(text string) string {
+	// Slack formats mentions as "<@U12345> command args"
+	if idx := strings.Index(text, ">"); idx >= 0 && strings.HasPrefix(text, "<@") {
+		return strings.TrimSpace(text[idx+1:])
+	}
+	return strings.TrimSpace(text)
 }

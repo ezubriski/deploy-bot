@@ -24,8 +24,9 @@ func Watch(ctx context.Context, h *Holder, interval time.Duration, onReload func
 		interval = defaultPollInterval
 	}
 
-	// Capture initial mtime so the first poll doesn't immediately reload.
+	// Capture initial mtimes so the first poll doesn't immediately reload.
 	lastMod := mtimeOrZero(h.path)
+	lastDiscoveredMod := mtimeOrZero(h.discoveredPath)
 
 	sighup := make(chan os.Signal, 1)
 	signal.Notify(sighup, syscall.SIGHUP)
@@ -42,23 +43,34 @@ func Watch(ctx context.Context, h *Holder, interval time.Duration, onReload func
 				return
 
 			case <-sighup:
-				reload(h, "SIGHUP", &lastMod, onReload, log)
+				reload(h, "SIGHUP", &lastMod, &lastDiscoveredMod, onReload, log)
 
 			case <-ticker.C:
+				changed := false
+
 				mod := mtimeOrZero(h.path)
 				if mod.IsZero() {
 					log.Warn("config watcher: could not stat config file", zap.String("path", h.path))
-					continue
+				} else if mod.After(lastMod) {
+					changed = true
 				}
-				if mod.After(lastMod) {
-					reload(h, "file changed", &lastMod, onReload, log)
+
+				if h.discoveredPath != "" {
+					dmod := mtimeOrZero(h.discoveredPath)
+					if !dmod.IsZero() && dmod.After(lastDiscoveredMod) {
+						changed = true
+					}
+				}
+
+				if changed {
+					reload(h, "file changed", &lastMod, &lastDiscoveredMod, onReload, log)
 				}
 			}
 		}
 	}()
 }
 
-func reload(h *Holder, reason string, lastMod *time.Time, onReload func(*Config), log *zap.Logger) {
+func reload(h *Holder, reason string, lastMod, lastDiscoveredMod *time.Time, onReload func(*Config), log *zap.Logger) {
 	newCfg, err := h.Reload()
 	if err != nil {
 		log.Warn("config reload failed, keeping current config",
@@ -67,9 +79,12 @@ func reload(h *Holder, reason string, lastMod *time.Time, onReload func(*Config)
 			zap.Error(err))
 		return
 	}
-	// Update tracked mtime after a successful reload so we don't re-fire
+	// Update tracked mtimes after a successful reload so we don't re-fire
 	// on the same file version.
 	*lastMod = mtimeOrZero(h.path)
+	if h.discoveredPath != "" {
+		*lastDiscoveredMod = mtimeOrZero(h.discoveredPath)
+	}
 	log.Info("config reloaded", zap.String("reason", reason), zap.String("path", h.path))
 	if onReload != nil {
 		onReload(newCfg)

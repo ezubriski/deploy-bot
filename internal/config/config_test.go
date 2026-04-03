@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -275,4 +276,192 @@ func TestTokenPrefix(t *testing.T) {
 			t.Errorf("tokenPrefix(%q) = %q, want %q", tc.input, got, tc.want)
 		}
 	}
+}
+
+func TestMergeApps_NoDuplicates(t *testing.T) {
+	primary := []AppConfig{
+		{App: "a", Environment: "dev"},
+		{App: "b", Environment: "prod"},
+	}
+	discovered := []DiscoveredAppConfig{
+		{AppConfig: AppConfig{App: "c", Environment: "dev"}, SourceRepo: "org/c"},
+		{AppConfig: AppConfig{App: "d", Environment: "prod"}, SourceRepo: "org/d"},
+	}
+
+	merged := MergeApps(primary, discovered)
+	if len(merged) != 4 {
+		t.Fatalf("expected 4 apps, got %d", len(merged))
+	}
+}
+
+func TestMergeApps_OperatorWins(t *testing.T) {
+	primary := []AppConfig{
+		{App: "myapp", Environment: "prod", KustomizePath: "operator-path"},
+	}
+	discovered := []DiscoveredAppConfig{
+		{AppConfig: AppConfig{App: "myapp", Environment: "prod", KustomizePath: "repo-path"}, SourceRepo: "org/myapp"},
+		{AppConfig: AppConfig{App: "myapp", Environment: "dev", KustomizePath: "repo-path-dev"}, SourceRepo: "org/myapp"},
+	}
+
+	merged := MergeApps(primary, discovered)
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 apps, got %d", len(merged))
+	}
+	// Operator's entry should be kept for prod.
+	if merged[0].KustomizePath != "operator-path" {
+		t.Errorf("expected operator path for prod, got %q", merged[0].KustomizePath)
+	}
+	// Dev should be added from discovered.
+	if merged[1].KustomizePath != "repo-path-dev" {
+		t.Errorf("expected repo path for dev, got %q", merged[1].KustomizePath)
+	}
+}
+
+func TestMergeApps_DeduplicatesDiscovered(t *testing.T) {
+	primary := []AppConfig{}
+	discovered := []DiscoveredAppConfig{
+		{AppConfig: AppConfig{App: "myapp", Environment: "dev"}, SourceRepo: "org/a"},
+		{AppConfig: AppConfig{App: "myapp", Environment: "dev"}, SourceRepo: "org/b"},
+	}
+
+	merged := MergeApps(primary, discovered)
+	if len(merged) != 1 {
+		t.Fatalf("expected 1 app (first wins among discovered), got %d", len(merged))
+	}
+}
+
+func TestLoadWithDiscovered_NoFile(t *testing.T) {
+	dir := t.TempDir()
+	primaryPath := dir + "/config.json"
+	writeFile(t, primaryPath, `{"deployment":{"merge_method":"squash"},"apps":[{"app":"a","environment":"dev"}]}`)
+
+	cfg, err := LoadWithDiscovered(primaryPath, dir+"/nonexistent.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(cfg.Apps))
+	}
+}
+
+func TestLoadWithDiscovered_MergesApps(t *testing.T) {
+	dir := t.TempDir()
+	primaryPath := dir + "/config.json"
+	discoveredPath := dir + "/discovered.json"
+
+	writeFile(t, primaryPath, `{"deployment":{"merge_method":"squash"},"apps":[{"app":"a","environment":"dev"}]}`)
+	writeFile(t, discoveredPath, `{"apps":[{"app":"b","environment":"prod","kustomize_path":"p","ecr_repo":"r","_source_repo":"org/b"}]}`)
+
+	cfg, err := LoadWithDiscovered(primaryPath, discoveredPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Apps) != 2 {
+		t.Fatalf("expected 2 apps, got %d", len(cfg.Apps))
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepoDiscoveryDefaults(t *testing.T) {
+	rd := &RepoDiscoveryConfig{}
+	if rd.PollIntervalDuration() != 5*time.Minute {
+		t.Errorf("PollIntervalDuration = %v, want 5m", rd.PollIntervalDuration())
+	}
+	if rd.ConfigFileName() != ".deploy-bot.json" {
+		t.Errorf("ConfigFileName = %q, want .deploy-bot.json", rd.ConfigFileName())
+	}
+	if rd.DiscoveredFilePath() != "/etc/deploy-bot/discovered.json" {
+		t.Errorf("DiscoveredFilePath = %q", rd.DiscoveredFilePath())
+	}
+	if rd.ConfigMapTargetName() != "deploy-bot-discovered" {
+		t.Errorf("ConfigMapTargetName = %q", rd.ConfigMapTargetName())
+	}
+	if rd.RateLimitFloorValue() != 500 {
+		t.Errorf("RateLimitFloorValue = %d, want 500", rd.RateLimitFloorValue())
+	}
+}
+
+func TestAppByECRRepo(t *testing.T) {
+	cfg := &Config{
+		Apps: []AppConfig{
+			{App: "myapp", Environment: "dev", ECRRepo: "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp"},
+		},
+	}
+
+	t.Run("suffix match", func(t *testing.T) {
+		app, ok := cfg.AppByECRRepo("myapp")
+		if !ok || app.App != "myapp" {
+			t.Errorf("expected match, got ok=%v app=%v", ok, app)
+		}
+	})
+
+	t.Run("exact match", func(t *testing.T) {
+		app, ok := cfg.AppByECRRepo("123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp")
+		if !ok || app.App != "myapp" {
+			t.Errorf("expected match, got ok=%v app=%v", ok, app)
+		}
+	})
+
+	t.Run("no match", func(t *testing.T) {
+		_, ok := cfg.AppByECRRepo("other-app")
+		if ok {
+			t.Error("expected no match")
+		}
+	})
+}
+
+func TestIsProd(t *testing.T) {
+	tests := []struct {
+		env  string
+		want bool
+	}{
+		{"prod", true},
+		{"production", true},
+		{"PROD", true},
+		{"Production", true},
+		{"dev", false},
+		{"staging", false},
+	}
+	for _, tt := range tests {
+		a := &AppConfig{Environment: tt.env}
+		if got := a.IsProd(); got != tt.want {
+			t.Errorf("IsProd(%q) = %v, want %v", tt.env, got, tt.want)
+		}
+	}
+}
+
+func TestEffectiveAutoDeploy(t *testing.T) {
+	t.Run("auto_deploy false", func(t *testing.T) {
+		a := &AppConfig{AutoDeploy: false}
+		if a.EffectiveAutoDeploy(true) {
+			t.Error("expected false when auto_deploy is false")
+		}
+	})
+
+	t.Run("prod blocked by guard", func(t *testing.T) {
+		a := &AppConfig{AutoDeploy: true, Environment: "prod"}
+		if a.EffectiveAutoDeploy(false) {
+			t.Error("expected false for prod when guard is off")
+		}
+	})
+
+	t.Run("prod allowed by guard", func(t *testing.T) {
+		a := &AppConfig{AutoDeploy: true, Environment: "prod"}
+		if !a.EffectiveAutoDeploy(true) {
+			t.Error("expected true for prod when guard is on")
+		}
+	})
+
+	t.Run("non-prod always allowed", func(t *testing.T) {
+		a := &AppConfig{AutoDeploy: true, Environment: "dev"}
+		if !a.EffectiveAutoDeploy(false) {
+			t.Error("expected true for non-prod even when guard is off")
+		}
+	})
 }

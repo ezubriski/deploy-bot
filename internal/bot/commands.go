@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/audit"
+	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
@@ -46,6 +47,12 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 		b.handleNudge(ctx, cmd, parts[1])
 	case parts[0] == "rollback" && len(parts) >= 2:
 		b.handleRollback(ctx, cmd, parts[1])
+	case parts[0] == "apps":
+		b.handleApps(ctx, cmd)
+	case parts[0] == "conflicts":
+		b.handleConflicts(ctx, cmd)
+	case parts[0] == "help":
+		b.handleSlashHelp(ctx, cmd)
 	default:
 		// Treat first arg as app name
 		b.openDeployModal(ctx, cmd, parts[0], "")
@@ -339,7 +346,7 @@ func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appNam
 
 func (b *Bot) handleTagList(ctx context.Context, cmd slack.SlashCommand, appName string) {
 	if _, ok := b.cfg.Load().AppByName(appName); !ok {
-		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Unknown app *%s*.", appName))
+		b.postEphemeralCommand(ctx, cmd, b.unknownAppMessage(appName))
 		return
 	}
 	tags := b.ecrCache.Tags(appName, 20)
@@ -358,7 +365,7 @@ func (b *Bot) handleTagList(ctx context.Context, cmd slack.SlashCommand, appName
 
 func (b *Bot) handleTagVerify(ctx context.Context, cmd slack.SlashCommand, appName, tag string) {
 	if _, ok := b.cfg.Load().AppByName(appName); !ok {
-		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Unknown app *%s*.", appName))
+		b.postEphemeralCommand(ctx, cmd, b.unknownAppMessage(appName))
 		return
 	}
 	valid, err := b.ecrCache.ValidateTag(ctx, appName, tag)
@@ -373,9 +380,89 @@ func (b *Bot) handleTagVerify(ctx context.Context, cmd slack.SlashCommand, appNa
 	}
 }
 
+func (b *Bot) handleApps(ctx context.Context, cmd slack.SlashCommand) {
+	cfg := b.cfg.Load()
+	if len(cfg.Apps) == 0 {
+		b.postEphemeralCommand(ctx, cmd, "No apps configured.")
+		return
+	}
+
+	var lines []string
+	for _, app := range cfg.Apps {
+		source := "operator"
+		if app.SourceRepo != "" {
+			source = app.SourceRepo
+		}
+		line := fmt.Sprintf("• *%s* (`%s`) — source: `%s`", app.App, app.Environment, source)
+		if app.AutoDeploy {
+			line += " — auto-deploy"
+		}
+		lines = append(lines, line)
+	}
+
+	b.postEphemeralCommand(ctx, cmd, "*Configured Apps:*\n"+strings.Join(lines, "\n"))
+}
+
+func (b *Bot) handleConflicts(ctx context.Context, cmd slack.SlashCommand) {
+	h := b.cfg
+	conflicts, err := config.LoadConflicts(h.Path(), h.DiscoveredPath())
+	if err != nil {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to check conflicts: %v", err))
+		return
+	}
+
+	if len(conflicts) == 0 {
+		b.postEphemeralCommand(ctx, cmd, "No config conflicts.")
+		return
+	}
+
+	var lines []string
+	for _, c := range conflicts {
+		lines = append(lines, fmt.Sprintf(
+			"• `%s` (`%s`) — repo `%s` blocked by operator config",
+			c.App, c.Env, c.SourceRepo,
+		))
+	}
+	b.postEphemeralCommand(ctx, cmd,
+		"*Config Conflicts:*\nThe following repo-sourced apps are blocked by operator config. "+
+			"Remove them from operator config for the repo definitions to take effect.\n"+
+			strings.Join(lines, "\n"),
+	)
+}
+
+func (b *Bot) handleSlashHelp(ctx context.Context, cmd slack.SlashCommand) {
+	b.postEphemeralCommand(ctx, cmd, helpText(cmd.Command))
+}
+
 func (b *Bot) postEphemeralCommand(ctx context.Context, cmd slack.SlashCommand, text string) {
 	_, err := b.slack.PostEphemeralContext(ctx, cmd.ChannelID, cmd.UserID, slack.MsgOptionText(text, false))
 	if err != nil {
 		b.log.Error("post ephemeral", zap.Error(err))
 	}
+}
+
+// helpText returns the full help message. cmdName is the slash command name
+// (e.g. "/deploy") used to make examples match the installation.
+//
+// App names in this bot include the environment (e.g. `myapp-dev`,
+// `myapp-prod`). Use `apps` to see what's configured.
+func helpText(cmdName string) string {
+	return fmt.Sprintf(`*%s commands*
+App names include the environment suffix (e.g. `+"`myapp-dev`"+`, `+"`myapp-prod`"+`). Use `+"`apps`"+` to list them.
+
+• `+"`%s`"+`  — open the deploy modal
+• `+"`%s <app-env>`"+`  — open the deploy modal pre-selected to an app
+• `+"`%s status`"+`  — list pending deployments
+• `+"`%s history [app-env]`"+`  — show recent completed deploys
+• `+"`%s apps`"+`  — list all configured apps and their source
+• `+"`%s conflicts`"+`  — list repo-sourced apps blocked by operator config
+• `+"`%s tags <app-env>`"+`  — list recent ECR tags
+• `+"`%s tags <app-env> <tag>`"+`  — check if a specific tag exists
+• `+"`%s cancel <pr>`"+`  — cancel your own pending deployment
+• `+"`%s nudge <pr>`"+`  — remind the approver
+• `+"`%s rollback <app-env>`"+`  — deploy the previously merged tag
+• `+"`%s help`"+`  — show this message`,
+		cmdName,
+		cmdName, cmdName, cmdName, cmdName, cmdName,
+		cmdName, cmdName, cmdName, cmdName, cmdName, cmdName, cmdName)
 }

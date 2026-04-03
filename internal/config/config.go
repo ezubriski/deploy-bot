@@ -16,12 +16,69 @@ import (
 )
 
 type Config struct {
-	GitHub     GitHubConfig     `json:"github"`
-	Slack      SlackConfig      `json:"slack"`
-	Deployment DeploymentConfig `json:"deployment"`
-	AWS        AWSConfig        `json:"aws"`
-	ECREvents  ECREventsConfig  `json:"ecr_events,omitempty"`
-	Apps       []AppConfig      `json:"apps"`
+	GitHub        GitHubConfig        `json:"github"`
+	Slack         SlackConfig         `json:"slack"`
+	Deployment    DeploymentConfig    `json:"deployment"`
+	AWS           AWSConfig           `json:"aws"`
+	ECREvents     ECREventsConfig     `json:"ecr_events,omitempty"`
+	RepoDiscovery RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
+	Apps          []AppConfig         `json:"apps"`
+}
+
+// RepoDiscoveryConfig holds settings for repo-sourced app discovery.
+// The feature is disabled when Enabled is false (the default).
+type RepoDiscoveryConfig struct {
+	Enabled            bool   `json:"enabled,omitempty"`
+	PollInterval       string `json:"poll_interval,omitempty"`
+	ConfigFile         string `json:"config_file,omitempty"`
+	RepoPrefix         string `json:"repo_prefix,omitempty"`
+	DiscoveredPath     string `json:"discovered_path,omitempty"`
+	ConfigMapName      string `json:"configmap_name,omitempty"`
+	ConfigMapNamespace string `json:"configmap_namespace,omitempty"`
+	RateLimitFloor     int    `json:"rate_limit_floor,omitempty"`
+	WarnChannel        string `json:"warn_channel,omitempty"`
+}
+
+// PollIntervalDuration returns the parsed poll interval, defaulting to 5m.
+func (r *RepoDiscoveryConfig) PollIntervalDuration() time.Duration {
+	if r.PollInterval != "" {
+		if d, err := time.ParseDuration(r.PollInterval); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 5 * time.Minute
+}
+
+// ConfigFileName returns the config file name to look for, defaulting to ".deploy-bot.json".
+func (r *RepoDiscoveryConfig) ConfigFileName() string {
+	if r.ConfigFile != "" {
+		return r.ConfigFile
+	}
+	return ".deploy-bot.json"
+}
+
+// DiscoveredFilePath returns the path for discovered apps, defaulting to "/etc/deploy-bot/discovered.json".
+func (r *RepoDiscoveryConfig) DiscoveredFilePath() string {
+	if r.DiscoveredPath != "" {
+		return r.DiscoveredPath
+	}
+	return "/etc/deploy-bot/discovered.json"
+}
+
+// ConfigMapTargetName returns the ConfigMap name, defaulting to "deploy-bot-discovered".
+func (r *RepoDiscoveryConfig) ConfigMapTargetName() string {
+	if r.ConfigMapName != "" {
+		return r.ConfigMapName
+	}
+	return "deploy-bot-discovered"
+}
+
+// RateLimitFloorValue returns the rate limit floor, defaulting to 500.
+func (r *RepoDiscoveryConfig) RateLimitFloorValue() int {
+	if r.RateLimitFloor > 0 {
+		return r.RateLimitFloor
+	}
+	return 500
 }
 
 // ECREventsConfig holds settings for ECR push-triggered deploys.
@@ -160,6 +217,10 @@ type AppConfig struct {
 	// a user group ID (S…) to @mention the group in the deploy channel.
 	AutoDeployApproverGroup string `json:"auto_deploy_approver_group,omitempty"`
 
+	// SourceRepo is set only for repo-discovered apps (e.g. "org/myapp").
+	// Empty for operator-managed apps. Not serialized to the primary config.
+	SourceRepo string `json:"-"`
+
 	compiledPattern *regexp.Regexp
 }
 
@@ -229,6 +290,18 @@ func tokenPrefix(token string) string {
 	return token
 }
 
+// DiscoveredApps is the format of the discovered apps file written by the
+// repo scanner. Each entry includes a SourceRepo field for audit/debugging.
+type DiscoveredApps struct {
+	Apps []DiscoveredAppConfig `json:"apps"`
+}
+
+// DiscoveredAppConfig extends AppConfig with the source repository.
+type DiscoveredAppConfig struct {
+	AppConfig
+	SourceRepo string `json:"_source_repo,omitempty"`
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -247,6 +320,108 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	return &cfg, nil
+}
+
+// LoadWithDiscovered loads the primary config and merges in discovered apps
+// from discoveredPath. Operator-defined apps take precedence: any discovered
+// app whose (app, environment) pair already exists in the primary config is
+// silently skipped. If discoveredPath is empty or the file doesn't exist, only
+// the primary config is returned.
+func LoadWithDiscovered(path, discoveredPath string) (*Config, error) {
+	cfg, err := Load(path)
+	if err != nil {
+		return nil, err
+	}
+	if discoveredPath == "" {
+		return cfg, nil
+	}
+	data, err := os.ReadFile(discoveredPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return nil, fmt.Errorf("read discovered apps: %w", err)
+	}
+	if len(data) == 0 {
+		return cfg, nil
+	}
+	var discovered DiscoveredApps
+	if err := json.Unmarshal(data, &discovered); err != nil {
+		return nil, fmt.Errorf("parse discovered apps: %w", err)
+	}
+	cfg.Apps = MergeApps(cfg.Apps, discovered.Apps)
+	return cfg, nil
+}
+
+// Conflict describes a repo-sourced app blocked by an operator-managed entry.
+type Conflict struct {
+	App        string
+	Env        string
+	SourceRepo string
+}
+
+// LoadConflicts reads the discovered file and returns any entries whose
+// (app, environment) pair collides with the primary config.
+func LoadConflicts(primaryPath, discoveredPath string) ([]Conflict, error) {
+	if discoveredPath == "" {
+		return nil, nil
+	}
+	primary, err := Load(primaryPath)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(discoveredPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var discovered DiscoveredApps
+	if err := json.Unmarshal(data, &discovered); err != nil {
+		return nil, err
+	}
+	operatorApps := make(map[string]struct{}, len(primary.Apps))
+	for _, a := range primary.Apps {
+		operatorApps[a.App+"\x00"+a.Environment] = struct{}{}
+	}
+	var conflicts []Conflict
+	for _, d := range discovered.Apps {
+		key := d.App + "\x00" + d.Environment
+		if _, ok := operatorApps[key]; ok {
+			conflicts = append(conflicts, Conflict{
+				App:        d.App,
+				Env:        d.Environment,
+				SourceRepo: d.SourceRepo,
+			})
+		}
+	}
+	return conflicts, nil
+}
+
+// MergeApps appends discovered apps to the primary list, skipping any whose
+// (app, environment) pair already exists in primary.
+func MergeApps(primary []AppConfig, discovered []DiscoveredAppConfig) []AppConfig {
+	existing := make(map[string]struct{}, len(primary))
+	for _, a := range primary {
+		existing[a.App+"\x00"+a.Environment] = struct{}{}
+	}
+	result := make([]AppConfig, len(primary))
+	copy(result, primary)
+	for _, d := range discovered {
+		key := d.App + "\x00" + d.Environment
+		if _, ok := existing[key]; ok {
+			continue
+		}
+		existing[key] = struct{}{}
+		app := d.AppConfig
+		app.SourceRepo = d.SourceRepo
+		result = append(result, app)
+	}
+	return result
 }
 
 func (c *Config) StaleDuration() (time.Duration, error) {

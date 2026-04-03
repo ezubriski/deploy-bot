@@ -99,6 +99,13 @@ func (b *Bot) HandleEvent(ctx context.Context, evt socketmode.Event) {
 			return
 		}
 		b.handleECRPush(ctx, ecrEvt)
+	case queue.EventTypeAppMention:
+		mention, ok := evt.Data.(queue.AppMentionEvent)
+		if !ok {
+			b.log.Error("bot: app_mention event has unexpected data type")
+			return
+		}
+		b.handleMention(ctx, mention)
 	default:
 		b.log.Warn("bot: unhandled event type", zap.String("type", string(evt.Type)))
 	}

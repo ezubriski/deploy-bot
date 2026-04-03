@@ -48,11 +48,21 @@ func main() {
 	if configPath == "" {
 		configPath = "/etc/deploy-bot/config.json"
 	}
-	initialCfg, err := config.Load(configPath)
+	// Load primary config first to check if repo discovery is enabled,
+	// then reload with discovered apps merged in.
+	primaryCfg, err := config.Load(configPath)
 	if err != nil {
 		log.Fatal("load config", zap.Error(err))
 	}
-	cfgHolder := config.NewHolder(initialCfg, configPath)
+	var discoveredPath string
+	if primaryCfg.RepoDiscovery.Enabled {
+		discoveredPath = primaryCfg.RepoDiscovery.DiscoveredFilePath()
+	}
+	initialCfg, err := config.LoadWithDiscovered(configPath, discoveredPath)
+	if err != nil {
+		log.Fatal("load config with discovered", zap.Error(err))
+	}
+	cfgHolder := config.NewHolderWithDiscovered(initialCfg, configPath, discoveredPath)
 
 	secrets, err := config.LoadSecrets(ctx, os.Getenv("AWS_SECRET_NAME"))
 	if err != nil {

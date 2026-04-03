@@ -79,6 +79,12 @@ func decode(msg redis.XMessage) (socketmode.Event, error) {
 			return socketmode.Event{}, fmt.Errorf("unmarshal ecr push event: %w", err)
 		}
 		evt.Data = ecr
+	case EventTypeAppMention:
+		var mention AppMentionEvent
+		if err := json.Unmarshal(env.Data, &mention); err != nil {
+			return socketmode.Event{}, fmt.Errorf("unmarshal app mention event: %w", err)
+		}
+		evt.Data = mention
 	default:
 		return socketmode.Event{}, fmt.Errorf("unsupported event type: %s", env.Type)
 	}
