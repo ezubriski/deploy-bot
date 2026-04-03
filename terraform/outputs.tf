@@ -1,11 +1,21 @@
 output "bot_role_arn" {
-  description = "IAM role ARN for the bot (worker) ServiceAccount annotation"
-  value       = aws_iam_role.bot.arn
+  description = "IAM role ARN for the bot (worker) ServiceAccount annotation (empty if IRSA not configured)"
+  value       = local.create_irsa_roles ? aws_iam_role.bot[0].arn : ""
 }
 
 output "receiver_role_arn" {
-  description = "IAM role ARN for the receiver ServiceAccount annotation"
-  value       = aws_iam_role.receiver.arn
+  description = "IAM role ARN for the receiver ServiceAccount annotation (empty if IRSA not configured)"
+  value       = local.create_irsa_roles ? aws_iam_role.receiver[0].arn : ""
+}
+
+output "bot_policy_arn" {
+  description = "IAM policy ARN for the bot (worker) component"
+  value       = aws_iam_policy.bot.arn
+}
+
+output "receiver_policy_arn" {
+  description = "IAM policy ARN for the receiver component"
+  value       = aws_iam_policy.receiver.arn
 }
 
 output "sqs_queue_url" {

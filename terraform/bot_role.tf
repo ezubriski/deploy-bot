@@ -1,7 +1,10 @@
 # IAM role for the bot (worker) component.
 # Needs: Secrets Manager, ECR read, S3 audit write.
+# Only created when IRSA (EKS OIDC) variables are provided.
 
 data "aws_iam_policy_document" "bot_assume_role" {
+  count = local.create_irsa_roles ? 1 : 0
+
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     effect  = "Allow"
@@ -26,8 +29,10 @@ data "aws_iam_policy_document" "bot_assume_role" {
 }
 
 resource "aws_iam_role" "bot" {
+  count = local.create_irsa_roles ? 1 : 0
+
   name                 = "${var.name}-bot"
-  assume_role_policy   = data.aws_iam_policy_document.bot_assume_role.json
+  assume_role_policy   = data.aws_iam_policy_document.bot_assume_role[0].json
   permissions_boundary = var.permissions_boundary != "" ? var.permissions_boundary : null
   tags                 = var.tags
 }
@@ -71,6 +76,8 @@ resource "aws_iam_policy" "bot" {
 }
 
 resource "aws_iam_role_policy_attachment" "bot" {
-  role       = aws_iam_role.bot.name
+  count = local.create_irsa_roles ? 1 : 0
+
+  role       = aws_iam_role.bot[0].name
   policy_arn = aws_iam_policy.bot.arn
 }

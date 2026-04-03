@@ -15,13 +15,15 @@ variable "account_id" {
 }
 
 variable "eks_oidc_provider_arn" {
-  description = "ARN of the EKS OIDC provider for IRSA"
+  description = "ARN of the EKS OIDC provider for IRSA. Leave empty to skip IAM role creation"
   type        = string
+  default     = ""
 }
 
 variable "eks_oidc_provider_url" {
-  description = "URL of the EKS OIDC provider (without https://)"
+  description = "URL of the EKS OIDC provider (without https://). Leave empty to skip IAM role creation"
   type        = string
+  default     = ""
 }
 
 variable "namespace" {

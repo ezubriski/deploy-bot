@@ -1,7 +1,10 @@
 # IAM role for the receiver component.
 # Needs: Secrets Manager, SQS read (when ECR events enabled).
+# Only created when IRSA (EKS OIDC) variables are provided.
 
 data "aws_iam_policy_document" "receiver_assume_role" {
+  count = local.create_irsa_roles ? 1 : 0
+
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     effect  = "Allow"
@@ -26,8 +29,10 @@ data "aws_iam_policy_document" "receiver_assume_role" {
 }
 
 resource "aws_iam_role" "receiver" {
+  count = local.create_irsa_roles ? 1 : 0
+
   name                 = "${var.name}-receiver"
-  assume_role_policy   = data.aws_iam_policy_document.receiver_assume_role.json
+  assume_role_policy   = data.aws_iam_policy_document.receiver_assume_role[0].json
   permissions_boundary = var.permissions_boundary != "" ? var.permissions_boundary : null
   tags                 = var.tags
 }
@@ -64,6 +69,8 @@ resource "aws_iam_policy" "receiver" {
 }
 
 resource "aws_iam_role_policy_attachment" "receiver" {
-  role       = aws_iam_role.receiver.name
+  count = local.create_irsa_roles ? 1 : 0
+
+  role       = aws_iam_role.receiver[0].name
   policy_arn = aws_iam_policy.receiver.arn
 }

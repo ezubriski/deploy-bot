@@ -7,6 +7,10 @@ terraform {
   }
 }
 
+locals {
+  create_irsa_roles = var.eks_oidc_provider_arn != "" && var.eks_oidc_provider_url != ""
+}
+
 # --- SQS queue for ECR push events (optional, shared infra) ---
 
 resource "aws_sqs_queue" "ecr_events" {
