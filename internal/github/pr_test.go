@@ -65,29 +65,6 @@ func TestUpdateNewTag(t *testing.T) {
 	}
 }
 
-// --- sanitizeBranchName ---
-
-func TestSanitizeBranchName(t *testing.T) {
-	cases := []struct {
-		tag  string
-		want string
-	}{
-		{"v1.2.3", "v1.2.3"},
-		{"sha-abc123", "sha-abc123"},
-		{"feature/my-tag", "feature-my-tag"},
-		{"v1.0.0:arm64", "v1.0.0-arm64"},
-		{"v1.0.0+build.1", "v1.0.0-build.1"},
-		{"my tag", "my-tag"},
-		{"a/b:c+d e", "a-b-c-d-e"},
-	}
-	for _, tc := range cases {
-		got := sanitizeBranchName(tc.tag)
-		if got != tc.want {
-			t.Errorf("sanitizeBranchName(%q) = %q, want %q", tc.tag, got, tc.want)
-		}
-	}
-}
-
 // --- CreateDeployPR ---
 
 func TestCreateDeployPR(t *testing.T) {
@@ -291,8 +268,20 @@ func TestCreateDeployPR_BranchNameSanitized(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", org, repo)
-	client.CreateDeployPR(context.Background(), CreatePRParams{
+
+	// Tags with unsafe characters are now rejected before branch creation.
+	_, _, err := client.CreateDeployPR(context.Background(), CreatePRParams{
 		App: "myapp", Environment: "dev", Tag: "feature/v1.0:arm64", KustomizePath: kustomizePath,
+		BaseBranch: "main",
+	})
+	if err == nil {
+		t.Error("expected error for unsafe tag, got nil")
+	}
+
+	// Safe tags work and produce a clean branch name.
+	createdBranch = ""
+	client.CreateDeployPR(context.Background(), CreatePRParams{
+		App: "myapp", Environment: "dev", Tag: "v1.0.0-rc.1", KustomizePath: kustomizePath,
 		BaseBranch: "main",
 	})
 
@@ -300,11 +289,9 @@ func TestCreateDeployPR_BranchNameSanitized(t *testing.T) {
 	if !strings.HasPrefix(createdBranch, wantPrefix) {
 		t.Errorf("branch name %q should start with %q", createdBranch, wantPrefix)
 	}
-	// Only the tag suffix (after the deploy/<app>- prefix) must be free of
-	// special characters that are illegal in git ref names.
 	tagSuffix := strings.TrimPrefix(createdBranch, wantPrefix)
-	if strings.ContainsAny(tagSuffix, "/:") {
-		t.Errorf("tag portion of branch name %q contains illegal characters (/ or :)", createdBranch)
+	if strings.ContainsAny(tagSuffix, "/:+") {
+		t.Errorf("tag portion of branch name %q contains illegal characters", createdBranch)
 	}
 }
 

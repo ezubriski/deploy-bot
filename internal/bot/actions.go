@@ -14,6 +14,7 @@ import (
 
 	"github.com/ezubriski/deploy-bot/internal/audit"
 	githubPkg "github.com/ezubriski/deploy-bot/internal/github"
+	"github.com/ezubriski/deploy-bot/internal/sanitize"
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
 
@@ -528,7 +529,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
 		slack.MsgOptionText(fmt.Sprintf(
 			"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *rejected* by <@%s>.\n\n*Reason:* %s",
-			d.App, d.Environment, d.Tag, d.PRURL, prNumber, approverID, rejReason,
+			d.App, d.Environment, d.Tag, d.PRURL, prNumber, approverID, sanitize.SlackText(rejReason, 500),
 		), false),
 	)
 

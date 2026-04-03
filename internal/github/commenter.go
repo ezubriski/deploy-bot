@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	gh "github.com/google/go-github/v60/github"
+
+	"github.com/ezubriski/deploy-bot/internal/sanitize"
 )
 
 // AddComment posts a comment on the given PR.
@@ -23,8 +25,8 @@ func (c *Client) AddComment(ctx context.Context, prNumber int, body string) erro
 // CommentRequested posts a "deployment requested" comment.
 func (c *Client) CommentRequested(ctx context.Context, prNumber int, requester, app, tag, reason string) error {
 	body := fmt.Sprintf(
-		"**Deployment requested** by @%s\n\n- **App:** %s\n- **Tag:** %s\n- **Reason:** %s",
-		requester, app, tag, reason,
+		"**Deployment requested** by @%s\n\n- **App:** %s\n- **Tag:** `%s`\n- **Reason:** %s",
+		requester, app, tag, sanitize.GitHubMarkdown(reason),
 	)
 	return c.AddComment(ctx, prNumber, body)
 }
@@ -37,7 +39,7 @@ func (c *Client) CommentApproved(ctx context.Context, prNumber int, approver str
 
 // CommentRejected posts a "rejected" comment.
 func (c *Client) CommentRejected(ctx context.Context, prNumber int, approver, reason string) error {
-	body := fmt.Sprintf("**Rejected** by @%s\n\n**Reason:** %s", approver, reason)
+	body := fmt.Sprintf("**Rejected** by @%s\n\n**Reason:** %s", approver, sanitize.GitHubMarkdown(reason))
 	return c.AddComment(ctx, prNumber, body)
 }
 

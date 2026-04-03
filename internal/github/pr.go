@@ -11,6 +11,8 @@ import (
 	gh "github.com/google/go-github/v60/github"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
+
+	"github.com/ezubriski/deploy-bot/internal/sanitize"
 )
 
 // ErrCINotPassed is returned by MergePR when GitHub blocks the merge because a
@@ -67,7 +69,10 @@ func NewClient(token, org, repo string, log *zap.Logger, retry RetryConfig) *Cli
 // CreateDeployPR creates a branch, commits the kustomize image tag update, and
 // opens a PR. Returns ErrNoChange if the tag is already current in the file.
 func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int, string, error) {
-	branch := fmt.Sprintf("deploy/%s-%s-%s", params.Environment, params.App, sanitizeBranchName(params.Tag))
+	if !sanitize.TagIsSafe(params.Tag) {
+		return 0, "", fmt.Errorf("tag %q contains unsafe characters", params.Tag)
+	}
+	branch := fmt.Sprintf("deploy/%s-%s-%s", params.Environment, params.App, sanitize.BranchName(params.Tag))
 
 	// Get default branch SHA
 	var ref *gh.Reference
@@ -145,8 +150,8 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 		Tag:              params.Tag,
 	})
 	prBody := fmt.Sprintf(
-		"**Environment:** %s\n**App:** %s\n**Tag:** %s\n**Requester:** @%s\n**Reason:** %s\n\n<!-- deploy-bot-meta: %s -->",
-		params.Environment, params.App, params.Tag, params.Requester, params.Reason, string(metaJSON),
+		"**Environment:** %s\n**App:** %s\n**Tag:** `%s`\n**Requester:** @%s\n**Reason:** %s\n\n<!-- deploy-bot-meta: %s -->",
+		params.Environment, params.App, params.Tag, params.Requester, sanitize.GitHubMarkdown(params.Reason), string(metaJSON),
 	)
 
 	var pr *gh.PullRequest
@@ -209,7 +214,7 @@ func (c *Client) MergePR(ctx context.Context, prNumber int, mergeMethod string) 
 // MergePR. Returns ErrNoChange if the tag is already current on the base
 // branch (the deploy happened through another means).
 func (c *Client) RebaseDeployBranch(ctx context.Context, params CreatePRParams) error {
-	branch := fmt.Sprintf("deploy/%s-%s-%s", params.Environment, params.App, sanitizeBranchName(params.Tag))
+	branch := fmt.Sprintf("deploy/%s-%s-%s", params.Environment, params.App, sanitize.BranchName(params.Tag))
 
 	// Step 1: get current default branch HEAD SHA.
 	var baseRef *gh.Reference
@@ -410,8 +415,3 @@ func updateNewTag(content, newTag string) (string, error) {
 	return newTagRegex.ReplaceAllString(content, "${1}"+newTag), nil
 }
 
-// sanitizeBranchName makes a tag safe for use in a git branch name.
-func sanitizeBranchName(tag string) string {
-	r := strings.NewReplacer("/", "-", ":", "-", "+", "-", " ", "-")
-	return r.Replace(tag)
-}
