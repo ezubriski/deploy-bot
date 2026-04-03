@@ -47,8 +47,6 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 
 ### Key architectural points
 
-**Leader election** (`internal/election`): Uses `coordination.k8s.io/leases`. Only the leader runs the Slack socket mode loop, ECR cache, and sweeper. On leadership loss, `log.Fatal` restarts the pod. The leader context is passed to all leader-only components so they stop cleanly.
-
 **Config vs Secrets split**: `config.json` (mounted as a ConfigMap, hot-reloaded) holds app definitions, GitHub/Slack config, and AWS settings. Secrets (tokens, Redis addr) come from AWS Secrets Manager at startup via `AWS_SECRET_NAME` env var. A second `discovered.json` file (optional, from repo scanner) provides repo-sourced app entries that are merged at load time.
 
 **App config**: Each app entry requires an `environment` field (e.g. `"dev"`, `"prod"`). App names include the environment (e.g. `myapp-dev`, `myapp-prod`). This is included in lock keys, branch names, PR titles, and all user-facing messages so deployments across environments are unambiguous.
@@ -85,7 +83,6 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 | `internal/ecrpoller` | SQS long-poll loop for ECR push events from EventBridge |
 | `internal/reposcanner` | Repo-sourced app discovery: scan, validate, conflict detect, ConfigMap write |
 | `internal/audit` | Audit log writes (S3 or zap fallback) |
-| `internal/election` | Kubernetes lease-based leader election wrapper |
 | `internal/config` | Config struct, file loading, discovered-path merge, hot-reload watcher, `Holder` |
 | `internal/metrics` | Prometheus counters/gauges (pending deploys, deploy events by app/outcome) |
 | `internal/health` | `/healthz` (liveness) and `/readyz` (readiness -- gated on ECR cache populated) endpoints |

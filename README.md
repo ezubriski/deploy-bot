@@ -18,7 +18,7 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 
 **Built for resilience.** Redis Streams consumer groups for exactly-once processing, in-memory buffer with backpressure during Redis outages, sweeper for expired deploys, automatic rebase on merge conflicts, GitHub reconciliation after Redis data loss.
 
-**Horizontal scaling.** Receiver and worker scale independently. Redis Streams consumer groups ensure each event processes once. Leader election (Kubernetes leases) handles singleton work like the sweeper and reconciler.
+**Horizontal scaling.** Receiver and worker scale independently. Redis Streams consumer groups ensure each event processes once. Distributed Redis locks coordinate singleton work like the sweeper and reconciler across replicas.
 
 **Hot-reload config.** Add an app to `config.json` and the bot picks it up within 30 seconds. No restart needed. SIGHUP also triggers reload.
 
