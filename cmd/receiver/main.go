@@ -65,6 +65,9 @@ func main() {
 	if err := secrets.Validate(); err != nil {
 		log.Fatal("invalid secrets", zap.Error(err))
 	}
+	if secrets.SlackAppToken == "" {
+		log.Fatal("slack_app_token is required for the receiver (Socket Mode)")
+	}
 
 	rdb := redis.NewClient(&redis.Options{Addr: secrets.RedisAddr, Password: secrets.RedisToken})
 	if err := rdb.Ping(ctx).Err(); err != nil {
@@ -126,7 +129,7 @@ func main() {
 			log.Warn("reposcanner: not running in Kubernetes, ConfigMap writes disabled")
 		}
 		cfgHolder := config.NewHolder(cfg, configPath)
-		scanner := reposcanner.NewScanner(secrets.GitHubToken, cfg.GitHub.Org, scannerSlack, cmWriter, cfgHolder, log)
+		scanner := reposcanner.NewScanner(secrets.ScannerToken(), cfg.GitHub.Org, scannerSlack, cmWriter, cfgHolder, log)
 		go scanner.Run(ctx)
 	}
 

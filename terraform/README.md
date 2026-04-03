@@ -2,7 +2,7 @@
 
 Creates the AWS resources needed to run deploy-bot:
 
-- **Two IAM roles** (optional, via IRSA) with least-privilege separation: bot and receiver
+- **Two IAM roles** with least-privilege separation: bot and receiver (IRSA trust policy optional)
 - **Two managed IAM policies** (always created) that can be attached to roles or IAM users
 - **SQS queue + EventBridge rule** (optional) for ECR push-triggered deploys
 
@@ -20,7 +20,9 @@ Creates the AWS resources needed to run deploy-bot:
 
 **Least-privilege split.** The bot and receiver run as separate pods with separate service accounts. The bot role grants SecretsManager read, ECR read (all repositories), and optionally S3 PutObject for audit logs. The receiver role grants SecretsManager read and, when ECR events are enabled, SQS consume permissions. This means a compromise of the receiver pod cannot read ECR or write audit logs, and vice versa.
 
-**IRSA is optional.** When `eks_oidc_provider_arn` and `eks_oidc_provider_url` are left empty (the default), the module skips IAM role creation entirely. The managed policies are still created so you can attach them to an IAM user or any other principal. This is useful for local development, non-EKS clusters, or accounts where IRSA is not available.
+**IRSA trust is optional.** IAM roles are always created. When `eks_oidc_provider_arn` and `eks_oidc_provider_url` are provided, the roles get an IRSA trust policy allowing the corresponding Kubernetes ServiceAccount to assume them. When omitted, the roles are created with an empty trust policy — configure trust separately to match your environment.
+
+**Separate secrets.** Each component reads from its own Secrets Manager secret. The bot policy grants access only to `bot_secrets_manager_secret_name`; the receiver policy only to `receiver_secrets_manager_secret_name`. This prevents credential cross-access between components.
 
 **Managed policies, not inline.** Policies are created as `aws_iam_policy` resources and attached via `aws_iam_role_policy_attachment`. This makes them visible in the IAM console policy list and reusable across principals.
 
@@ -37,12 +39,13 @@ Creates the AWS resources needed to run deploy-bot:
 | `name` | `string` | `"deploy-bot"` | Name prefix for all resources |
 | `region` | `string` | (required) | AWS region |
 | `account_id` | `string` | (required) | AWS account ID |
-| `eks_oidc_provider_arn` | `string` | `""` | EKS OIDC provider ARN for IRSA (empty = skip role creation) |
-| `eks_oidc_provider_url` | `string` | `""` | EKS OIDC provider URL (empty = skip role creation) |
+| `eks_oidc_provider_arn` | `string` | `""` | EKS OIDC provider ARN for IRSA (empty = no IRSA trust policy) |
+| `eks_oidc_provider_url` | `string` | `""` | EKS OIDC provider URL (empty = no IRSA trust policy) |
 | `namespace` | `string` | `"deploy-bot"` | Kubernetes namespace for IRSA trust policy |
 | `bot_service_account_name` | `string` | `"deploy-bot-worker"` | Bot ServiceAccount name for IRSA trust policy |
 | `receiver_service_account_name` | `string` | `"deploy-bot-receiver"` | Receiver ServiceAccount name for IRSA trust policy |
-| `secrets_manager_secret_name` | `string` | `"deploy-bot/secrets"` | Secrets Manager secret name to grant read access |
+| `bot_secrets_manager_secret_name` | `string` | `"deploy-bot/bot-secrets"` | Secrets Manager secret for the bot (worker) component |
+| `receiver_secrets_manager_secret_name` | `string` | `"deploy-bot/receiver-secrets"` | Secrets Manager secret for the receiver component |
 | `audit_bucket` | `string` | `""` | S3 bucket for audit logs (empty = disable S3 statement in bot policy) |
 | `ecr_events_enabled` | `bool` | `false` | Create SQS queue and EventBridge rule for ECR push events |
 | `ecr_events_visibility_timeout` | `number` | `300` | SQS visibility timeout in seconds |
@@ -53,8 +56,8 @@ Creates the AWS resources needed to run deploy-bot:
 
 | Output | Description |
 |---|---|
-| `bot_role_arn` | Bot IAM role ARN (empty string if IRSA is not configured) |
-| `receiver_role_arn` | Receiver IAM role ARN (empty string if IRSA is not configured) |
+| `bot_role_arn` | Bot IAM role ARN |
+| `receiver_role_arn` | Receiver IAM role ARN |
 | `bot_policy_arn` | Bot managed policy ARN (always created) |
 | `receiver_policy_arn` | Receiver managed policy ARN (always created) |
 | `sqs_queue_url` | SQS queue URL (empty string if ECR events disabled) |
@@ -62,9 +65,9 @@ Creates the AWS resources needed to run deploy-bot:
 
 ## Usage
 
-### Full EKS/IRSA setup
+### With IRSA (EKS)
 
-Both IAM roles are created and bound to their respective Kubernetes service accounts via IRSA.
+Both roles get an IRSA trust policy bound to their Kubernetes service accounts.
 
 ```hcl
 module "deploy_bot" {
@@ -76,12 +79,9 @@ module "deploy_bot" {
   eks_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"
   eks_oidc_provider_url = "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"
 
-  namespace                    = "deploy-bot"
-  bot_service_account_name     = "deploy-bot-worker"
-  receiver_service_account_name = "deploy-bot-receiver"
-
-  secrets_manager_secret_name = "deploy-bot/secrets"
-  audit_bucket                = "my-audit-logs"
+  bot_secrets_manager_secret_name      = "deploy-bot/bot-secrets"
+  receiver_secrets_manager_secret_name = "deploy-bot/receiver-secrets"
+  audit_bucket                         = "my-audit-logs"
 
   tags = {
     Team = "platform"
@@ -103,9 +103,9 @@ metadata:
     eks.amazonaws.com/role-arn: <module.deploy_bot.receiver_role_arn>
 ```
 
-### IAM user setup (no IRSA)
+### Without IRSA
 
-Omit the OIDC variables. The module creates only the managed policies. Attach them to an IAM user or any other principal.
+Omit the OIDC variables. Roles are still created (with an empty trust policy) so you can configure trust separately to match your environment.
 
 ```hcl
 module "deploy_bot" {
@@ -114,23 +114,12 @@ module "deploy_bot" {
   region     = "us-east-1"
   account_id = "123456789012"
 
-  # eks_oidc_provider_arn and eks_oidc_provider_url left empty (default)
-
-  secrets_manager_secret_name = "deploy-bot/secrets"
+  bot_secrets_manager_secret_name      = "deploy-bot/bot-secrets"
+  receiver_secrets_manager_secret_name = "deploy-bot/receiver-secrets"
 
   tags = {
     Team = "platform"
   }
-}
-
-resource "aws_iam_user_policy_attachment" "bot" {
-  user       = aws_iam_user.deploy_bot.name
-  policy_arn = module.deploy_bot.bot_policy_arn
-}
-
-resource "aws_iam_user_policy_attachment" "receiver" {
-  user       = aws_iam_user.deploy_bot_receiver.name
-  policy_arn = module.deploy_bot.receiver_policy_arn
 }
 ```
 
@@ -148,7 +137,9 @@ module "deploy_bot" {
   eks_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"
   eks_oidc_provider_url = "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"
 
-  ecr_events_enabled = true
+  bot_secrets_manager_secret_name      = "deploy-bot/bot-secrets"
+  receiver_secrets_manager_secret_name = "deploy-bot/receiver-secrets"
+  ecr_events_enabled                   = true
 
   tags = {
     Team = "platform"

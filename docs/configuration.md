@@ -7,63 +7,90 @@ The bot uses two configuration sources:
 
 ## Secrets
 
-Secrets are loaded from one of two sources, checked in order:
+The bot and receiver use **separate secrets** so that each component only has access to the credentials it needs. Secrets are loaded from one of two sources, checked in order:
 
 1. **File** (`SECRETS_PATH` env var) — a JSON file, typically mounted from a Kubernetes Secret
 2. **AWS Secrets Manager** (`AWS_SECRET_NAME` env var) — fetched at startup via the AWS SDK
 
-Set exactly one. If both are set, `SECRETS_PATH` takes precedence.
+Set exactly one per component. If both are set, `SECRETS_PATH` takes precedence.
 
-### Option A: Kubernetes Secret (file mount)
+### Bot (worker) secret
 
-Create a K8s Secret and mount it as a volume:
+| Field | Required | Description |
+|---|---|---|
+| `slack_bot_token` | Yes | Bot User OAuth Token (`xoxb-`) |
+| `github_token` | Yes | Fine-grained PAT scoped to the gitops repo — Contents and Pull requests (read/write), org Members (read) |
+| `redis_addr` | Yes | Redis endpoint with port (e.g. `redis:6379`) |
+| `redis_token` | No | Redis auth token |
+
+The bot does not need `slack_app_token` (Socket Mode is receiver-only) or `github_scanner_token` (repo scanning is receiver-only).
+
+### Receiver secret
+
+| Field | Required | Description |
+|---|---|---|
+| `slack_bot_token` | Yes | Bot User OAuth Token (`xoxb-`) |
+| `slack_app_token` | Yes | App-Level Token (`xapp-`) with `connections:write` scope — required for Socket Mode |
+| `github_token` | Yes | Fine-grained PAT — org Members (read) for approver cache |
+| `github_scanner_token` | No | Fine-grained PAT scoped to all repos (or discoverable repos) with Contents (read) and Commit statuses (read/write). Used by the repo scanner. Falls back to `github_token` if not set |
+| `redis_addr` | Yes | Redis endpoint with port |
+| `redis_token` | No | Redis auth token |
+
+### Option A: Kubernetes Secrets (file mount)
 
 ```bash
-kubectl create secret generic deploy-bot-secrets \
+# Bot secret
+kubectl create secret generic deploy-bot-worker-secrets \
   --namespace=deploy-bot \
   --from-literal=secrets.json='{
     "slack_bot_token": "xoxb-...",
-    "slack_app_token": "xapp-...",
     "github_token":    "github_pat_...",
     "redis_addr":      "redis:6379"
   }'
+
+# Receiver secret
+kubectl create secret generic deploy-bot-receiver-secrets \
+  --namespace=deploy-bot \
+  --from-literal=secrets.json='{
+    "slack_bot_token":      "xoxb-...",
+    "slack_app_token":      "xapp-...",
+    "github_token":         "github_pat_...",
+    "github_scanner_token": "github_pat_...",
+    "redis_addr":           "redis:6379"
+  }'
 ```
 
-Set `SECRETS_PATH=/etc/deploy-bot/secrets/secrets.json` in the deployment and mount the secret as a volume at `/etc/deploy-bot/secrets`.
+Set `SECRETS_PATH=/etc/deploy-bot/secrets/secrets.json` in each deployment and mount the respective secret as a volume.
 
 ### Option B: AWS Secrets Manager
 
-Create a secret at the path set in `AWS_SECRET_NAME` (default `deploy-bot/secrets`):
+Create separate secrets for each component:
 
 ```bash
+# Bot secret
 aws secretsmanager create-secret \
-  --name deploy-bot/secrets \
+  --name deploy-bot/bot-secrets \
   --secret-string '{
     "slack_bot_token": "xoxb-...",
-    "slack_app_token": "xapp-...",
     "github_token":    "github_pat_...",
     "redis_addr":      "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
     "redis_token":     "your-elasticache-auth-token"
   }'
+
+# Receiver secret
+aws secretsmanager create-secret \
+  --name deploy-bot/receiver-secrets \
+  --secret-string '{
+    "slack_bot_token":      "xoxb-...",
+    "slack_app_token":      "xapp-...",
+    "github_token":         "github_pat_...",
+    "github_scanner_token": "github_pat_...",
+    "redis_addr":           "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
+    "redis_token":          "your-elasticache-auth-token"
+  }'
 ```
 
-| Field | Required | Where to find it |
-|---|---|---|
-| `slack_bot_token` | Yes | Slack App > OAuth & Permissions > Bot User OAuth Token (`xoxb-`) |
-| `slack_app_token` | Yes | Slack App > Basic Information > App-Level Tokens (`xapp-`) -- needs `connections:write` scope |
-| `github_token` | Yes | GitHub > Settings > Developer settings > Fine-grained tokens -- scope to the gitops repo with Contents/Pull requests (read/write) and the org with Members (read) |
-| `redis_addr` | Yes | ElastiCache > Cluster > Primary endpoint (include port, typically `6379`) |
-| `redis_token` | No | ElastiCache > Cluster > Auth token -- only set if in-transit encryption with token auth is enabled |
-
-To rotate a value without touching the others:
-
-```bash
-aws secretsmanager get-secret-value --secret-id deploy-bot/secrets \
-  --query SecretString --output text | \
-  jq '.github_token = "github_pat_newtoken"' | \
-  xargs -0 aws secretsmanager put-secret-value \
-    --secret-id deploy-bot/secrets --secret-string
-```
+The Terraform module scopes each role's Secrets Manager read permission to its own secret (`bot_secrets_manager_secret_name` and `receiver_secrets_manager_secret_name`), preventing cross-access.
 
 ## Config file (`config.json`)
 

@@ -252,11 +252,22 @@ func (a *AppConfig) CompiledTagPattern() *regexp.Regexp {
 }
 
 type Secrets struct {
-	SlackBotToken string `json:"slack_bot_token"`
-	SlackAppToken string `json:"slack_app_token"`
-	GitHubToken   string `json:"github_token"`
-	RedisAddr     string `json:"redis_addr"`
-	RedisToken    string `json:"redis_token,omitempty"`
+	SlackBotToken      string `json:"slack_bot_token"`
+	SlackAppToken      string `json:"slack_app_token"`
+	GitHubToken        string `json:"github_token"`
+	GitHubScannerToken string `json:"github_scanner_token,omitempty"`
+	RedisAddr          string `json:"redis_addr"`
+	RedisToken         string `json:"redis_token,omitempty"`
+}
+
+// ScannerToken returns the token to use for repo scanning. If a dedicated
+// scanner token is configured, it is returned; otherwise the primary
+// GitHubToken is used.
+func (s *Secrets) ScannerToken() string {
+	if s.GitHubScannerToken != "" {
+		return s.GitHubScannerToken
+	}
+	return s.GitHubToken
 }
 
 // Validate checks that all required secrets are present and have the expected format.
@@ -267,9 +278,7 @@ func (s *Secrets) Validate() error {
 	} else if !strings.HasPrefix(s.SlackBotToken, "xoxb-") {
 		errs = append(errs, fmt.Errorf("slack_bot_token has unexpected prefix (want xoxb-, got %q)", tokenPrefix(s.SlackBotToken)))
 	}
-	if s.SlackAppToken == "" {
-		errs = append(errs, errors.New("slack_app_token is empty"))
-	} else if !strings.HasPrefix(s.SlackAppToken, "xapp-") {
+	if s.SlackAppToken != "" && !strings.HasPrefix(s.SlackAppToken, "xapp-") {
 		errs = append(errs, fmt.Errorf("slack_app_token has unexpected prefix (want xapp-, got %q)", tokenPrefix(s.SlackAppToken)))
 	}
 	if s.GitHubToken == "" {

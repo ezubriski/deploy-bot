@@ -44,10 +44,16 @@ variable "receiver_service_account_name" {
   default     = "deploy-bot-receiver"
 }
 
-variable "secrets_manager_secret_name" {
-  description = "Name of the Secrets Manager secret containing bot tokens"
+variable "bot_secrets_manager_secret_name" {
+  description = "Name of the Secrets Manager secret for the bot (worker) component"
   type        = string
-  default     = "deploy-bot/secrets"
+  default     = "deploy-bot/bot-secrets"
+}
+
+variable "receiver_secrets_manager_secret_name" {
+  description = "Name of the Secrets Manager secret for the receiver component"
+  type        = string
+  default     = "deploy-bot/receiver-secrets"
 }
 
 variable "audit_bucket" {

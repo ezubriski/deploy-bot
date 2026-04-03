@@ -94,23 +94,31 @@ Use the `slack-manifest.json` file at the root of this repository:
 2. Go to **Socket Mode** in the sidebar. Click **Generate Token**, name it (e.g. `socket`), add the `connections:write` scope, and generate. Copy the token (starts with `xapp-`) -- this is your `slack_app_token`.
 3. Go to **OAuth & Permissions** and click **Install to Workspace**. Copy the **Bot User OAuth Token** (starts with `xoxb-`) -- this is your `slack_bot_token`.
 
-### 2. Create a GitHub PAT
+### 2. Create GitHub PATs
 
-Create a **fine-grained Personal Access Token** at GitHub > Settings > Developer settings > Personal access tokens > Fine-grained tokens. Set the resource owner to your organization.
+Fine-grained PATs cannot mix permission levels across repositories. You need one token for the gitops repo (read/write) and, if using repo-sourced app discovery, a second read-only token for discoverable repos.
 
-**Repository permissions** (scope to the gitops repo only):
+**Primary token** (`github_token`) -- scope to the gitops repo only:
 
 | Permission | Level | Why |
 |---|---|---|
 | Contents | Read & write | Push kustomization branches |
 | Pull requests | Read & write | Create, merge, close PRs and post comments |
-| Commit statuses | Read & write | Set config validation status on repos (repo discovery) |
 
-**Organization permissions:**
+**Organization permissions** (on the primary token):
 
 | Permission | Level | Why |
 |---|---|---|
 | Members | Read | Check deployer/approver team membership |
+
+**Scanner token** (`github_scanner_token`, optional) -- scope to all repos (or repos with your discovery prefix):
+
+| Permission | Level | Why |
+|---|---|---|
+| Contents | Read | Read `.deploy-bot.json` from repos |
+| Commit statuses | Read & write | Set config validation status on discovered repos |
+
+If `github_scanner_token` is not set, the primary `github_token` is used for scanning. This works if your primary token has access to all repos, but means the gitops write permissions are shared with the scanner.
 
 ### 3. Set up AWS resources
 

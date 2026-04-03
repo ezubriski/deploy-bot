@@ -1,11 +1,11 @@
 output "bot_role_arn" {
-  description = "IAM role ARN for the bot (worker) ServiceAccount annotation (empty if IRSA not configured)"
-  value       = local.create_irsa_roles ? aws_iam_role.bot[0].arn : ""
+  description = "IAM role ARN for the bot (worker) ServiceAccount annotation"
+  value       = aws_iam_role.bot.arn
 }
 
 output "receiver_role_arn" {
-  description = "IAM role ARN for the receiver ServiceAccount annotation (empty if IRSA not configured)"
-  value       = local.create_irsa_roles ? aws_iam_role.receiver[0].arn : ""
+  description = "IAM role ARN for the receiver ServiceAccount annotation"
+  value       = aws_iam_role.receiver.arn
 }
 
 output "bot_policy_arn" {

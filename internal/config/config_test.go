@@ -91,15 +91,11 @@ func TestSecretsValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("empty slack_app_token", func(t *testing.T) {
+	t.Run("empty slack_app_token is valid", func(t *testing.T) {
 		s := valid
 		s.SlackAppToken = ""
-		err := s.Validate()
-		if err == nil {
-			t.Fatal("expected error for empty slack_app_token")
-		}
-		if !strings.Contains(err.Error(), "slack_app_token is empty") {
-			t.Errorf("unexpected error message: %v", err)
+		if err := s.Validate(); err != nil {
+			t.Errorf("slack_app_token is optional, got error: %v", err)
 		}
 	})
 
@@ -145,7 +141,7 @@ func TestSecretsValidate(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected errors for all-empty secrets")
 		}
-		for _, want := range []string{"slack_bot_token", "slack_app_token", "github_token", "redis_addr"} {
+		for _, want := range []string{"slack_bot_token", "github_token", "redis_addr"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("expected error to mention %q, got: %v", want, err)
 			}

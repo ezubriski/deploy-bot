@@ -111,9 +111,11 @@ func main() {
 		}
 	}
 
-	rawSlack := slack.New(secrets.SlackBotToken,
-		slack.OptionAppLevelToken(secrets.SlackAppToken),
-	)
+	slackOpts := []slack.Option{}
+	if secrets.SlackAppToken != "" {
+		slackOpts = append(slackOpts, slack.OptionAppLevelToken(secrets.SlackAppToken))
+	}
+	rawSlack := slack.New(secrets.SlackBotToken, slackOpts...)
 	slackMaxRetries, slackRetryWait := cfgHolder.Load().Slack.RateLimitConfig()
 	slackClient := slackclient.New(rawSlack, slackMaxRetries, slackRetryWait, log)
 
