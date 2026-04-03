@@ -17,4 +17,4 @@ This project is a self-hosted Slack bot. The attack surface is:
 - The GitHub token used to create and merge PRs
 - The Slack tokens used to receive and send messages
 
-Secrets are expected to be stored in AWS Secrets Manager, not in config files or environment variables directly.
+Secrets are loaded from AWS Secrets Manager (`AWS_SECRET_NAME`) or a mounted JSON file (`SECRETS_PATH`). When using Kubernetes, the file-based approach uses a K8s Secret mounted as a volume. Secrets should never be committed to version control or passed as plain environment variables.

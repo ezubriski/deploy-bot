@@ -2,9 +2,29 @@
 
 > This project was largely built with [Claude Code](https://claude.ai/code). Human contributors are welcome.
 
-A Slack bot that gates Kubernetes deployments behind an approval workflow. Developers request deployments via `/deploy` or `@bot deploy`, approvers approve or reject via Slack buttons, and the bot creates and merges GitHub PRs that update kustomize image tags in a GitOps repo. Argo CD picks up merged PRs and deploys.
+A Slack bot that gates Kubernetes deployments behind an approval workflow. Developers request deployments via `/deploy` or `@bot deploy`, approvers approve or reject with Slack buttons, and the bot creates and merges GitHub PRs that update kustomize image tags in a GitOps repo. Argo CD picks up merged PRs and deploys.
 
-## How it works
+Built for organizations running Kubernetes + Argo CD that want centralized, auditable deployment control without leaving Slack.
+
+## Why deploy-bot
+
+**No public network exposure required.** The receiver connects outbound via Slack Socket Mode (WebSocket) and SQS long-polling. No ingress controller, no webhooks, no load balancer, no public IP. Deploy it in a private subnet and forget about it.
+
+**ECR push-triggered deploys.** A single EventBridge rule captures all ECR pushes account-wide. The bot filters by app and tag pattern. Add a new app and it works immediately -- no EventBridge changes, no GitHub webhooks, no per-repo CI pipelines.
+
+**Batteries included.** Terraform module, Kustomize base, Slack app manifest, GitHub Action, validation CLI tool. Getting started is config, not code.
+
+**Repo-sourced app discovery.** App teams drop a `.deploy-bot.json` in their repo. The bot discovers it, validates it, and starts deploying -- no operator intervention. The `deploy-bot-config` CLI and GitHub Action let teams validate their config in CI before it gets scraped.
+
+**Built for resilience.** Redis Streams consumer groups for exactly-once processing, in-memory buffer with backpressure during Redis outages, sweeper for expired deploys, automatic rebase on merge conflicts, GitHub reconciliation after Redis data loss.
+
+**Horizontal scaling.** Receiver and worker scale independently. Redis Streams consumer groups ensure each event processes once. Leader election (Kubernetes leases) handles singleton work like the sweeper and reconciler.
+
+**Hot-reload config.** Add an app to `config.json` and the bot picks it up within 30 seconds. No restart needed. SIGHUP also triggers reload.
+
+**Least-privilege IAM.** Separate IAM roles and policies for bot and receiver components. The Terraform module handles it. Policies are exported as managed policies so they work with IAM users too -- IRSA is optional.
+
+## Architecture
 
 ```
 Developer          Receiver          Redis Stream       Worker            GitHub / Argo CD
@@ -36,26 +56,65 @@ Two processes share a single container image:
 - **receiver** -- connects to Slack via Socket Mode, validates incoming events, and enqueues them to a Redis Stream. Also polls SQS for ECR push events and scans repos for app config (when enabled). Stateless; run 2+ replicas.
 - **worker** -- consumes events from the stream, runs all business logic (GitHub API, ECR, audit logging). Run 2+ replicas; Redis Streams consumer groups ensure each event is processed once.
 
-## Prerequisites
+## Security
 
-- Kubernetes cluster (EKS recommended)
-- AWS -- Secrets Manager, ECR (for app images), S3 (audit log, optional), SQS + EventBridge (ECR push deploys, optional)
-- ElastiCache for Redis -- Multi-AZ with automatic failover and AOF persistence enabled. **Redis is required; the bot will not start without it.** See [docs/redis-resilience.md](docs/redis-resilience.md) for behaviour during outages and after a flush.
-- GitHub fine-grained PAT with repository (contents, pull requests, commit statuses) and organisation (members read) permissions
-- Slack App in Socket Mode with the following bot scopes:
-  `app_mentions:read`, `commands`, `chat:write`, `users:read`, `users:read.email`, `im:write`
+- **Minimal container image** -- built `FROM scratch`. No shell, no package manager, no OS. Just the binary and CA certificates.
+- **Hardened runtime** -- runs as non-root (UID 65534), read-only filesystem, all capabilities dropped, seccomp RuntimeDefault.
+- **No inbound network** -- Socket Mode uses an outbound WebSocket. ECR events arrive via SQS long-poll. Nothing listens on a public port.
+- **Secrets isolation** -- tokens and credentials loaded from AWS Secrets Manager (or a Kubernetes Secret volume mount). Never stored in config files.
+- **Deploy locks** -- per-app, per-environment locks prevent concurrent deploys to the same target.
+- **Identity verification** -- Slack user ID is resolved to email (Slack API), then to GitHub login (GitHub API), then checked against team membership. Every action is traced back to a verified identity.
+- **Input sanitization** -- user-provided text (deploy reasons, rejection reasons) is sanitized before rendering in Slack messages and GitHub comments to prevent injection.
+- **Tag validation** -- image tags are validated against an allowlist regex before use in branch names, YAML files, and git refs.
 
-## Configuration
+## Networking
 
-See [docs/configuration.md](docs/configuration.md) for the full configuration reference covering secrets, config file fields, ECR events, repo discovery, and per-app settings.
+deploy-bot requires no ingress controller, load balancer, or public IP. All external communication is outbound:
 
-Quick start: copy `deploy/configmap.yaml`, fill in your values, and apply.
+| Direction | Protocol | Destination | Purpose |
+|---|---|---|---|
+| Outbound | WSS | `wss://wss-primary.slack.com` | Slack Socket Mode (receiver) |
+| Outbound | HTTPS | `sqs.{region}.amazonaws.com` | ECR event polling (receiver) |
+| Outbound | HTTPS | `api.github.com` | PR creation, merge, close (worker) |
+| Outbound | HTTPS | `api.ecr.{region}.amazonaws.com` | Tag listing and cache refresh (worker) |
+| Outbound | HTTPS | `s3.{region}.amazonaws.com` | Audit log writes (worker, optional) |
+| Outbound | HTTPS | `slack.com` | Slack Web API calls (worker) |
+| Internal | TCP 6379 | Redis | State, locks, streams, history |
+| Internal | HTTP | Inter-pod | Health checks (`/healthz`, `/readyz`) |
 
-## Deployment
+If deployed on AWS with VPC endpoints for SQS, ECR, S3, and Secrets Manager, the bot can run in a fully private subnet with no internet gateway. The only service that requires public internet access is the Slack Socket Mode WebSocket and the Slack/GitHub APIs.
 
-### AWS resources
+## Getting started
 
-Use the Terraform module in `terraform/` to create the IAM role, policies, and optionally the SQS queue and EventBridge rule for ECR push events:
+### 1. Create the Slack app
+
+Use the `slack-manifest.json` file at the root of this repository:
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App > From a manifest**. Select your workspace, paste the contents of `slack-manifest.json`, and create the app.
+2. Go to **Socket Mode** in the sidebar. Click **Generate Token**, name it (e.g. `socket`), add the `connections:write` scope, and generate. Copy the token (starts with `xapp-`) -- this is your `slack_app_token`.
+3. Go to **OAuth & Permissions** and click **Install to Workspace**. Copy the **Bot User OAuth Token** (starts with `xoxb-`) -- this is your `slack_bot_token`.
+
+### 2. Create a GitHub PAT
+
+Create a **fine-grained Personal Access Token** at GitHub > Settings > Developer settings > Personal access tokens > Fine-grained tokens. Set the resource owner to your organization.
+
+**Repository permissions** (scope to the gitops repo only):
+
+| Permission | Level | Why |
+|---|---|---|
+| Contents | Read & write | Push kustomization branches |
+| Pull requests | Read & write | Create, merge, close PRs and post comments |
+| Commit statuses | Read & write | Set config validation status on repos (repo discovery) |
+
+**Organization permissions:**
+
+| Permission | Level | Why |
+|---|---|---|
+| Members | Read | Check deployer/approver team membership |
+
+### 3. Set up AWS resources
+
+Use the Terraform module in `terraform/`:
 
 ```hcl
 module "deploy_bot" {
@@ -70,71 +129,101 @@ module "deploy_bot" {
 }
 ```
 
-The module grants ECR read access to **all repositories** in the account so new apps work without IAM changes. The EventBridge rule captures all ECR push events account-wide; the bot filters by configured apps and tag patterns. See [terraform/README.md](terraform/README.md) for details.
+The IRSA variables are optional. If omitted, the module creates only the IAM policies (no roles), which you can attach to IAM users directly. See [terraform/README.md](terraform/README.md) for the full variable reference.
 
-### Slack app setup
+### 4. Store secrets
 
-Use the `slack-manifest.json` file at the root of this repository to create the app in one step:
+Create an AWS Secrets Manager secret (or a Kubernetes Secret) with these keys:
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App > From a manifest**. Select your workspace, paste the contents of `slack-manifest.json`, and click through to create the app.
+```json
+{
+  "slack_bot_token": "xoxb-...",
+  "slack_app_token": "xapp-...",
+  "github_token": "github_pat_...",
+  "redis_addr": "your-redis:6379"
+}
+```
 
-2. Go to **Socket Mode** in the sidebar. Click **Generate Token**, name it (e.g. `socket`), add the `connections:write` scope, and click **Generate**. Copy the token (starts with `xapp-`) -- this is your `slack_app_token`.
+Set the `AWS_SECRET_NAME` and `AWS_REGION` environment variables on both deployments to point to it.
 
-3. Go to **OAuth & Permissions** and click **Install to Workspace**. Approve the permissions. Copy the **Bot User OAuth Token** (starts with `xoxb-`) -- this is your `slack_bot_token`.
+### 5. Customize config.json
 
-### GitHub permissions
+Copy `deploy/config.json` and fill in your values:
 
-A **fine-grained Personal Access Token** is required. Store it in the `github_token` secret field.
+```json
+{
+  "github_owner": "your-org",
+  "github_repo": "your-gitops-repo",
+  "slack_channel_id": "C0123456789",
+  "deployer_team": "your-org/developers",
+  "approver_team": "your-org/platform",
+  "apps": [
+    {
+      "app": "myapp",
+      "environment": "dev",
+      "kustomize_path": "apps/myapp/overlays/dev",
+      "ecr_repo": "myapp"
+    }
+  ]
+}
+```
 
-Create it at GitHub > Settings > Developer settings > Personal access tokens > Fine-grained tokens. Set the resource owner to your organisation.
+See [docs/configuration.md](docs/configuration.md) for the full reference.
 
-**Repository permissions** -- scope to the gitops repo only:
+### 6. Deploy with Kustomize
 
-| Permission | Level | Why |
-|---|---|---|
-| Contents | Read & write | Push kustomization branches |
-| Pull requests | Read & write | Create, merge, close PRs and post comments |
-| Commit statuses | Read & write | Set config validation status on repos (repo discovery) |
-
-**Organisation permissions:**
-
-| Permission | Level | Why |
-|---|---|---|
-| Members | Read | Check deployer/approver team membership |
-
-### Apply Kubernetes manifests
-
-The `deploy/` directory is a Kustomize base:
+The `deploy/` directory is a Kustomize base. Create an overlay for your cluster:
 
 ```bash
-# Review and customise
-kubectl kustomize deploy/
-
-# Apply
-kubectl apply -k deploy/
+# overlay/kustomization.yaml
+cat <<'EOF' > kustomization.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - github.com/ezubriski/deploy-bot/deploy
+images:
+  - name: deploy-bot
+    newName: ghcr.io/ezubriski/deploy-bot
+    newTag: latest
+configMapGenerator:
+  - name: deploy-bot-config
+    behavior: replace
+    files:
+      - config.json
+EOF
 ```
 
-Or apply directly:
+Apply:
 
 ```bash
-kubectl create namespace deploy-bot
-kubectl apply -f deploy/
+kubectl apply -k .
 ```
 
-Update the image tag in `deploy/deployment.yaml` to match the version you want to run. The public image is:
+### 7. Test it
 
-```
-ghcr.io/ezubriski/deploy-bot:<tag>
-```
+Run `/deploy help` in Slack. You should see the command help. Run `/deploy apps` to verify your app config loaded.
 
-The `deploy-bot-discovered` ConfigMap is created automatically by the repo scanner and should **not** be version-controlled. It is marked `optional: true` in the deployment so the bot starts without it.
+### 8. Add your first app
 
-### Endpoints
+Add an entry to `config.json` with `app`, `environment`, `kustomize_path`, and `ecr_repo`. The bot picks it up within 30 seconds -- no restart needed.
 
-| Process | Port | Paths |
-|---|---|---|
-| worker | 9090 | `/healthz` (liveness), `/readyz` (readiness), `/metrics` (Prometheus) |
-| receiver | 8080 | `/healthz` (liveness) |
+### 9. (Optional) Enable ECR push deploys
+
+1. Set `ecr_events_enabled = true` in the Terraform module (creates the SQS queue and EventBridge rule).
+2. Add `ecr_events.sqs_queue_url` to your config.
+3. Set `auto_deploy: true` on apps that should deploy without approval.
+4. Push an image to ECR and watch it deploy.
+
+See [docs/ecr-push-triggered-deploys.md](docs/ecr-push-triggered-deploys.md) for the full guide.
+
+### 10. (Optional) Enable repo-sourced app discovery
+
+1. Enable the repo scanner in config (`repo_scanner.enabled: true`, list target repos).
+2. App teams create a `.deploy-bot.json` in their repo root.
+3. Use the `deploy-bot-config` CLI or GitHub Action to validate in CI.
+4. The bot discovers new apps on the next scan cycle.
+
+See [docs/repo-sourced-app-discovery.md](docs/repo-sourced-app-discovery.md) for the full guide.
 
 ## Commands
 
@@ -176,24 +265,106 @@ All commands are available by mentioning the bot in any channel:
 
 Mention responses are posted in-channel (threaded if the mention was in a thread). The slash command provides a guided modal with dropdowns and validation.
 
+## Terraform module
+
+The `terraform/` directory contains a module that creates all AWS resources:
+
+- Separate IAM roles for bot (worker) and receiver -- least-privilege by default
+- IAM policies exported as managed policies (`bot_policy_arn`, `receiver_policy_arn`) so they work with IAM users when IRSA is not available
+- SQS queue and EventBridge rule for ECR push-triggered deploys (opt-in via `ecr_events_enabled`)
+- Optional `permissions_boundary` support
+
+The IRSA variables (`eks_oidc_provider_arn`, `eks_oidc_provider_url`) are optional. Omit them to create policies without roles.
+
+See [terraform/README.md](terraform/README.md) for the full variable and output reference.
+
+## deploy-bot-config CLI
+
+A standalone binary for validating `.deploy-bot.json` files. App teams use it locally or in CI to catch config errors before the bot scrapes their repo.
+
+**Usage:**
+
+```
+deploy-bot-config [--file PATH] [--format text|json]
+```
+
+**Exit codes:**
+
+| Code | Meaning |
+|---|---|
+| 0 | All apps valid |
+| 1 | Validation errors found |
+| 2 | File not found or JSON parse error |
+
+**Text output:**
+
+```
+$ deploy-bot-config --file .deploy-bot.json
+.deploy-bot.json (deploy-bot/v1)
+
+  ✓ apps[0] (myapp-dev): ok
+  ✓ apps[1] (myapp-prod): ok
+  ✗ apps[2] (broken): kustomize_path: required
+
+2/3 apps valid. 1 error found.
+```
+
+**JSON output:**
+
+```json
+$ deploy-bot-config --file .deploy-bot.json --format json
+{
+  "valid": false,
+  "api_version": "deploy-bot/v1",
+  "file": ".deploy-bot.json",
+  "apps_total": 3,
+  "apps_valid": 2,
+  "errors": [
+    {
+      "index": 2,
+      "app": "broken",
+      "field": "kustomize_path",
+      "message": "required"
+    }
+  ]
+}
+```
+
+### GitHub Action
+
+A reusable GitHub Action is provided at `.github/actions/validate-config/`. Add it to your repo's CI:
+
+```yaml
+- uses: ezubriski/deploy-bot/.github/actions/validate-config@main
+  with:
+    config-file: .deploy-bot.json  # default
+```
+
+The action builds the validator from source and runs it against your config file. Failures block the PR.
+
+## Endpoints
+
+| Process | Port | Paths |
+|---|---|---|
+| worker | 9090 | `/healthz` (liveness), `/readyz` (readiness), `/metrics` (Prometheus) |
+| receiver | 8080 | `/healthz` (liveness) |
+
 ## Development
 
 ```bash
-make build              # build both binaries to ./bin
-make test               # run unit tests
+make build              # build all binaries (bot, receiver, deploy-bot-config) to ./bin
+make test               # run unit tests (uses miniredis, no external deps)
 make test-pkg PKG=./internal/store/...  # single package
 make test-integ         # integration tests (requires .env.integration)
 make test-integ-single RUN=TestDeployAndApprove  # single integration test
-make lint               # run golangci-lint
-make image              # build container image with Podman (git short SHA)
-make ecr-login          # authenticate Podman to ECR
+make lint               # golangci-lint
+make image              # build container image with Podman
 make push               # build and push to ECR
+make push TAG=v1.2.3    # push with a specific tag
 make clean              # remove ./bin
 ```
 
-Override the image tag: `make push TAG=v1.2.3`
-
-Integration tests require a `.env.integration` file with `AWS_SECRET_NAME`, `AWS_REGION`, `INTEGRATION_REQUESTER_ID`, `INTEGRATION_REQUESTER_USERNAME`, `INTEGRATION_APPROVER_ID`, `INTEGRATION_APP`, `INTEGRATION_TAG`, and `CONFIG_PATH`.
+Integration tests require a `.env.integration` file. See [docs/integration-test-setup.md](docs/integration-test-setup.md) for the full setup.
 
 ## Monitoring
 
@@ -205,7 +376,7 @@ prometheus.io/port:   "9090"
 prometheus.io/path:   "/metrics"
 ```
 
-If you are running the Prometheus Operator, use a `ServiceMonitor`:
+For the Prometheus Operator, use a `ServiceMonitor`:
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -227,7 +398,7 @@ spec:
 GitHub Actions runs on pull requests and pushes to `main` and version tags (`v*`):
 
 1. **Test** -- runs `make test` (unit tests only; no external dependencies).
-2. **Build** (push events only, only if tests pass) -- builds with Podman and pushes to ghcr.io, tagged with the short SHA (`main` pushes) or the version (`v*` tags), plus `latest`. Also pushes to ECR if the `ECR_REGISTRY` repository secret is set.
+2. **Build** (push events only, after tests pass) -- builds with Podman and pushes to ghcr.io, tagged with the short SHA (`main` pushes) or the version (`v*` tags), plus `latest`. Also pushes to ECR if the `ECR_REGISTRY` repository secret is set.
 
 ## Further reading
 

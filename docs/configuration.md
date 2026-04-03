@@ -5,7 +5,33 @@ The bot uses two configuration sources:
 - **`config.json`** — mounted as a ConfigMap, hot-reloaded on file change (30s poll) or SIGHUP
 - **`discovered.json`** — written by the repo scanner (optional), merged at load time
 
-## Secrets (AWS Secrets Manager)
+## Secrets
+
+Secrets are loaded from one of two sources, checked in order:
+
+1. **File** (`SECRETS_PATH` env var) — a JSON file, typically mounted from a Kubernetes Secret
+2. **AWS Secrets Manager** (`AWS_SECRET_NAME` env var) — fetched at startup via the AWS SDK
+
+Set exactly one. If both are set, `SECRETS_PATH` takes precedence.
+
+### Option A: Kubernetes Secret (file mount)
+
+Create a K8s Secret and mount it as a volume:
+
+```bash
+kubectl create secret generic deploy-bot-secrets \
+  --namespace=deploy-bot \
+  --from-literal=secrets.json='{
+    "slack_bot_token": "xoxb-...",
+    "slack_app_token": "xapp-...",
+    "github_token":    "github_pat_...",
+    "redis_addr":      "redis:6379"
+  }'
+```
+
+Set `SECRETS_PATH=/etc/deploy-bot/secrets/secrets.json` in the deployment and mount the secret as a volume at `/etc/deploy-bot/secrets`.
+
+### Option B: AWS Secrets Manager
 
 Create a secret at the path set in `AWS_SECRET_NAME` (default `deploy-bot/secrets`):
 
