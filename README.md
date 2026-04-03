@@ -21,7 +21,7 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 - Slack app manifest for one-click app setup
 - GitHub Action and CLI for config validation
 
-⚙️ **Simple app configuration.** Define apps in `config.json` and the bot picks them up on the next hot-reload (30s poll or SIGHUP). For self-service, optional repo-sourced discovery lets app teams drop a `.deploy-bot.json` in their repo -- the bot discovers it, validates it, and starts deploying with no operator intervention.
+⚙️ **Simple app configuration.** Define apps in `config.json` and the bot picks them up on the next hot-reload (30s poll or SIGHUP). For self-service, optional [repo-sourced discovery](docs/repo-sourced-app-discovery.md) lets app teams drop a `.deploy-bot.json` in their repo -- the bot discovers it, validates it, and starts deploying with no operator intervention.
 
 🛡️ **Built for resilience.** The bot handles the rough edges of distributed systems:
 - Redis Streams consumer groups for exactly-once processing
