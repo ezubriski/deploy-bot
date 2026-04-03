@@ -6,11 +6,14 @@ import (
 	"testing"
 )
 
-func TestLiveness_AlwaysOK(t *testing.T) {
+func TestLiveness_NotHealthyByDefault(t *testing.T) {
 	h := &Handler{}
-	assertStatus(t, h.Liveness, http.StatusOK)
+	assertStatus(t, h.Liveness, http.StatusServiceUnavailable)
+}
 
-	h.SetCacheReady()
+func TestLiveness_HealthyAfterSet(t *testing.T) {
+	h := &Handler{}
+	h.SetHealthy()
 	assertStatus(t, h.Liveness, http.StatusOK)
 }
 
@@ -28,7 +31,6 @@ func TestReadiness_ReadyAfterCachePopulated(t *testing.T) {
 func TestReadiness_CacheReadyIsOnceOnly(t *testing.T) {
 	h := &Handler{}
 	h.SetCacheReady()
-	// Calling again is a no-op; readiness should still hold.
 	h.SetCacheReady()
 	assertStatus(t, h.Readiness, http.StatusOK)
 }

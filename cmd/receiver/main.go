@@ -21,6 +21,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/buffer"
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/ecrpoller"
+	"github.com/ezubriski/deploy-bot/internal/health"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/reposcanner"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
@@ -69,11 +70,22 @@ func main() {
 		log.Fatal("slack_app_token is required for the receiver (Socket Mode)")
 	}
 
+	hh := &health.Handler{}
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/healthz", hh.Liveness)
+		log.Info("health server listening", zap.String("addr", healthAddr))
+		if err := http.ListenAndServe(healthAddr, mux); err != nil {
+			log.Error("health server error", zap.Error(err))
+		}
+	}()
+
 	redisStore := store.New(secrets.RedisAddr, secrets.RedisToken)
 	log.Info("waiting for redis", zap.String("addr", secrets.RedisAddr))
 	if err := redisStore.WaitForRedis(ctx, time.Minute); err != nil {
 		log.Fatal("redis not available", zap.Error(err))
 	}
+	hh.SetHealthy()
 	log.Info("redis connected")
 	rdb := redisStore.Redis()
 
@@ -91,18 +103,6 @@ func main() {
 		log.Warn("approver cache initial refresh failed", zap.Error(err))
 	}
 	approverCache.StartRefresh(ctx, approverRefreshInterval)
-
-	go func() {
-		mux := http.NewServeMux()
-		mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("ok"))
-		})
-		log.Info("health server listening", zap.String("addr", healthAddr))
-		if err := http.ListenAndServe(healthAddr, mux); err != nil {
-			log.Error("health server error", zap.Error(err))
-		}
-	}()
 
 	// Start ECR poller if configured. It enqueues to the same Redis stream
 	// as Slack events, using its own buffer for Redis backpressure.

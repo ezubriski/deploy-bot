@@ -102,6 +102,7 @@ func main() {
 	if err := redisStore.WaitForRedis(ctx, time.Minute); err != nil {
 		log.Fatal("redis not available", zap.Error(err))
 	}
+	hh.SetHealthy()
 	log.Info("redis connected")
 
 	maxRetries, retryWait := cfgHolder.Load().GitHub.RateLimitConfig()

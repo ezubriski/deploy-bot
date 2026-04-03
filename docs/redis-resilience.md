@@ -2,10 +2,12 @@
 
 deploy-bot requires Redis to function. On startup, both the receiver and worker
 attempt to connect to Redis with retries every 5 seconds for up to 60 seconds.
-During this window the pod is alive (`/healthz` returns 200) but not ready
-(`/readyz` returns 503), so Kubernetes will not route traffic to it. If Redis
-is still unreachable after 60 seconds, the process exits. There is no degraded
-mode; Redis is not optional.
+During this window the pod reports both unhealthy (`/healthz` returns 503) and
+not ready (`/readyz` returns 503). If Redis is still unreachable after 60
+seconds, the process exits. Kubernetes liveness probes will restart the pod if
+the failure threshold is reached before the 60-second timeout, which is the
+expected behaviour — the restart backoff gives Redis time to come up. There is
+no degraded mode; Redis is not optional.
 
 ## What Redis holds
 
