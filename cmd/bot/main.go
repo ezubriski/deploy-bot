@@ -112,6 +112,9 @@ func main() {
 
 	val := validator.New(secrets.GitHubToken, rawSlack, cfgHolder.Load(), log)
 
+	// Log prod auto-deploy guard status at startup.
+	logProdAutoDeployGuard(initialCfg, auditLog, log)
+
 	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m, cfgHolder, log)
 	sw := sweeper.New(redisStore, ghClient, slackClient, auditLog, m, cfgHolder, log)
 
@@ -194,4 +197,33 @@ func main() {
 	log.Info("worker starting")
 	qw.Run(ctx, b.HandleEvent)
 	log.Info("worker stopped")
+}
+
+// logProdAutoDeployGuard logs the status of production auto-deploy at startup.
+func logProdAutoDeployGuard(cfg *config.Config, auditLog audit.Logger, log *zap.Logger) {
+	var prodAutoDeployApps []string
+	for _, app := range cfg.Apps {
+		if !app.AutoDeploy {
+			continue
+		}
+		if app.IsProd() && !cfg.Deployment.AllowProdAutoDeploy {
+			log.Warn("auto_deploy ignored for prod app (allow_prod_auto_deploy is false)",
+				zap.String("app", app.App),
+				zap.String("environment", app.Environment),
+			)
+			continue
+		}
+		if app.IsProd() {
+			prodAutoDeployApps = append(prodAutoDeployApps, app.App)
+		}
+	}
+	if len(prodAutoDeployApps) > 0 {
+		log.Info("production apps with auto-deploy enabled",
+			zap.Strings("apps", prodAutoDeployApps),
+		)
+		_ = auditLog.Log(context.Background(), audit.AuditEvent{
+			EventType: "startup",
+			Reason:    fmt.Sprintf("prod auto-deploy apps: %v", prodAutoDeployApps),
+		})
+	}
 }

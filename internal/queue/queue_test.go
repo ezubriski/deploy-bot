@@ -91,6 +91,41 @@ func TestDecode_InteractionCallback(t *testing.T) {
 	}
 }
 
+func TestDecode_ECRPushEvent(t *testing.T) {
+	evt := NewECRPushEvent(ECRPushEvent{
+		App:        "myapp",
+		Tag:        "v1.0.0",
+		Repository: "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp",
+	})
+
+	rdb := newTestClient(t)
+	ctx := context.Background()
+
+	if err := Enqueue(ctx, rdb, evt); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	msgs, err := rdb.XRange(ctx, StreamKey, "-", "+").Result()
+	if err != nil || len(msgs) == 0 {
+		t.Fatalf("expected 1 message in stream, got err=%v msgs=%d", err, len(msgs))
+	}
+
+	got, err := decode(msgs[0])
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Type != EventTypeECRPush {
+		t.Errorf("type = %q, want %q", got.Type, EventTypeECRPush)
+	}
+	ecrEvt, ok := got.Data.(ECRPushEvent)
+	if !ok {
+		t.Fatal("Data is not ECRPushEvent")
+	}
+	if ecrEvt.App != "myapp" || ecrEvt.Tag != "v1.0.0" {
+		t.Errorf("ecr event = %+v, want {App:myapp Tag:v1.0.0}", ecrEvt)
+	}
+}
+
 func TestDecode_UnknownType(t *testing.T) {
 	rdb := newTestClient(t)
 	ctx := context.Background()

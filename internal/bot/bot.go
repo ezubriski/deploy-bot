@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/audit"
+	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/ecr"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
@@ -91,6 +92,13 @@ func (b *Bot) HandleEvent(ctx context.Context, evt socketmode.Event) {
 		b.handleSlashCommand(ctx, evt)
 	case socketmode.EventTypeInteractive:
 		b.handleInteraction(ctx, evt)
+	case queue.EventTypeECRPush:
+		ecrEvt, ok := evt.Data.(queue.ECRPushEvent)
+		if !ok {
+			b.log.Error("bot: ecr_push event has unexpected data type")
+			return
+		}
+		b.handleECRPush(ctx, ecrEvt)
 	default:
 		b.log.Warn("bot: unhandled event type", zap.String("type", string(evt.Type)))
 	}

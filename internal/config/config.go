@@ -20,7 +20,25 @@ type Config struct {
 	Slack      SlackConfig      `json:"slack"`
 	Deployment DeploymentConfig `json:"deployment"`
 	AWS        AWSConfig        `json:"aws"`
+	ECREvents  ECREventsConfig  `json:"ecr_events,omitempty"`
 	Apps       []AppConfig      `json:"apps"`
+}
+
+// ECREventsConfig holds settings for ECR push-triggered deploys.
+// The feature is disabled when SQSQueueURL is empty.
+type ECREventsConfig struct {
+	SQSQueueURL  string `json:"sqs_queue_url,omitempty"`
+	PollInterval string `json:"poll_interval,omitempty"`
+}
+
+// PollIntervalDuration returns the parsed poll interval, defaulting to 30s.
+func (e *ECREventsConfig) PollIntervalDuration() time.Duration {
+	if e.PollInterval != "" {
+		if d, err := time.ParseDuration(e.PollInterval); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 30 * time.Second
 }
 
 type GitHubConfig struct {
@@ -97,11 +115,12 @@ func (s *SlackConfig) IsChannelAllowed(channelID string) bool {
 }
 
 type DeploymentConfig struct {
-	StaleDuration     string `json:"stale_duration"`
-	MergeMethod       string `json:"merge_method"`
-	LockTTL           string `json:"lock_ttl"`
-	Label             string `json:"label,omitempty"`
-	ReconcileInterval string `json:"reconcile_interval,omitempty"`
+	StaleDuration        string `json:"stale_duration"`
+	MergeMethod          string `json:"merge_method"`
+	LockTTL              string `json:"lock_ttl"`
+	Label                string `json:"label,omitempty"`
+	ReconcileInterval    string `json:"reconcile_interval,omitempty"`
+	AllowProdAutoDeploy  bool   `json:"allow_prod_auto_deploy,omitempty"`
 }
 
 // DeployLabel returns the configured GitHub label name, defaulting to "deploy-bot".
@@ -132,12 +151,34 @@ type AppConfig struct {
 	KustomizePath string `json:"kustomize_path"`
 	ECRRepo       string `json:"ecr_repo"`
 	TagPattern    string `json:"tag_pattern"`
+	// AutoDeploy, when true, causes ECR push-triggered deploys to merge
+	// automatically without human approval. Subject to the global
+	// AllowProdAutoDeploy guard for production environments.
+	AutoDeploy bool `json:"auto_deploy,omitempty"`
 	// AutoDeployApproverGroup is the Slack ID to notify for ECR-triggered deploys
 	// and no-op notifications. Use a channel ID (C…) to post there directly, or
 	// a user group ID (S…) to @mention the group in the deploy channel.
 	AutoDeployApproverGroup string `json:"auto_deploy_approver_group,omitempty"`
 
 	compiledPattern *regexp.Regexp
+}
+
+// IsProd returns true if the app's environment is "prod" or "production".
+func (a *AppConfig) IsProd() bool {
+	env := strings.ToLower(a.Environment)
+	return env == "prod" || env == "production"
+}
+
+// EffectiveAutoDeploy returns whether this app should auto-deploy, taking the
+// global production guard into account.
+func (a *AppConfig) EffectiveAutoDeploy(allowProdAutoDeploy bool) bool {
+	if !a.AutoDeploy {
+		return false
+	}
+	if a.IsProd() && !allowProdAutoDeploy {
+		return false
+	}
+	return true
 }
 
 // CompiledTagPattern returns a compiled version of TagPattern, compiling it
@@ -248,6 +289,18 @@ func LoadSecrets(ctx context.Context, secretName string) (*Secrets, error) {
 func (c *Config) AppByName(name string) (*AppConfig, bool) {
 	for i := range c.Apps {
 		if c.Apps[i].App == name {
+			return &c.Apps[i], true
+		}
+	}
+	return nil, false
+}
+
+// AppByECRRepo returns the first app whose ECR repo contains the given
+// repository name as a suffix. This matches the short repo name from
+// EventBridge events against the full URI in config.
+func (c *Config) AppByECRRepo(repoName string) (*AppConfig, bool) {
+	for i := range c.Apps {
+		if strings.HasSuffix(c.Apps[i].ECRRepo, "/"+repoName) || c.Apps[i].ECRRepo == repoName {
 			return &c.Apps[i], true
 		}
 	}

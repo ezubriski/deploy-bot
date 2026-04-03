@@ -18,6 +18,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/bot"
 	"github.com/ezubriski/deploy-bot/internal/buffer"
 	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/ecrpoller"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
@@ -86,6 +87,18 @@ func main() {
 			log.Error("health server error", zap.Error(err))
 		}
 	}()
+
+	// Start ECR poller if configured. It enqueues to the same Redis stream
+	// as Slack events, using its own buffer for Redis backpressure.
+	if cfg.ECREvents.SQSQueueURL != "" {
+		ecrBuf := buffer.New(buffer.DefaultSize, rdb, log)
+		go ecrBuf.Run(ctx)
+		poller, err := ecrpoller.New(ctx, rdb, ecrBuf, redisStore, config.NewHolder(cfg, configPath), log)
+		if err != nil {
+			log.Fatal("init ecr poller", zap.Error(err))
+		}
+		go poller.Run(ctx)
+	}
 
 	sm := socketmode.New(slackClient)
 
