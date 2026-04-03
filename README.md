@@ -8,21 +8,19 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 
 ## Why deploy-bot
 
-**No public network exposure required.** The receiver connects outbound via Slack Socket Mode (WebSocket) and SQS long-polling. No ingress controller, no webhooks, no load balancer, no public IP. Deploy it in a private subnet and forget about it.
+- 🔒 **No public network exposure** -- Socket Mode (outbound WebSocket) and SQS long-polling. No ingress, no webhooks, no load balancer. Deploy it in a private subnet and forget about it.
 
-**ECR push-triggered deploys.** A single EventBridge rule captures all ECR pushes account-wide. The bot filters by app and tag pattern. Add a new app and it works immediately -- no EventBridge changes, no GitHub webhooks, no per-repo CI pipelines.
+- 📦 **ECR push-triggered deploys** -- one EventBridge rule captures all ECR pushes account-wide. The bot filters by app and tag pattern. Add a new app and it works immediately -- no EventBridge changes, no GitHub webhooks, no per-repo CI pipelines.
 
-**Batteries included.** Terraform module, Kustomize base, Slack app manifest, GitHub Action, validation CLI tool. Getting started is config, not code.
+- 🔋 **Batteries included** -- Terraform module, Kustomize base, Slack app manifest, GitHub Action, validation CLI. Getting started is config, not code.
 
-**Simple app configuration.** Apps are defined explicitly in `config.json` -- add an entry and the bot picks it up on the next hot-reload. For organizations that prefer self-service, optional repo-sourced discovery lets app teams drop a `.deploy-bot.json` in their repo. The bot discovers it, validates it, and starts deploying -- no operator intervention. The `deploy-bot-config` CLI and GitHub Action let teams validate their config in CI before it gets scraped.
+- ⚙️ **Simple app configuration** -- define apps in `config.json` and the bot picks them up on the next hot-reload (30s poll or SIGHUP). For self-service, optional repo-sourced discovery lets app teams drop a `.deploy-bot.json` in their repo -- the bot discovers it, validates it, and starts deploying with no operator intervention.
 
-**Built for resilience.** Redis Streams consumer groups for exactly-once processing, in-memory buffer with backpressure during Redis outages, sweeper for expired deploys, automatic rebase on merge conflicts, GitHub reconciliation after Redis data loss.
+- 🛡️ **Built for resilience** -- Redis Streams consumer groups for exactly-once processing, in-memory buffer with backpressure during outages, sweeper for expired deploys, automatic rebase on merge conflicts, GitHub reconciliation after data loss.
 
-**Horizontal scaling.** Receiver and worker scale independently. Redis Streams consumer groups ensure each event processes once. Distributed Redis locks coordinate singleton work like the sweeper and reconciler across replicas.
+- 📈 **Horizontal scaling** -- receiver and worker scale independently. Consumer groups ensure each event processes once. Distributed Redis locks coordinate singleton work across replicas.
 
-**Hot-reload config.** Add an app to `config.json` and the bot picks it up within 30 seconds. No restart needed. SIGHUP also triggers reload.
-
-**Least-privilege IAM.** Separate IAM roles and policies for bot and receiver components. The Terraform module handles it. Policies are exported as managed policies so they work with IAM users too -- IRSA is optional.
+- 🔑 **Least-privilege IAM** -- separate roles and policies for bot and receiver. The Terraform module handles it. IRSA is optional.
 
 ## Architecture
 
