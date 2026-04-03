@@ -87,7 +87,14 @@ func reload(h *Holder, reason string, lastMod, lastDiscoveredMod *time.Time, onR
 	}
 	log.Info("config reloaded", zap.String("reason", reason), zap.String("path", h.path))
 	if onReload != nil {
-		onReload(newCfg)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Error("config reload callback panicked", zap.Any("panic", r))
+				}
+			}()
+			onReload(newCfg)
+		}()
 	}
 }
 

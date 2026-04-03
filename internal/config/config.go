@@ -318,6 +318,11 @@ func Load(path string) (*Config, error) {
 		if app.Environment == "" {
 			return nil, fmt.Errorf("app %q is missing required field \"environment\"", app.App)
 		}
+		if app.TagPattern != "" {
+			if _, err := regexp.Compile(app.TagPattern); err != nil {
+				return nil, fmt.Errorf("app %q has invalid tag_pattern: %w", app.App, err)
+			}
+		}
 	}
 	return &cfg, nil
 }

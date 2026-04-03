@@ -330,6 +330,34 @@ func TestMergeApps_DeduplicatesDiscovered(t *testing.T) {
 	}
 }
 
+func TestLoad_InvalidTagPattern(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	writeFile(t, path, `{"apps":[{"app":"a","environment":"dev","tag_pattern":"[invalid"}]}`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid tag_pattern")
+	}
+	if !strings.Contains(err.Error(), "invalid tag_pattern") {
+		t.Errorf("error = %v, want mention of invalid tag_pattern", err)
+	}
+}
+
+func TestLoad_ValidTagPattern(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	writeFile(t, path, `{"apps":[{"app":"a","environment":"dev","tag_pattern":"^v\\d+$"}]}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Apps) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(cfg.Apps))
+	}
+}
+
 func TestLoadWithDiscovered_NoFile(t *testing.T) {
 	dir := t.TempDir()
 	primaryPath := dir + "/config.json"
