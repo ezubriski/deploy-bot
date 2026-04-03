@@ -105,8 +105,12 @@ func (s *Store) GetAll(ctx context.Context) ([]*PendingDeploy, error) {
 		if v == nil {
 			continue
 		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
 		var d PendingDeploy
-		if err := json.Unmarshal([]byte(v.(string)), &d); err != nil {
+		if err := json.Unmarshal([]byte(s), &d); err != nil {
 			continue
 		}
 		deploys = append(deploys, &d)

@@ -294,13 +294,13 @@ func (b *Bot) handleViewSubmission(ctx context.Context, callback slack.Interacti
 }
 
 func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.InteractionCallback) {
-	values := callback.View.State.Values
+	vals := ModalValues(callback.View.State.Values)
 
-	appVal := values[BlockApp][ActionApp].SelectedOption.Value
-	tagVal := values[BlockTag][ActionTag].SelectedOption.Value
-	manualTag := values[BlockTagManual][ActionTagManual].Value
-	reason := values[BlockReason][ActionReason].Value
-	approverID := values[BlockApprover][ActionApprover].SelectedUser
+	appVal := vals.SelectedOption(BlockApp, ActionApp)
+	tagVal := vals.SelectedOption(BlockTag, ActionTag)
+	manualTag := vals.Text(BlockTagManual, ActionTagManual)
+	reason := vals.Text(BlockReason, ActionReason)
+	approverID := vals.SelectedUser(BlockApprover, ActionApprover)
 
 	// Manual tag overrides dropdown selection
 	tag := tagVal

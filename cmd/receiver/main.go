@@ -214,10 +214,10 @@ func validateAndDispatch(
 	callback slack.InteractionCallback,
 	log *zap.Logger,
 ) {
-	values := callback.View.State.Values
-	appVal := values[bot.BlockApp][bot.ActionApp].SelectedOption.Value
-	approverID := values[bot.BlockApprover][bot.ActionApprover].SelectedUser
-	manualTag := values[bot.BlockTagManual][bot.ActionTagManual].Value
+	vals := bot.ModalValues(callback.View.State.Values)
+	appVal := vals.SelectedOption(bot.BlockApp, bot.ActionApp)
+	approverID := vals.SelectedUser(bot.BlockApprover, bot.ActionApprover)
+	manualTag := vals.Text(bot.BlockTagManual, bot.ActionTagManual)
 
 	errs := make(map[string]string)
 

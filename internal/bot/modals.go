@@ -30,6 +30,58 @@ const (
 	ActionReject  = "action_reject"
 )
 
+// ModalValues provides safe access to Slack modal view state values,
+// returning zero values instead of panicking on missing blocks or actions.
+type ModalValues map[string]map[string]slack.BlockAction
+
+// SelectedOption returns the selected option value for a static select block.
+func (m ModalValues) SelectedOption(block, action string) string {
+	if m == nil {
+		return ""
+	}
+	actions, ok := m[block]
+	if !ok {
+		return ""
+	}
+	a, ok := actions[action]
+	if !ok {
+		return ""
+	}
+	return a.SelectedOption.Value
+}
+
+// Text returns the plain text value for an input block.
+func (m ModalValues) Text(block, action string) string {
+	if m == nil {
+		return ""
+	}
+	actions, ok := m[block]
+	if !ok {
+		return ""
+	}
+	a, ok := actions[action]
+	if !ok {
+		return ""
+	}
+	return a.Value
+}
+
+// SelectedUser returns the selected user ID for a user select block.
+func (m ModalValues) SelectedUser(block, action string) string {
+	if m == nil {
+		return ""
+	}
+	actions, ok := m[block]
+	if !ok {
+		return ""
+	}
+	a, ok := actions[action]
+	if !ok {
+		return ""
+	}
+	return a.SelectedUser
+}
+
 func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack.OptionBlockObject, preSelectedApp, preSelectedTag, staleDuration, commandName string) slack.ModalViewRequest {
 	appElement := slack.NewOptionsSelectBlockElement(
 		slack.OptTypeStatic,
