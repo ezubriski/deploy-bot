@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Use `make help` to list all targets. Common ones:
 
 ```bash
-# Build both binaries to ./bin
+# Build all binaries (bot, receiver, deploy-bot-config) to ./bin
 make build
 
 # Unit tests (no network required)
@@ -33,9 +33,9 @@ make ecr-login      # authenticate Podman to ECR
 
 Unit tests use `miniredis` -- no real Redis needed.
 
-Integration tests require `.env.integration` with `AWS_SECRET_NAME`, `AWS_REGION`,
-`INTEGRATION_REQUESTER_ID`, `INTEGRATION_APPROVER_ID`, `INTEGRATION_APP`, `INTEGRATION_TAG`,
-and `CONFIG_PATH`.
+Integration tests require `.env.integration` with `AWS_SECRET_NAME`,
+`INTEGRATION_REQUESTER_ID`, `INTEGRATION_REQUESTER_USERNAME`, `INTEGRATION_APPROVER_ID`,
+`INTEGRATION_APP`, and optionally `CONFIG_PATH` (defaults to `testdata/config.json`).
 
 ## Architecture
 
@@ -47,7 +47,7 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 
 ### Key architectural points
 
-**Config vs Secrets split**: `config.json` (mounted as a ConfigMap, hot-reloaded) holds app definitions, GitHub/Slack config, and AWS settings. Secrets (tokens, Redis addr) come from AWS Secrets Manager at startup via `AWS_SECRET_NAME` env var. A second `discovered.json` file (optional, from repo scanner) provides repo-sourced app entries that are merged at load time.
+**Config vs Secrets split**: `config.json` (mounted via configMapGenerator, hot-reloaded) holds app definitions, GitHub/Slack config, and AWS settings. Secrets (tokens, Redis addr) come from a JSON file via `SECRETS_PATH` env var or from AWS Secrets Manager via `AWS_SECRET_NAME` env var. Bot and receiver use separate secrets so each component only accesses the credentials it needs. A second `discovered.json` file (optional, from repo scanner) provides repo-sourced app entries that are merged at load time.
 
 **App config**: Each app entry requires an `environment` field (e.g. `"dev"`, `"prod"`). App names include the environment (e.g. `myapp-dev`, `myapp-prod`). This is included in lock keys, branch names, PR titles, and all user-facing messages so deployments across environments are unambiguous.
 
@@ -71,8 +71,9 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 
 | Package | Responsibility |
 |---|---|
-| `cmd/bot` | Wiring: loads config/secrets, constructs all components, runs election loop |
+| `cmd/bot` | Wiring: loads config/secrets, constructs all components, runs sweeper and queue worker with distributed Redis locks |
 | `cmd/receiver` | Slack Socket Mode receiver: accepts events, validates deploy modal submissions inline, enqueues to Redis Streams. Also runs ECR poller and repo scanner |
+| `cmd/deploy-bot-config` | Standalone CLI for validating `.deploy-bot.json` files |
 | `internal/bot` | Slash command handlers, @mention handlers, interaction (button) handlers, modal builders, ECR push handler |
 | `internal/store` | Redis operations: pending deploys, per-app/env locks, history list |
 | `internal/sweeper` | Expires stale deploys on a ticker; reconciles GitHub on startup |
@@ -81,7 +82,10 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 | `internal/validator` | Slack->GitHub identity resolution, team membership gating |
 | `internal/ecr` | ECR tag listing, in-memory cache with periodic refresh |
 | `internal/ecrpoller` | SQS long-poll loop for ECR push events from EventBridge |
+| `internal/repoconfig` | Shared `.deploy-bot.json` schema, parsing (with apiVersion), and validation (stdlib-only) |
 | `internal/reposcanner` | Repo-sourced app discovery: scan, validate, conflict detect, ConfigMap write |
+| `internal/sanitize` | Input sanitization for user-provided text in Slack/GitHub and tag/branch name validation |
+| `internal/approvers` | Cached approver team membership lookups with periodic refresh |
 | `internal/audit` | Audit log writes (S3 or zap fallback) |
 | `internal/config` | Config struct, file loading, discovered-path merge, hot-reload watcher, `Holder` |
 | `internal/metrics` | Prometheus counters/gauges (pending deploys, deploy events by app/outcome) |
@@ -97,7 +101,7 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 
 ### Branch and commit naming
 
-Branches: `deploy/<env>-<app>-<tag>` (tag sanitized: `/`, `:`, `+`, ` ` -> `-`)
+Branches: `deploy/<env>-<app>-<tag>` (tags with unsafe characters are rejected by `sanitize.TagIsSafe`; the branch suffix is sanitized by `sanitize.BranchName` which replaces `/`, `:`, `+`, ` `, `~`, `^`, `*`, `?`, `[`, `]`, `\`, `..` with `-`, collapses runs, and trims)
 
 Commits and PR titles: `deploy(<env>/<app>): update image tag to <tag>`
 
@@ -124,4 +128,4 @@ All commands are also available via `@bot <command>` in any channel. Responses a
 
 ### Deployment
 
-Kubernetes manifests are in `deploy/` as a Kustomize base. AWS resources (IAM, SQS, EventBridge) are in `terraform/`. See [docs/configuration.md](docs/configuration.md) for the full config reference.
+Kubernetes manifests are in `deploy/` as a Kustomize base (`receiver.yaml`, `worker.yaml`, `rbac.yaml`, `service.yaml`, `namespace.yaml`, `redis.yaml`). Config is mounted via `configMapGenerator` with suffix hashing disabled. AWS resources (IAM roles, policies, SQS, EventBridge) are in `terraform/`. See [docs/configuration.md](docs/configuration.md) for the full config reference.
