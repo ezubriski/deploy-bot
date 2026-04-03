@@ -8,19 +8,31 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 
 ## Why deploy-bot
 
-- 🔒 **No public network exposure** -- Socket Mode (outbound WebSocket) and SQS long-polling. No ingress, no webhooks, no load balancer. Deploy it in a private subnet and forget about it.
+🔒 **No public network exposure.** Socket Mode (outbound WebSocket) and SQS long-polling. No ingress, no webhooks, no load balancer. Deploy it in a private subnet and forget about it.
 
-- 📦 **ECR push-triggered deploys** -- one EventBridge rule captures all ECR pushes account-wide. The bot filters by app and tag pattern. Add a new app and it works immediately -- no EventBridge changes, no GitHub webhooks, no per-repo CI pipelines.
+📦 **ECR push-triggered deploys.** One EventBridge rule captures all ECR pushes account-wide. The bot filters by app and tag pattern. Add a new app and it works immediately:
+- No EventBridge changes
+- No GitHub webhooks
+- No per-repo CI pipelines
 
-- 🔋 **Batteries included** -- Terraform module, Kustomize base, Slack app manifest, GitHub Action, validation CLI. Getting started is config, not code.
+🔋 **Batteries included.** Getting started is config, not code:
+- Terraform module for IAM, SQS, and EventBridge
+- Kustomize base for Kubernetes manifests
+- Slack app manifest for one-click app setup
+- GitHub Action and CLI for config validation
 
-- ⚙️ **Simple app configuration** -- define apps in `config.json` and the bot picks them up on the next hot-reload (30s poll or SIGHUP). For self-service, optional repo-sourced discovery lets app teams drop a `.deploy-bot.json` in their repo -- the bot discovers it, validates it, and starts deploying with no operator intervention.
+⚙️ **Simple app configuration.** Define apps in `config.json` and the bot picks them up on the next hot-reload (30s poll or SIGHUP). For self-service, optional repo-sourced discovery lets app teams drop a `.deploy-bot.json` in their repo -- the bot discovers it, validates it, and starts deploying with no operator intervention.
 
-- 🛡️ **Built for resilience** -- Redis Streams consumer groups for exactly-once processing, in-memory buffer with backpressure during outages, sweeper for expired deploys, automatic rebase on merge conflicts, GitHub reconciliation after data loss.
+🛡️ **Built for resilience.** The bot handles the rough edges of distributed systems:
+- Redis Streams consumer groups for exactly-once processing
+- In-memory buffer with backpressure during Redis outages
+- Sweeper for expired deploys
+- Automatic rebase on merge conflicts
+- GitHub reconciliation after data loss
 
-- 📈 **Horizontal scaling** -- receiver and worker scale independently. Consumer groups ensure each event processes once. Distributed Redis locks coordinate singleton work across replicas.
+📈 **Horizontal scaling.** Receiver and worker scale independently. Consumer groups ensure each event processes once. Distributed Redis locks coordinate singleton work across replicas.
 
-- 🔑 **Least-privilege IAM** -- separate roles and policies for bot and receiver. The Terraform module handles it. IRSA is optional.
+🔑 **Least-privilege IAM.** Separate roles and policies for bot and receiver. The Terraform module handles it. IRSA is optional.
 
 ## Architecture
 
