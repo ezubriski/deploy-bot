@@ -14,7 +14,7 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 
 **Batteries included.** Terraform module, Kustomize base, Slack app manifest, GitHub Action, validation CLI tool. Getting started is config, not code.
 
-**Repo-sourced app discovery.** App teams drop a `.deploy-bot.json` in their repo. The bot discovers it, validates it, and starts deploying -- no operator intervention. The `deploy-bot-config` CLI and GitHub Action let teams validate their config in CI before it gets scraped.
+**Simple app configuration.** Apps are defined explicitly in `config.json` -- add an entry and the bot picks it up on the next hot-reload. For organizations that prefer self-service, optional repo-sourced discovery lets app teams drop a `.deploy-bot.json` in their repo. The bot discovers it, validates it, and starts deploying -- no operator intervention. The `deploy-bot-config` CLI and GitHub Action let teams validate their config in CI before it gets scraped.
 
 **Built for resilience.** Redis Streams consumer groups for exactly-once processing, in-memory buffer with backpressure during Redis outages, sweeper for expired deploys, automatic rebase on merge conflicts, GitHub reconciliation after Redis data loss.
 
