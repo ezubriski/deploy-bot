@@ -6,7 +6,8 @@ namespace: deploy-bot
 resources:
   - namespace.yaml
   - rbac.yaml
-  - deployment.yaml
+  - receiver.yaml
+  - worker.yaml
   - service.yaml
 
 # Redis is provided as a separate resource for development/testing.
