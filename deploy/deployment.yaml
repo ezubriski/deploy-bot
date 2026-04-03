@@ -36,7 +36,12 @@ spec:
               drop: ["ALL"]
           volumeMounts:
             - name: config
-              mountPath: /etc/deploy-bot
+              mountPath: /etc/deploy-bot/config.json
+              subPath: config.json
+              readOnly: true
+            - name: discovered
+              mountPath: /etc/deploy-bot/discovered.json
+              subPath: discovered.json
               readOnly: true
           ports:
             - name: health
@@ -58,6 +63,10 @@ spec:
         - name: config
           configMap:
             name: deploy-bot-config
+        - name: discovered
+          configMap:
+            name: deploy-bot-discovered
+            optional: true
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -101,7 +110,12 @@ spec:
               drop: ["ALL"]
           volumeMounts:
             - name: config
-              mountPath: /etc/deploy-bot
+              mountPath: /etc/deploy-bot/config.json
+              subPath: config.json
+              readOnly: true
+            - name: discovered
+              mountPath: /etc/deploy-bot/discovered.json
+              subPath: discovered.json
               readOnly: true
           ports:
             - name: metrics
@@ -129,3 +143,7 @@ spec:
         - name: config
           configMap:
             name: deploy-bot-config
+        - name: discovered
+          configMap:
+            name: deploy-bot-discovered
+            optional: true

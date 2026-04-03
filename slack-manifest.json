@@ -21,7 +21,7 @@
       {
         "command": "/deploy",
         "description": "Request, approve, and manage deployments",
-        "usage_hint": "[app] [status | history [app] | tags <app> | cancel <pr> | nudge <pr> | rollback <app>]",
+        "usage_hint": "[app-env] [status | history | apps | conflicts | tags <app-env> | cancel <pr> | nudge <pr> | rollback <app-env> | help]",
         "should_escape": false
       }
     ]
@@ -29,6 +29,7 @@
   "oauth_config": {
     "scopes": {
       "bot": [
+        "app_mentions:read",
         "commands",
         "chat:write",
         "users:read",
@@ -38,6 +39,11 @@
     }
   },
   "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "app_mention"
+      ]
+    },
     "interactivity": {
       "is_enabled": true
     },

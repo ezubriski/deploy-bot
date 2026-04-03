@@ -2,7 +2,7 @@
 
 > This project was largely built with [Claude Code](https://claude.ai/code). Human contributors are welcome.
 
-A Slack bot that gates Kubernetes deployments behind an approval workflow. Developers request deployments via `/deploy`, approvers approve or reject via Slack buttons, and the bot creates and merges GitHub PRs that update kustomize image tags in a GitOps repo. Argo CD picks up merged PRs and deploys.
+A Slack bot that gates Kubernetes deployments behind an approval workflow. Developers request deployments via `/deploy` or `@bot deploy`, approvers approve or reject via Slack buttons, and the bot creates and merges GitHub PRs that update kustomize image tags in a GitOps repo. Argo CD picks up merged PRs and deploys.
 
 ## How it works
 
@@ -10,7 +10,7 @@ A Slack bot that gates Kubernetes deployments behind an approval workflow. Devel
 Developer          Receiver          Redis Stream       Worker            GitHub / Argo CD
     |                  |                   |               |                     |
     |-- /deploy ------>|                   |               |                     |
-    |                  |-- enqueue ------->|               |                     |
+    |   @bot deploy    |-- enqueue ------->|               |                     |
     |                  |<-- ack -----------|               |                     |
     |                  |                   |-- event ----->|                     |
     |                  |                   |               |-- create PR ------->|
@@ -21,171 +21,80 @@ Approver               |                   |               |                    
     |                  |                   |-- event ----->|                     |
     |                  |                   |               |-- merge PR -------->|
     |                  |                   |               |                     |-- deploy
+    |                  |                   |               |                     |
+ECR Push               |                   |               |                     |
+    |  EventBridge --->|                   |               |                     |
+    |  (SQS)           |-- enqueue ------->|               |                     |
+    |                  |                   |-- event ----->|                     |
+    |                  |                   |               |-- create PR ------->|
+    |                  |                   |               |   (auto-merge or    |
+    |                  |                   |               |    request approval)|
 ```
 
 Two processes share a single container image:
 
-- **receiver** — connects to Slack via Socket Mode, validates incoming events, and enqueues them to a Redis Stream. Stateless; run 2+ replicas.
-- **worker** — consumes events from the stream, runs all business logic (GitHub API, ECR, audit logging). Run 2+ replicas; Redis Streams consumer groups ensure each event is processed once.
+- **receiver** -- connects to Slack via Socket Mode, validates incoming events, and enqueues them to a Redis Stream. Also polls SQS for ECR push events and scans repos for app config (when enabled). Stateless; run 2+ replicas.
+- **worker** -- consumes events from the stream, runs all business logic (GitHub API, ECR, audit logging). Run 2+ replicas; Redis Streams consumer groups ensure each event is processed once.
 
 ## Prerequisites
 
 - Kubernetes cluster (EKS recommended)
-- AWS — Secrets Manager, ECR (for app images), S3 (audit log), STS (cross-account roles)
-- ElastiCache for Redis — Multi-AZ with automatic failover and AOF persistence enabled. **Redis is required; the bot will not start without it.** See [docs/redis-resilience.md](docs/redis-resilience.md) for behaviour during outages and after a flush.
-- GitHub fine-grained PAT with repository (contents, pull requests) and organisation (members read) permissions
+- AWS -- Secrets Manager, ECR (for app images), S3 (audit log, optional), SQS + EventBridge (ECR push deploys, optional)
+- ElastiCache for Redis -- Multi-AZ with automatic failover and AOF persistence enabled. **Redis is required; the bot will not start without it.** See [docs/redis-resilience.md](docs/redis-resilience.md) for behaviour during outages and after a flush.
+- GitHub fine-grained PAT with repository (contents, pull requests, commit statuses) and organisation (members read) permissions
 - Slack App in Socket Mode with the following bot scopes:
-  `commands`, `chat:write`, `users:read`, `users:read.email`, `im:write`
+  `app_mentions:read`, `commands`, `chat:write`, `users:read`, `users:read.email`, `im:write`
 
 ## Configuration
 
-### Secrets (AWS Secrets Manager)
+See [docs/configuration.md](docs/configuration.md) for the full configuration reference covering secrets, config file fields, ECR events, repo discovery, and per-app settings.
 
-Create a secret at the path set in `AWS_SECRET_NAME` (default `deploy-bot/secrets`):
-
-```bash
-aws secretsmanager create-secret \
-  --name deploy-bot/secrets \
-  --secret-string '{
-    "slack_bot_token": "xoxb-111111111111-2222222222222-xxxxxxxxxxxxxxxxxxxxxxxx",
-    "slack_app_token": "xapp-1-Axxxxxxxxxx-2222222222222-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "github_token":    "github_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "redis_addr":      "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
-    "redis_token":     "your-elasticache-auth-token"
-  }'
-```
-
-`redis_token` is optional. Omit the field entirely if your ElastiCache cluster does not require authentication.
-
-| Field | Required | Where to find it |
-|---|---|---|
-| `slack_bot_token` | Yes | Slack App → OAuth & Permissions → Bot User OAuth Token (`xoxb-`) |
-| `slack_app_token` | Yes | Slack App → Basic Information → App-Level Tokens (`xapp-`) — needs `connections:write` scope |
-| `github_token` | Yes | GitHub → Settings → Developer settings → Fine-grained tokens — scope to the gitops repo with Contents/Pull requests (read/write) and the org with Members (read) |
-| `redis_addr` | Yes | ElastiCache → Cluster → Primary endpoint (include port, typically `6379`) |
-| `redis_token` | No | ElastiCache → Cluster → Auth token — only set if in-transit encryption with token auth is enabled |
-
-To rotate a value without touching the others:
-
-```bash
-aws secretsmanager get-secret-value --secret-id deploy-bot/secrets \
-  --query SecretString --output text | \
-  jq '.github_token = "github_pat_newtoken"' | \
-  xargs -0 aws secretsmanager put-secret-value \
-    --secret-id deploy-bot/secrets --secret-string
-```
-
-### Config file (`config.json`)
-
-Mounted as a ConfigMap. Hot-reloaded on SIGHUP or file change (30s poll). See `deploy/configmap.yaml` for a full example.
-
-| Field | Description |
-|---|---|
-| `github.org` | GitHub organisation |
-| `github.repo` | GitOps repository name |
-| `github.deployer_team` | GitHub team slug — members can request deploys |
-| `github.approver_team` | GitHub team slug — members can approve/reject |
-| `github.users` | Optional map of Slack user ID → GitHub login for users with private GitHub emails (e.g. `{"U12345": "ghlogin"}`) |
-| `slack.deploy_channel` | Channel where deployment notifications are posted |
-| `slack.allowed_channels` | Optional list of channel IDs where `/deploy` commands are accepted. Omit or leave empty to allow all channels. Use channel IDs (e.g. `C01234567`), not names |
-| `slack.buffer_size` | Number of events the receiver buffers in memory when Redis is unavailable (default `500`). Buffered events are retried with exponential backoff until Redis recovers. Events are never ACKed to Slack from the buffer — Slack retries in parallel |
-| `deployment.stale_duration` | How long a pending deploy waits before expiring (default `2h`) |
-| `deployment.merge_method` | `squash`, `merge`, or `rebase` (default `squash`) |
-| `deployment.lock_ttl` | Per-app lock duration (default `5m`) |
-| `deployment.label` | GitHub label applied to every deploy PR (default `deploy-bot`). Used to rediscover open PRs after a Redis flush |
-| `deployment.reconcile_interval` | If set (e.g. `1h`), periodically reconcile open labeled PRs against Redis state. Disabled by default; startup reconciliation always runs |
-| `aws.ecr_role_arn` | Optional role to assume for ECR reads. Omit to use the pod/instance identity directly |
-| `aws.ecr_region` | Region of app ECR repositories |
-| `aws.audit_role_arn` | Optional role to assume for S3 audit writes. Omit to use the pod/instance identity directly |
-| `aws.audit_region` | Region of the audit S3 bucket |
-| `aws.audit_bucket` | S3 bucket for audit logs |
-| `apps[]` | One entry per deployable application (see below) |
-
-Each app entry:
-
-```json
-{
-  "app": "myapp",
-  "environment": "prod",
-  "kustomize_path": "apps/myapp/kustomization.yaml",
-  "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",
-  "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
-}
-```
-
-`environment` is required. It is included in lock keys (`lock:<env>/<app>`), branch names (`deploy/<env>-<app>-<tag>`), PR titles, and all user-facing Slack messages so that deployments across environments are unambiguous.
+Quick start: copy `deploy/configmap.yaml`, fill in your values, and apply.
 
 ## Deployment
 
-### IAM
+### AWS resources
 
-The bot role is attached to the `deploy-bot` Kubernetes ServiceAccount via IRSA (`deploy/rbac.yaml`). It needs permission to read its own secret, plus ECR and S3 permissions for the pod identity directly:
+Use the Terraform module in `terraform/` to create the IAM role, policies, and optionally the SQS queue and EventBridge rule for ECR push events:
 
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "ReadBotSecret",
-      "Effect": "Allow",
-      "Action": "secretsmanager:GetSecretValue",
-      "Resource": "arn:aws:secretsmanager:<region>:<account>:secret:deploy-bot/secrets-*"
-    },
-    {
-      "Sid": "ReadECR",
-      "Effect": "Allow",
-      "Action": [
-        "ecr:GetAuthorizationToken",
-        "ecr:DescribeImages",
-        "ecr:BatchGetImage",
-        "ecr:ListImages"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "WriteAuditLog",
-      "Effect": "Allow",
-      "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::<audit_bucket>/deploy-bot/*"
-    }
-  ]
+```hcl
+module "deploy_bot" {
+  source = "./terraform"
+
+  region                = "us-east-1"
+  account_id            = "123456789012"
+  eks_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"
+  eks_oidc_provider_url = "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"
+  audit_bucket          = "my-audit-logs"
+  ecr_events_enabled    = true
 }
 ```
 
-> `ecr:GetAuthorizationToken` requires `Resource: "*"` — it cannot be scoped to a repository ARN.
-
-The `aws.ecr_role_arn` and `aws.audit_role_arn` config fields are optional. Omit them to use the pod identity directly (as above). Set them only if ECR or S3 live in a separate AWS account that requires cross-account role assumption.
+The module grants ECR read access to **all repositories** in the account so new apps work without IAM changes. The EventBridge rule captures all ECR push events account-wide; the bot filters by configured apps and tag patterns. See [terraform/README.md](terraform/README.md) for details.
 
 ### Slack app setup
 
-Use the `slack-manifest.json` file at the root of this repository to create
-the app in one step:
+Use the `slack-manifest.json` file at the root of this repository to create the app in one step:
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click
-   **Create New App → From a manifest**. Select your workspace, paste the
-   contents of `slack-manifest.json`, and click through to create the app.
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App > From a manifest**. Select your workspace, paste the contents of `slack-manifest.json`, and click through to create the app.
 
-2. Go to **Socket Mode** in the sidebar. You will see Socket Mode is already
-   enabled. Click **Generate Token**, name it (e.g. `socket`), add the
-   `connections:write` scope, and click **Generate**. Copy the token (starts
-   with `xapp-`) — this is your `slack_app_token`.
+2. Go to **Socket Mode** in the sidebar. Click **Generate Token**, name it (e.g. `socket`), add the `connections:write` scope, and click **Generate**. Copy the token (starts with `xapp-`) -- this is your `slack_app_token`.
 
-3. Go to **OAuth & Permissions** and click **Install to Workspace**. Approve
-   the permissions. Copy the **Bot User OAuth Token** (starts with `xoxb-`) —
-   this is your `slack_bot_token`.
+3. Go to **OAuth & Permissions** and click **Install to Workspace**. Approve the permissions. Copy the **Bot User OAuth Token** (starts with `xoxb-`) -- this is your `slack_bot_token`.
 
 ### GitHub permissions
 
 A **fine-grained Personal Access Token** is required. Store it in the `github_token` secret field.
 
-Create it at GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens. Set the resource owner to your organisation (not your personal account) so that organisation permissions can be granted.
+Create it at GitHub > Settings > Developer settings > Personal access tokens > Fine-grained tokens. Set the resource owner to your organisation.
 
-**Repository permissions** — scope to the gitops repo only:
+**Repository permissions** -- scope to the gitops repo only:
 
 | Permission | Level | Why |
 |---|---|---|
 | Contents | Read & write | Push kustomization branches |
 | Pull requests | Read & write | Create, merge, close PRs and post comments |
+| Commit statuses | Read & write | Set config validation status on repos (repo discovery) |
 
 **Organisation permissions:**
 
@@ -193,22 +102,32 @@ Create it at GitHub → Settings → Developer settings → Personal access toke
 |---|---|---|
 | Members | Read | Check deployer/approver team membership |
 
-If your organisation requires administrator approval for fine-grained tokens with organisation permissions (`Settings → Personal access tokens → Require administrator approval`), the token will be pending until an org admin approves it.
+### Apply Kubernetes manifests
 
-### Apply manifests
+The `deploy/` directory is a Kustomize base:
+
+```bash
+# Review and customise
+kubectl kustomize deploy/
+
+# Apply
+kubectl apply -k deploy/
+```
+
+Or apply directly:
 
 ```bash
 kubectl create namespace deploy-bot
 kubectl apply -f deploy/
 ```
 
-Update the image tag in `deploy/deployment.yaml` to match the version you want to run. The ECR image is:
+Update the image tag in `deploy/deployment.yaml` to match the version you want to run. The public image is:
 
 ```
 ghcr.io/ezubriski/deploy-bot:<tag>
 ```
 
-A public image is available on GitHub Container Registry (free, unlimited pulls). To use your own ECR build instead, update the image field in `deploy/deployment.yaml`.
+The `deploy-bot-discovered` ConfigMap is created automatically by the repo scanner and should **not** be version-controlled. It is marked `optional: true` in the deployment so the bot starts without it.
 
 ### Endpoints
 
@@ -217,21 +136,45 @@ A public image is available on GitHub Container Registry (free, unlimited pulls)
 | worker | 9090 | `/healthz` (liveness), `/readyz` (readiness), `/metrics` (Prometheus) |
 | receiver | 8080 | `/healthz` (liveness) |
 
-The worker's `/readyz` returns 503 until the ECR cache has completed its first populate. The receiver's `/healthz` is always 200 if the process is running.
+## Commands
 
-## Slack commands
+App names include the environment suffix (e.g. `myapp-dev`, `myapp-prod`). Use `apps` to list configured apps.
+
+### Slash commands
 
 | Command | Description |
 |---|---|
 | `/deploy` | Open the deployment request modal |
-| `/deploy <app>` | Open the modal pre-selected to an app |
+| `/deploy <app-env>` | Open the modal pre-selected to an app |
 | `/deploy status` | List all pending deployments |
-| `/deploy history [app]` | Show recent completed deployments |
-| `/deploy tags <app>` | List the 20 most recent valid tags for an app |
-| `/deploy tags <app> <tag>` | Verify a specific tag exists in ECR |
+| `/deploy history [app-env]` | Show recent completed deployments |
+| `/deploy apps` | List all configured apps and their source (operator or repo) |
+| `/deploy conflicts` | List repo-sourced apps blocked by operator config |
+| `/deploy tags <app-env>` | List the 20 most recent valid tags for an app |
+| `/deploy tags <app-env> <tag>` | Verify a specific tag exists in ECR |
 | `/deploy cancel <pr>` | Cancel your own pending deployment |
 | `/deploy nudge <pr>` | Re-ping the approver |
-| `/deploy rollback <app>` | Re-deploy the previous approved tag |
+| `/deploy rollback <app-env>` | Re-deploy the previous approved tag |
+| `/deploy help` | Show command help |
+
+### @mention commands
+
+All commands are available by mentioning the bot in any channel:
+
+| Command | Description |
+|---|---|
+| `@bot deploy <app-env> <tag> [@approver] [reason]` | Create a deploy PR with positional args |
+| `@bot status` | List pending deployments (visible in channel) |
+| `@bot history [app-env]` | Show recent deploys |
+| `@bot apps` | List configured apps |
+| `@bot conflicts` | List config conflicts |
+| `@bot tags <app-env>` | List recent tags |
+| `@bot cancel <pr>` | Cancel your own deployment |
+| `@bot nudge <pr>` | Remind the approver |
+| `@bot rollback <app-env>` | Deploy the previous tag |
+| `@bot help` | Show command help |
+
+Mention responses are posted in-channel (threaded if the mention was in a thread). The slash command provides a guided modal with dropdowns and validation.
 
 ## Development
 
@@ -262,35 +205,7 @@ prometheus.io/port:   "9090"
 prometheus.io/path:   "/metrics"
 ```
 
-If your Prometheus is configured with Kubernetes pod auto-discovery, the following scrape job will pick up any pod across the cluster that carries these annotations — not just deploy-bot:
-
-```yaml
-scrape_configs:
-  - job_name: kubernetes-annotated-pods
-    kubernetes_sd_configs:
-      - role: pod
-    relabel_configs:
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-        action: keep
-        regex: "true"
-      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
-        action: replace
-        target_label: __metrics_path__
-        regex: (.+)
-      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
-        action: replace
-        regex: ([^:]+)(?::\d+)?;(\d+)
-        replacement: $1:$2
-        target_label: __address__
-      - source_labels: [__meta_kubernetes_pod_label_app]
-        action: replace
-        target_label: app
-      - source_labels: [__meta_kubernetes_namespace]
-        action: replace
-        target_label: namespace
-```
-
-If you are running the Prometheus Operator, use a `ServiceMonitor` instead:
+If you are running the Prometheus Operator, use a `ServiceMonitor`:
 
 ```yaml
 apiVersion: monitoring.coreos.com/v1
@@ -311,7 +226,16 @@ spec:
 
 GitHub Actions runs on pull requests and pushes to `main` and version tags (`v*`):
 
-1. **Test** — runs `make test` (unit tests only; no external dependencies). Runs on all triggers including PRs from forks.
-2. **Build** (push events only, only if tests pass) — builds with Podman and pushes to ghcr.io, tagged with the short SHA (`main` pushes) or the version (`v*` tags), plus `latest`. Also pushes to ECR if the `ECR_REGISTRY` repository secret is set.
+1. **Test** -- runs `make test` (unit tests only; no external dependencies).
+2. **Build** (push events only, only if tests pass) -- builds with Podman and pushes to ghcr.io, tagged with the short SHA (`main` pushes) or the version (`v*` tags), plus `latest`. Also pushes to ECR if the `ECR_REGISTRY` repository secret is set.
 
-Required repository secrets for ECR push: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `ECR_REGISTRY`. The ghcr.io push uses the built-in `GITHUB_TOKEN` and requires no extra secrets.
+## Further reading
+
+- [Configuration reference](docs/configuration.md)
+- [ECR push-triggered deploys](docs/ecr-push-triggered-deploys.md)
+- [Repo-sourced app discovery](docs/repo-sourced-app-discovery.md)
+- [No-op deploy handling](docs/no-op-deploy-handling.md)
+- [Merge conflict handling](docs/merge-conflict-handling.md)
+- [Redis resilience](docs/redis-resilience.md)
+- [Integration test setup](docs/integration-test-setup.md)
+- [Terraform module](terraform/README.md)

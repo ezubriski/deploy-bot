@@ -13,23 +13,34 @@ data:
         "approver_team": "senior-engineers"
       },
       "slack": {
-        "deploy_channel": "prod-deployments"
+        "deploy_channel": "C01234567"
       },
       "deployment": {
         "stale_duration": "2h",
-        "merge_method": "squash"
+        "merge_method": "squash",
+        "lock_ttl": "5m",
+        "allow_prod_auto_deploy": false
       },
       "aws": {
-        "ecr_role_arn": "arn:aws:iam::ECR_ACCOUNT_ID:role/deploy-bot-ecr-reader",
         "ecr_region": "us-east-1",
-        "audit_role_arn": "arn:aws:iam::AUDIT_ACCOUNT_ID:role/deploy-bot-audit-writer",
         "audit_bucket": "my-audit-logs",
         "audit_region": "us-east-1"
       },
+      "ecr_events": {
+        "sqs_queue_url": "",
+        "poll_interval": "30s"
+      },
+      "repo_discovery": {
+        "enabled": false,
+        "poll_interval": "5m",
+        "config_file": ".deploy-bot.json",
+        "repo_prefix": ""
+      },
       "apps": [
         {
-          "app": "myapp",
-          "kustomize_path": "apps/myapp/kustomization.yaml",
+          "app": "myapp-prod",
+          "environment": "prod",
+          "kustomize_path": "apps/myapp/overlays/prod/kustomization.yaml",
           "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",
           "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
         }

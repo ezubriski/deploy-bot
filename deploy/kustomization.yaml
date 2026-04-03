@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: deploy-bot
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+
+# Redis is provided as a separate resource for development/testing.
+# In production, use a managed Redis service (e.g. ElastiCache).
+# Uncomment the following line to include the in-cluster Redis:
+# - redis.yaml
