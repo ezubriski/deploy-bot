@@ -443,6 +443,21 @@ func (c *Config) LockTTL() (time.Duration, error) {
 	return time.ParseDuration(c.Deployment.LockTTL)
 }
 
+// LoadSecretsFromFile reads and parses bot secrets from a JSON file on disk.
+// This supports Kubernetes Secret volume mounts as an alternative to AWS
+// Secrets Manager.
+func LoadSecretsFromFile(path string) (*Secrets, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read secrets file: %w", err)
+	}
+	var secrets Secrets
+	if err := json.Unmarshal(data, &secrets); err != nil {
+		return nil, fmt.Errorf("parse secrets file: %w", err)
+	}
+	return &secrets, nil
+}
+
 // LoadSecrets fetches and parses the bot secrets from AWS Secrets Manager.
 func LoadSecrets(ctx context.Context, secretName string) (*Secrets, error) {
 	if secretName == "" {

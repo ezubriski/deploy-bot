@@ -396,6 +396,47 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+func TestLoadSecretsFromFile(t *testing.T) {
+	t.Run("valid file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := dir + "/secrets.json"
+		writeFile(t, path, `{
+			"slack_bot_token": "xoxb-test",
+			"slack_app_token": "xapp-test",
+			"github_token": "ghp_test",
+			"redis_addr": "localhost:6379"
+		}`)
+
+		s, err := LoadSecretsFromFile(path)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if s.SlackBotToken != "xoxb-test" {
+			t.Errorf("SlackBotToken = %q", s.SlackBotToken)
+		}
+		if s.RedisAddr != "localhost:6379" {
+			t.Errorf("RedisAddr = %q", s.RedisAddr)
+		}
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		_, err := LoadSecretsFromFile("/nonexistent/secrets.json")
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		dir := t.TempDir()
+		path := dir + "/bad.json"
+		writeFile(t, path, `not json`)
+		_, err := LoadSecretsFromFile(path)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
 func TestRepoDiscoveryDefaults(t *testing.T) {
 	rd := &RepoDiscoveryConfig{}
 	if rd.PollIntervalDuration() != 5*time.Minute {

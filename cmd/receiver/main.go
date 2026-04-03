@@ -51,7 +51,14 @@ func main() {
 		log.Fatal("load config", zap.Error(err))
 	}
 
-	secrets, err := config.LoadSecrets(ctx, os.Getenv("AWS_SECRET_NAME"))
+	var secrets *config.Secrets
+	if sp := os.Getenv("SECRETS_PATH"); sp != "" {
+		secrets, err = config.LoadSecretsFromFile(sp)
+	} else if sn := os.Getenv("AWS_SECRET_NAME"); sn != "" {
+		secrets, err = config.LoadSecrets(ctx, sn)
+	} else {
+		log.Fatal("set SECRETS_PATH or AWS_SECRET_NAME")
+	}
 	if err != nil {
 		log.Fatal("load secrets", zap.Error(err))
 	}
