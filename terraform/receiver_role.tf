@@ -26,6 +26,19 @@ data "aws_iam_policy_document" "receiver_assume_role" {
       }
     }
   }
+
+  dynamic "statement" {
+    for_each = var.enable_ec2_trust ? [1] : []
+    content {
+      actions = ["sts:AssumeRole"]
+      effect  = "Allow"
+
+      principals {
+        type        = "Service"
+        identifiers = ["ec2.amazonaws.com"]
+      }
+    }
+  }
 }
 
 resource "aws_iam_role" "receiver" {

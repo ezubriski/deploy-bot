@@ -74,6 +74,12 @@ variable "ecr_events_visibility_timeout" {
   default     = 300
 }
 
+variable "enable_ec2_trust" {
+  description = "Add an EC2 trust policy to the roles, allowing EC2 instances to assume them"
+  type        = bool
+  default     = false
+}
+
 variable "permissions_boundary" {
   description = "ARN of an IAM permissions boundary to attach to the bot role. Leave empty for no boundary"
   type        = string
