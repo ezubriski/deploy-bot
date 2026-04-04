@@ -4,7 +4,7 @@ metadata:
   name: deploy-bot-worker
   namespace: deploy-bot
 spec:
-  replicas: 0
+  replicas: 2
   selector:
     matchLabels:
       app: deploy-bot-worker
