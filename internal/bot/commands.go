@@ -272,8 +272,8 @@ func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilt
 		age := now.Sub(e.CompletedAt).Round(time.Minute)
 		icon := eventIcon(e.EventType)
 		lines = append(lines, fmt.Sprintf(
-			"%s *%s* (%s) `%s` — <%s|#%d> — <@%s> — %s ago",
-			icon, e.App, e.Environment, e.Tag, e.PRURL, e.PRNumber, e.RequesterID, age,
+			"%s *%s* (%s) `%s` — <%s|#%d> — %s — %s ago",
+			icon, e.App, e.Environment, e.Tag, e.PRURL, e.PRNumber, slackMention(e.RequesterID), age,
 		))
 	}
 

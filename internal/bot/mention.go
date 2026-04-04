@@ -109,8 +109,8 @@ func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent
 	for _, d := range deploys {
 		age := now.Sub(d.RequestedAt).Round(time.Minute)
 		lines = append(lines, fmt.Sprintf(
-			"• *%s* (%s) `%s` — PR <%s|#%d> — <@%s> — %s old — _%s_",
-			d.App, d.Environment, d.Tag, d.PRURL, d.PRNumber, d.RequesterID, age, d.State,
+			"• *%s* (%s) `%s` — PR <%s|#%d> — %s — %s old — _%s_",
+			d.App, d.Environment, d.Tag, d.PRURL, d.PRNumber, slackMention(d.RequesterID), age, d.State,
 		))
 	}
 	b.replyMention(ctx, evt, "*Pending Deployments:*\n"+strings.Join(lines, "\n"))
@@ -136,8 +136,8 @@ func (b *Bot) handleMentionHistory(ctx context.Context, evt queue.AppMentionEven
 		age := now.Sub(e.CompletedAt).Round(time.Minute)
 		icon := eventIcon(e.EventType)
 		lines = append(lines, fmt.Sprintf(
-			"%s *%s* (%s) `%s` — <%s|#%d> — <@%s> — %s ago",
-			icon, e.App, e.Environment, e.Tag, e.PRURL, e.PRNumber, e.RequesterID, age,
+			"%s *%s* (%s) `%s` — <%s|#%d> — %s — %s ago",
+			icon, e.App, e.Environment, e.Tag, e.PRURL, e.PRNumber, slackMention(e.RequesterID), age,
 		))
 		count++
 		if count >= defaultLimit {

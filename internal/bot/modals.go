@@ -204,8 +204,8 @@ func buildRejectModal(prNumber int, app, env, tag string) slack.ModalViewRequest
 
 func buildApproverMessage(deploy pendingInfo) []slack.MsgOption {
 	text := fmt.Sprintf(
-		"*Deployment Request* — <@%s> your approval is needed\n\n*App:* %s\n*Environment:* %s\n*Tag:* `%s`\n*Requester:* <@%s>\n*Reason:* %s\n*PR:* <%s|#%d>",
-		deploy.ApproverID, deploy.App, deploy.Environment, deploy.Tag, deploy.RequesterID, sanitize.SlackText(deploy.Reason, 500), deploy.PRURL, deploy.PRNumber,
+		"*Deployment Request* — %s your approval is needed\n\n*App:* %s\n*Environment:* %s\n*Tag:* `%s`\n*Requester:* %s\n*Reason:* %s\n*PR:* <%s|#%d>",
+		slackMention(deploy.ApproverID), deploy.App, deploy.Environment, deploy.Tag, slackMention(deploy.RequesterID), sanitize.SlackText(deploy.Reason, 500), deploy.PRURL, deploy.PRNumber,
 	)
 	btnApprove := slack.NewButtonBlockElement(ActionApprove, fmt.Sprintf("%d", deploy.PRNumber),
 		slack.NewTextBlockObject("plain_text", "Approve", false, false))
