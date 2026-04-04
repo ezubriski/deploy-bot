@@ -510,3 +510,16 @@ func (c *Config) AppByECRRepo(repoName string) (*AppConfig, bool) {
 	}
 	return nil, false
 }
+
+// AppsByECRRepo returns all apps whose ECR repo matches the given repository
+// name. Multiple apps may share the same ECR repo (e.g. the same image
+// deployed across environments).
+func (c *Config) AppsByECRRepo(repoName string) []*AppConfig {
+	var matches []*AppConfig
+	for i := range c.Apps {
+		if strings.HasSuffix(c.Apps[i].ECRRepo, "/"+repoName) || c.Apps[i].ECRRepo == repoName {
+			matches = append(matches, &c.Apps[i])
+		}
+	}
+	return matches
+}

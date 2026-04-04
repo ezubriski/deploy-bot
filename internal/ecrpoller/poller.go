@@ -144,57 +144,64 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 	imageTag := eb.Detail.ImageTag
 
 	cfg := p.cfg.Load()
-	appCfg, ok := cfg.AppByECRRepo(repoName)
-	if !ok {
+	matchingApps := cfg.AppsByECRRepo(repoName)
+	if len(matchingApps) == 0 {
 		p.log.Debug("ecrpoller: no app matches repo", zap.String("repo", repoName))
 		p.deleteMessage(ctx, msg)
 		return
 	}
 
-	// Validate tag against pattern.
-	if appCfg.TagPattern != "" && !appCfg.CompiledTagPattern().MatchString(imageTag) {
-		p.log.Debug("ecrpoller: tag does not match pattern",
+	enqueued := 0
+	for _, appCfg := range matchingApps {
+		// Validate tag against pattern.
+		if appCfg.TagPattern != "" && !appCfg.CompiledTagPattern().MatchString(imageTag) {
+			p.log.Debug("ecrpoller: tag does not match pattern",
+				zap.String("app", appCfg.App),
+				zap.String("tag", imageTag),
+				zap.String("pattern", appCfg.TagPattern),
+			)
+			continue
+		}
+
+		// Check deploy lock — skip if locked.
+		locked, err := p.store.IsLocked(ctx, appCfg.Environment, appCfg.App)
+		if err != nil {
+			p.log.Error("ecrpoller: check lock", zap.String("app", appCfg.App), zap.Error(err))
+			continue
+		}
+		if locked {
+			p.log.Info("ecrpoller: app locked, skipping",
+				zap.String("app", appCfg.App),
+				zap.String("tag", imageTag),
+			)
+			continue
+		}
+
+		// Enqueue to Redis stream (via buffer on failure).
+		evt := queue.NewECRPushEvent(queue.ECRPushEvent{
+			App:        appCfg.App,
+			Tag:        imageTag,
+			Repository: appCfg.ECRRepo,
+		})
+
+		if err := queue.Enqueue(ctx, p.rdb, evt); err != nil {
+			p.log.Warn("ecrpoller: enqueue failed, buffering", zap.String("app", appCfg.App), zap.Error(err))
+			p.buf.Add(evt)
+		}
+		enqueued++
+		p.log.Info("ecrpoller: event enqueued",
 			zap.String("app", appCfg.App),
 			zap.String("tag", imageTag),
-			zap.String("pattern", appCfg.TagPattern),
 		)
-		p.deleteMessage(ctx, msg)
-		return
 	}
 
-	// Check deploy lock — discard if locked.
-	locked, err := p.store.IsLocked(ctx, appCfg.Environment, appCfg.App)
-	if err != nil {
-		p.log.Error("ecrpoller: check lock", zap.String("app", appCfg.App), zap.Error(err))
-		// Don't delete — let SQS redeliver after visibility timeout.
-		return
-	}
-	if locked {
-		p.log.Info("ecrpoller: app locked, discarding",
-			zap.String("app", appCfg.App),
-			zap.String("tag", imageTag),
-		)
-		p.deleteMessage(ctx, msg)
-		return
-	}
-
-	// Enqueue to Redis stream (via buffer on failure).
-	evt := queue.NewECRPushEvent(queue.ECRPushEvent{
-		App:        appCfg.App,
-		Tag:        imageTag,
-		Repository: appCfg.ECRRepo,
-	})
-
-	if err := queue.Enqueue(ctx, p.rdb, evt); err != nil {
-		p.log.Warn("ecrpoller: enqueue failed, buffering", zap.String("app", appCfg.App), zap.Error(err))
-		p.buf.Add(evt)
-	}
-
-	// Delete SQS message only after successful enqueue/buffer.
+	// Delete SQS message after processing all matching apps.
 	p.deleteMessage(ctx, msg)
-	p.log.Info("ecrpoller: event enqueued",
-		zap.String("app", appCfg.App),
+	p.log.Info("ecrpoller: processed push event",
+		zap.String("repo", repoName),
 		zap.String("tag", imageTag),
+		zap.Int("matched", len(matchingApps)),
+		zap.Int("enqueued", enqueued),
 	)
 }
 
