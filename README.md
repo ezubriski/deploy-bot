@@ -424,12 +424,18 @@ spec:
       path: /metrics
 ```
 
+## Example
+
+See the bot opening and closing PRs in a live gitops repo: [aFakeBusiness/gitops](https://github.com/aFakeBusiness/gitops)
+
 ## CI
 
-GitHub Actions runs on pull requests and pushes to `main` and version tags (`v*`):
+GitHub Actions runs on pull requests and pushes to `main` and version tags (`v*`). Lint, test, and build fire in parallel on self-hosted runners:
 
-1. **Test** -- runs `make test` (unit tests only; no external dependencies).
-2. **Build** (push events only, after tests pass) -- builds with Podman and pushes to ghcr.io, tagged with the short SHA (`main` pushes) or the version (`v*` tags), plus `latest`. Also pushes to ECR if the `ECR_REGISTRY` repository secret is set.
+1. **Lint** -- `golangci-lint run`
+2. **Test** -- `make test` (unit tests with `-race`; no external dependencies)
+3. **Build and push** -- builds with Podman and pushes to ghcr.io tagged with the short commit SHA. Also pushes to ECR if the `ECR_REGISTRY` repository secret is set.
+4. **Promote** (after all three pass) -- tags the SHA image as `latest`, and with the semver tag on `v*` pushes.
 
 ## Further reading
 
