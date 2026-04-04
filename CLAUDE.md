@@ -111,7 +111,7 @@ Commits and PR titles: `deploy(<env>/<app>): update image tag to <tag>`
 |---|---|
 | `/deploy` | Opens modal |
 | `/deploy <app-env>` | Opens modal pre-selected to app |
-| `/deploy status` | Lists pending deploys |
+| `/deploy list` | Lists pending deploys (alias: `status`) |
 | `/deploy history [app-env]` | Shows last N completed events |
 | `/deploy apps` | Lists configured apps with source (operator/repo) |
 | `/deploy conflicts` | Lists repo-sourced apps blocked by operator config |

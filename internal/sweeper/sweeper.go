@@ -88,7 +88,7 @@ func (s *Sweeper) ReconstructHistory(ctx context.Context) {
 // ReconcileFromGitHub scans open PRs carrying the deploy-bot label (pending or
 // base) and re-hydrates any that are missing from Redis. This recovers state
 // after a Redis flush or when entries expire before the sweeper can act. PRs
-// are re-inserted into Redis so they appear in /deploy status and can be
+// are re-inserted into Redis so they appear in /deploy list and can be
 // cancelled or approved through normal flows.
 func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 	cfg := s.cfg.Load()
@@ -133,7 +133,7 @@ func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 			continue
 		}
 
-		// Re-hydrate the pending deploy so it appears in /deploy status
+		// Re-hydrate the pending deploy so it appears in /deploy list
 		// and can be acted on through normal flows (cancel, approve).
 		createdAt := issue.GetCreatedAt().Time
 		expiresAt := createdAt.Add(staleDuration)

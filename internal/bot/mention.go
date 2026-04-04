@@ -19,6 +19,7 @@ import (
 )
 
 var mentionCommands = map[string]bool{
+	"list":      true,
 	"status":    true,
 	"history":   true,
 	"apps":      true,
@@ -590,7 +591,7 @@ func (b *Bot) mentionHelp() string {
 App names include the environment suffix (e.g. ` + "`myapp-dev`" + `, ` + "`myapp-prod`" + `). Use ` + "`apps`" + ` to list them.
 
 • ` + "`deploy <app-env> <tag> [@approver] [reason]`" + `  — create a deploy PR
-• ` + "`status`" + `  — list pending deployments
+• ` + "`list`" + `  — list pending deployments (alias: ` + "`status`" + `)
 • ` + "`history [app-env]`" + `  — show recent completed deploys
 • ` + "`apps`" + `  — list all configured apps and their source
 • ` + "`conflicts`" + `  — list repo-sourced apps blocked by operator config

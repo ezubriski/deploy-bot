@@ -266,7 +266,7 @@ App names include the environment suffix (e.g. `myapp-dev`, `myapp-prod`). Use `
 |---|---|
 | `/deploy` | Open the deployment request modal |
 | `/deploy <app-env>` | Open the modal pre-selected to an app |
-| `/deploy status` | List all pending deployments |
+| `/deploy list` | List all pending deployments (alias: `status`) |
 | `/deploy history [app-env]` | Show recent completed deployments |
 | `/deploy apps` | List all configured apps and their source (operator or repo) |
 | `/deploy conflicts` | List repo-sourced apps blocked by operator config |
@@ -284,7 +284,7 @@ All commands are available by mentioning the bot in any channel:
 | Command | Description |
 |---|---|
 | `@bot deploy <app-env> <tag> [@approver] [reason]` | Create a deploy PR with positional args |
-| `@bot status` | List pending deployments (visible in channel) |
+| `@bot list` | List pending deployments (alias: `status`) |
 | `@bot history [app-env]` | Show recent deploys |
 | `@bot apps` | List configured apps |
 | `@bot conflicts` | List config conflicts |

@@ -114,11 +114,11 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 }
 
 // handleStatus lists pending deployments, optionally filtered by environment
-// and/or app name prefix:
+// and/or app name:
 //
-//	/deploy status              — all pending
-//	/deploy status prod         — all prod deploys
-//	/deploy status prod nginx   — prod deploys matching "nginx"
+//	/deploy list              — all pending
+//	/deploy list prod         — all prod deploys
+//	/deploy list prod nginx   — prod deploys matching "nginx"
 func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand, envFilter, appFilter string) {
 	deploys, err := b.store.GetAll(ctx)
 	if err != nil {
@@ -541,7 +541,7 @@ App names include the environment suffix (e.g. `+"`myapp-dev`"+`, `+"`myapp-prod
 
 • `+"`%s`"+`  — open the deploy modal
 • `+"`%s <app-env>`"+`  — open the deploy modal pre-selected to an app
-• `+"`%s status`"+`  — list pending deployments
+• `+"`%s list`"+`  — list pending deployments (alias: `+"`status`"+`)
 • `+"`%s history [app-env]`"+`  — show recent completed deploys
 • `+"`%s apps`"+`  — list all configured apps and their source
 • `+"`%s conflicts`"+`  — list repo-sourced apps blocked by operator config
