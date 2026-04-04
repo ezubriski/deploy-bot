@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	keyPrefix     = "pending:"
-	lockPrefix    = "lock:"
-	sysLockPrefix = "syslock:"
-	historyKey    = "history"
+	keyPrefix      = "pending:"
+	lockPrefix     = "lock:"
+	sysLockPrefix  = "syslock:"
+	threadPrefix   = "thread:"
+	historyKey     = "history"
 	// HistoryMaxLen is the maximum number of entries kept in the history list.
 	HistoryMaxLen = 100
 )
@@ -250,6 +251,25 @@ func (s *Store) TryLock(ctx context.Context, name string, ttl time.Duration) (bo
 		return false, fmt.Errorf("trylock %s: %w", name, err)
 	}
 	return ok, nil
+}
+
+// GetThreadTS returns the Slack thread timestamp for an environment's deploy
+// thread, or empty string if none exists.
+func (s *Store) GetThreadTS(ctx context.Context, env string) (string, error) {
+	ts, err := s.rdb.Get(ctx, threadPrefix+env).Result()
+	if err == redis.Nil {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get thread ts %s: %w", env, err)
+	}
+	return ts, nil
+}
+
+// SetThreadTS stores the Slack thread timestamp for an environment's deploy
+// thread with the given TTL.
+func (s *Store) SetThreadTS(ctx context.Context, env, ts string, ttl time.Duration) error {
+	return s.rdb.Set(ctx, threadPrefix+env, ts, ttl).Err()
 }
 
 // PRNumberFromKey extracts the PR number from a Redis key like "pending:123".

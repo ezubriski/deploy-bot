@@ -133,12 +133,28 @@ type SlackConfig struct {
 	DeployChannel   string   `json:"deploy_channel"`
 	AllowedChannels []string `json:"allowed_channels,omitempty"`
 	BufferSize      int      `json:"buffer_size,omitempty"`
+	// ThreadThreshold controls when deploy notifications are threaded by
+	// environment to avoid channel flooding:
+	//   0 or omitted: default to 4
+	//  -1: never thread (always flat)
+	//   1: always thread
+	//   N: thread when N+ deploys are pending in the same environment
+	ThreadThreshold *int `json:"thread_threshold,omitempty"`
 	// RateLimitMaxRetries is the maximum number of retries on a Slack 429
 	// rate-limit response. Defaults to 3.
 	RateLimitMaxRetries int    `json:"rate_limit_max_retries,omitempty"`
 	// RateLimitRetryWait is the maximum duration to wait between retries.
 	// Accepts Go duration strings (e.g. "30s"). Defaults to "30s".
 	RateLimitRetryWait  string `json:"rate_limit_retry_wait,omitempty"`
+}
+
+// EffectiveThreadThreshold returns the resolved thread threshold.
+// 0/omitted defaults to 4.
+func (s *SlackConfig) EffectiveThreadThreshold() int {
+	if s.ThreadThreshold == nil {
+		return 4
+	}
+	return *s.ThreadThreshold
 }
 
 // RateLimitConfig returns the parsed Slack rate limit retry settings with

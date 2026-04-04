@@ -203,12 +203,14 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
-	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+	approvedOpts := []slack.MsgOption{
 		slack.MsgOptionText(fmt.Sprintf(
 			"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *approved* by <@%s> — merging now.",
 			d.App, d.Environment, d.Tag, d.PRURL, prNumber, approverID,
 		), false),
-	)
+	}
+	approvedOpts = append(approvedOpts, threadOption(b.getThreadTS(ctx, d.Environment))...)
+	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, approvedOpts...)
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
 		EventType:   audit.EventApproved,
@@ -439,18 +441,18 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	_ = b.gh.CommentRequested(ctx, prNumber, requesterGH, appVal, tag, reason)
 
 	// Post approval request to the deploy channel with Approve/Reject buttons.
-	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
-		buildApproverMessage(pendingInfo{
-			App:         appVal,
-			Environment: env,
-			Tag:         tag,
-			PRNumber:    prNumber,
-			PRURL:       prURL,
-			RequesterID: requesterID,
-			ApproverID:  approverID,
-			Reason:      reason,
-		})...,
-	)
+	approvalOpts := buildApproverMessage(pendingInfo{
+		App:         appVal,
+		Environment: env,
+		Tag:         tag,
+		PRNumber:    prNumber,
+		PRURL:       prURL,
+		RequesterID: requesterID,
+		ApproverID:  approverID,
+		Reason:      reason,
+	})
+	approvalOpts = append(approvalOpts, threadOption(b.getThreadTS(ctx, env))...)
+	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, approvalOpts...)
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
 		EventType:   audit.EventRequested,
@@ -526,12 +528,14 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
 	_ = b.store.Delete(ctx, prNumber)
 
-	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
+	rejectedOpts := []slack.MsgOption{
 		slack.MsgOptionText(fmt.Sprintf(
 			"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *rejected* by <@%s>.\n\n*Reason:* %s",
 			d.App, d.Environment, d.Tag, d.PRURL, prNumber, approverID, sanitize.SlackText(rejReason, 500),
 		), false),
-	)
+	}
+	rejectedOpts = append(rejectedOpts, threadOption(b.getThreadTS(ctx, d.Environment))...)
+	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel, rejectedOpts...)
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
 		EventType:   audit.EventRejected,

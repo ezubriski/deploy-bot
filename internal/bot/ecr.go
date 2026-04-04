@@ -128,12 +128,14 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 	_ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel())
 	_ = b.store.ReleaseLock(ctx, env, evt.App)
 
-	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+	autoDeployOpts := []slack.MsgOption{
 		slack.MsgOptionText(fmt.Sprintf(
 			"Auto-deployed *%s* (%s) `%s` (ECR push). <%s|PR #%d> merged.",
 			evt.App, env, evt.Tag, prURL, prNumber,
 		), false),
-	)
+	}
+	autoDeployOpts = append(autoDeployOpts, threadOption(b.getThreadTS(ctx, env))...)
+	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, autoDeployOpts...)
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
 		EventType:   audit.EventApproved,
@@ -242,17 +244,20 @@ func (b *Bot) postECRApprovalRequest(ctx context.Context, appCfg *config.AppConf
 		),
 	}
 
+	// Thread if volume threshold is met.
+	opts := append(blocks, threadOption(b.getThreadTS(ctx, deploy.Environment))...)
+
 	group := appCfg.AutoDeployApproverGroup
 	switch {
 	case strings.HasPrefix(group, "S"):
 		// User group: mention in the deploy channel.
 		mention := fmt.Sprintf("<!subteam^%s>", group)
-		blocks = append(blocks, slack.MsgOptionText(mention+" "+text, false))
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, blocks...)
+		opts = append(opts, slack.MsgOptionText(mention+" "+text, false))
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
 	case strings.HasPrefix(group, "C"):
 		// Channel: post directly there.
-		_, _, _ = b.slack.PostMessageContext(ctx, group, blocks...)
+		_, _, _ = b.slack.PostMessageContext(ctx, group, opts...)
 	default:
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, blocks...)
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
 	}
 }
