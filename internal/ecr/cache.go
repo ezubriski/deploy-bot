@@ -119,15 +119,20 @@ func (c *Cache) Populate(ctx context.Context) {
 	c.mu.RUnlock()
 
 	// Deduplicate by repo — multiple apps may share the same ECR repo.
+	type appEntry struct {
+		name string
+		ac   *appCache
+	}
 	type repoGroup struct {
-		firstName string
-		ac        *appCache
+		apps []appEntry
 	}
 	byRepo := map[string]*repoGroup{}
 	for name, ac := range apps {
 		key := ac.registryID + "/" + ac.repoName
-		if _, ok := byRepo[key]; !ok {
-			byRepo[key] = &repoGroup{firstName: name, ac: ac}
+		if g, ok := byRepo[key]; ok {
+			g.apps = append(g.apps, appEntry{name, ac})
+		} else {
+			byRepo[key] = &repoGroup{apps: []appEntry{{name, ac}}}
 		}
 	}
 
@@ -139,8 +144,19 @@ func (c *Cache) Populate(ctx context.Context) {
 		go func(g *repoGroup) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := c.refresh(ctx, g.firstName, g.ac); err != nil {
-				c.log.Warn("ecr cache populate failed", zap.String("app", g.firstName), zap.Error(err))
+			start := time.Now()
+			images, err := c.fetchImages(ctx, g.apps[0].ac)
+			if err != nil {
+				c.log.Warn("ecr cache populate failed", zap.String("app", g.apps[0].name), zap.Error(err))
+				return
+			}
+			for _, entry := range g.apps {
+				tags := applyImages(images, entry.ac)
+				entry.ac.mu.Lock()
+				entry.ac.tags = tags
+				entry.ac.mu.Unlock()
+				c.metrics.ObserveECRRefresh(entry.name, time.Since(start))
+				c.log.Debug("ecr cache refreshed", zap.String("app", entry.name), zap.Int("tags", len(tags)))
 			}
 		}(group)
 	}
@@ -174,9 +190,7 @@ func (c *Cache) StartRefresh(ctx context.Context) {
 	}()
 }
 
-func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error {
-	start := time.Now()
-
+func (c *Cache) fetchImages(ctx context.Context, ac *appCache) ([]types.ImageDetail, error) {
 	input := &ecr.DescribeImagesInput{
 		RepositoryName: aws.String(ac.repoName),
 		RegistryId:     aws.String(ac.registryID),
@@ -188,11 +202,14 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return fmt.Errorf("describe images: %w", err)
+			return nil, fmt.Errorf("describe images: %w", err)
 		}
 		images = append(images, page.ImageDetails...)
 	}
+	return images, nil
+}
 
+func applyImages(images []types.ImageDetail, ac *appCache) []string {
 	type tagTime struct {
 		tag  string
 		time time.Time
@@ -216,6 +233,18 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 	for _, tt := range tagged {
 		tags = append(tags, tt.tag)
 	}
+	return tags
+}
+
+func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error {
+	start := time.Now()
+
+	images, err := c.fetchImages(ctx, ac)
+	if err != nil {
+		return err
+	}
+
+	tags := applyImages(images, ac)
 
 	ac.mu.Lock()
 	ac.tags = tags

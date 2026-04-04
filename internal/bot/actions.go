@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -198,43 +199,52 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 		}
 	}
 
-	_ = b.gh.CommentApproved(ctx, prNumber, ghLogin)
-	_ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel())
-	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
-	_ = b.store.Delete(ctx, prNumber)
-
-	approvedOpts := []slack.MsgOption{
-		slack.MsgOptionText(fmt.Sprintf(
-			"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *approved* by <@%s> — merging now.",
-			d.App, d.Environment, d.Tag, d.PRURL, prNumber, approverID,
-		), false),
-	}
-	approvedOpts = append(approvedOpts, threadOption(b.getThreadTS(ctx, d.Environment))...)
-	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, approvedOpts...)
-
-	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType:   audit.EventApproved,
-		App:         d.App,
-		Environment: d.Environment,
-		Tag:         d.Tag,
-		PRNumber:    prNumber,
-		PRURL:       d.PRURL,
-		Requester:   d.Requester,
-		Approver:    ghLogin,
-	})
-
+	var wg sync.WaitGroup
+	wg.Add(7)
+	go func() { defer wg.Done(); _ = b.gh.CommentApproved(ctx, prNumber, ghLogin) }()
+	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
+	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
+	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
+	go func() {
+		defer wg.Done()
+		approvedOpts := []slack.MsgOption{
+			slack.MsgOptionText(fmt.Sprintf(
+				"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *approved* by <@%s> — merging now.",
+				d.App, d.Environment, d.Tag, d.PRURL, prNumber, approverID,
+			), false),
+		}
+		approvedOpts = append(approvedOpts, threadOption(b.getThreadTS(ctx, d.Environment))...)
+		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, approvedOpts...)
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+			EventType:   audit.EventApproved,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			Requester:   d.Requester,
+			Approver:    ghLogin,
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.store.PushHistory(ctx, store.HistoryEntry{
+			EventType:   audit.EventApproved,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			RequesterID: d.RequesterID,
+			CompletedAt: time.Now(),
+		})
+	}()
 	b.metrics.RecordDeploy(d.App, audit.EventApproved)
+	wg.Wait()
 	b.updatePendingGauge(ctx)
-	_ = b.store.PushHistory(ctx, store.HistoryEntry{
-		EventType:   audit.EventApproved,
-		App:         d.App,
-		Environment: d.Environment,
-		Tag:         d.Tag,
-		PRNumber:    prNumber,
-		PRURL:       d.PRURL,
-		RequesterID: d.RequesterID,
-		CompletedAt: time.Now(),
-	})
 	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
 }
 
@@ -256,10 +266,13 @@ func (b *Bot) notifyConflictFailed(ctx context.Context, d *store.PendingDeploy, 
 // default branch) and notifies the deploy channel. Used when a rebase during
 // conflict resolution reveals the deploy already happened via another path.
 func (b *Bot) closeNoOpPR(ctx context.Context, d *store.PendingDeploy, prNumber int) {
-	_ = b.gh.ClosePR(ctx, prNumber)
-	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
-	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
-	_ = b.store.Delete(ctx, prNumber)
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
+	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel()) }()
+	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
+	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
+	wg.Wait()
 
 	msg := fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy. PR #%d closed.",
 		d.App, d.Environment, d.Tag, prNumber)
@@ -314,21 +327,35 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 
 	deployChannel := b.cfg.Load().Slack.DeployChannel
 
-	// Validate approver is on the team. Post to the deploy channel on failure
-	// since the modal has already closed by the time this runs asynchronously.
-	isMember, _, err := b.validator.IsApprover(ctx, approverID)
-	if err != nil || !isMember {
+	// Validate approver and tag concurrently.
+	var (
+		isMember     bool
+		approverErr  error
+		tagValid     bool
+		tagErr       error
+		validationWg sync.WaitGroup
+	)
+	validationWg.Add(2)
+	go func() {
+		defer validationWg.Done()
+		isMember, _, approverErr = b.validator.IsApprover(ctx, approverID)
+	}()
+	go func() {
+		defer validationWg.Done()
+		tagValid, tagErr = b.ecrCache.ValidateTag(ctx, appVal, tag)
+	}()
+	validationWg.Wait()
+
+	if approverErr != nil || !isMember {
 		msg := fmt.Sprintf("<@%s> — deploy request for *%s* `%s` failed: selected approver <@%s> is not a member of the approver team.", requesterID, appVal, tag, approverID)
-		if err != nil {
-			msg = fmt.Sprintf("<@%s> — deploy request for *%s* `%s` failed: could not validate approver: %v", requesterID, appVal, tag, err)
+		if approverErr != nil {
+			msg = fmt.Sprintf("<@%s> — deploy request for *%s* `%s` failed: could not validate approver: %v", requesterID, appVal, tag, approverErr)
 		}
 		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, slack.MsgOptionText(msg, false))
 		return
 	}
 
-	// Validate tag
-	valid, err := b.ecrCache.ValidateTag(ctx, appVal, tag)
-	if err != nil || !valid {
+	if tagErr != nil || !tagValid {
 		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
 			slack.MsgOptionText(fmt.Sprintf(
 				"<@%s> — deploy request for *%s* `%s` failed: tag not found in ECR. Use `/deploy tags %s` to list valid tags.",
@@ -367,16 +394,31 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		return
 	}
 
-	baseBranch, err := b.gh.GetDefaultBranch(ctx)
-	if err != nil {
-		b.log.Error("get default branch", zap.Error(err))
+	var (
+		baseBranch   string
+		branchErr    error
+		requesterGH  string
+		prepWg       sync.WaitGroup
+	)
+	prepWg.Add(2)
+	go func() {
+		defer prepWg.Done()
+		baseBranch, branchErr = b.gh.GetDefaultBranch(ctx)
+	}()
+	go func() {
+		defer prepWg.Done()
+		var ghErr error
+		requesterGH, ghErr = b.validator.SlackUserToGitHub(ctx, requesterID)
+		if ghErr != nil {
+			requesterGH = callback.User.Name
+		}
+	}()
+	prepWg.Wait()
+
+	if branchErr != nil {
+		b.log.Error("get default branch", zap.Error(branchErr))
 		_ = b.store.ReleaseLock(ctx, env, appVal)
 		return
-	}
-
-	requesterGH, err := b.validator.SlackUserToGitHub(ctx, requesterID)
-	if err != nil {
-		requesterGH = callback.User.Name
 	}
 
 	cfg := b.cfg.Load()
@@ -438,34 +480,43 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		b.log.Error("store deploy", zap.Error(err))
 	}
 
-	_ = b.gh.CommentRequested(ctx, prNumber, requesterGH, appVal, tag, reason)
-
-	// Post approval request to the deploy channel with Approve/Reject buttons.
-	approvalOpts := buildApproverMessage(pendingInfo{
-		App:         appVal,
-		Environment: env,
-		Tag:         tag,
-		PRNumber:    prNumber,
-		PRURL:       prURL,
-		RequesterID: requesterID,
-		ApproverID:  approverID,
-		Reason:      reason,
-	})
-	approvalOpts = append(approvalOpts, threadOption(b.getThreadTS(ctx, env))...)
-	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, approvalOpts...)
-
-	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType:   audit.EventRequested,
-		App:         appVal,
-		Environment: env,
-		Tag:         tag,
-		PRNumber:    prNumber,
-		PRURL:       prURL,
-		Requester:   requesterGH,
-		Reason:      reason,
-	})
-
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		_ = b.gh.CommentRequested(ctx, prNumber, requesterGH, appVal, tag, reason)
+	}()
+	go func() {
+		defer wg.Done()
+		// Post approval request to the deploy channel with Approve/Reject buttons.
+		approvalOpts := buildApproverMessage(pendingInfo{
+			App:         appVal,
+			Environment: env,
+			Tag:         tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
+			RequesterID: requesterID,
+			ApproverID:  approverID,
+			Reason:      reason,
+		})
+		approvalOpts = append(approvalOpts, threadOption(b.getThreadTS(ctx, env))...)
+		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, approvalOpts...)
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+			EventType:   audit.EventRequested,
+			App:         appVal,
+			Environment: env,
+			Tag:         tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
+			Requester:   requesterGH,
+			Reason:      reason,
+		})
+	}()
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
+	wg.Wait()
 	b.updatePendingGauge(ctx)
 	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber))
 }
@@ -522,45 +573,56 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 		return
 	}
 
-	_ = b.gh.CommentRejected(ctx, prNumber, ghLogin, rejReason)
-	_ = b.gh.ClosePR(ctx, prNumber)
-	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
-	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
-	_ = b.store.Delete(ctx, prNumber)
+	cfg := b.cfg.Load()
 
-	rejectedOpts := []slack.MsgOption{
-		slack.MsgOptionText(fmt.Sprintf(
-			"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *rejected* by <@%s>.\n\n*Reason:* %s",
-			d.App, d.Environment, d.Tag, d.PRURL, prNumber, approverID, sanitize.SlackText(rejReason, 500),
-		), false),
-	}
-	rejectedOpts = append(rejectedOpts, threadOption(b.getThreadTS(ctx, d.Environment))...)
-	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel, rejectedOpts...)
-
-	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType:   audit.EventRejected,
-		App:         d.App,
-		Environment: d.Environment,
-		Tag:         d.Tag,
-		PRNumber:    prNumber,
-		PRURL:       d.PRURL,
-		Requester:   d.Requester,
-		Approver:    ghLogin,
-		Rejection:   rejReason,
-	})
-
+	var wg sync.WaitGroup
+	wg.Add(8)
+	go func() { defer wg.Done(); _ = b.gh.CommentRejected(ctx, prNumber, ghLogin, rejReason) }()
+	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
+	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
+	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
+	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
+	go func() {
+		defer wg.Done()
+		rejectedOpts := []slack.MsgOption{
+			slack.MsgOptionText(fmt.Sprintf(
+				"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *rejected* by <@%s>.\n\n*Reason:* %s",
+				d.App, d.Environment, d.Tag, d.PRURL, prNumber, approverID, sanitize.SlackText(rejReason, 500),
+			), false),
+		}
+		rejectedOpts = append(rejectedOpts, threadOption(b.getThreadTS(ctx, d.Environment))...)
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, rejectedOpts...)
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+			EventType:   audit.EventRejected,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			Requester:   d.Requester,
+			Approver:    ghLogin,
+			Rejection:   rejReason,
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.store.PushHistory(ctx, store.HistoryEntry{
+			EventType:   audit.EventRejected,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			RequesterID: d.RequesterID,
+			CompletedAt: time.Now(),
+		})
+	}()
 	b.metrics.RecordDeploy(d.App, audit.EventRejected)
+	wg.Wait()
 	b.updatePendingGauge(ctx)
-	_ = b.store.PushHistory(ctx, store.HistoryEntry{
-		EventType:   audit.EventRejected,
-		App:         d.App,
-		Environment: d.Environment,
-		Tag:         d.Tag,
-		PRNumber:    prNumber,
-		PRURL:       d.PRURL,
-		RequesterID: d.RequesterID,
-		CompletedAt: time.Now(),
-	})
 	b.log.Info("deployment rejected", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
 }
 
