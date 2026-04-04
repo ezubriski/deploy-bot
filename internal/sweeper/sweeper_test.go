@@ -12,8 +12,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/slack-go/slack"
-	"go.uber.org/zap"
+"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
@@ -63,7 +62,7 @@ func prIssueJSON(number int, app, tag, requesterID string) map[string]interface{
 
 // --- ReconcileFromGitHub ---
 
-func TestReconcileFromGitHub_ClosesUntrackedPRs(t *testing.T) {
+func TestReconcileFromGitHub_RehydratesUntrackedPRs(t *testing.T) {
 	st, _ := newTestStore(t)
 	ctx := context.Background()
 
@@ -76,11 +75,8 @@ func TestReconcileFromGitHub_ClosesUntrackedPRs(t *testing.T) {
 		ExpiresAt: time.Now().Add(time.Hour),
 	}, time.Hour)
 
-	// PR #2 is not in Redis but has a lock — should be closed and lock released.
-	_, _ = st.AcquireLock(ctx, "dev", "myapp", "U456", 5*time.Minute)
-
-	var closedPRs []int
-	var slackMsgs atomic.Int32
+	// PR #2 is not in Redis — should be re-hydrated.
+	var labelAdded atomic.Bool
 
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -91,52 +87,49 @@ func TestReconcileFromGitHub_ClosesUntrackedPRs(t *testing.T) {
 				prIssueJSON(1, "myapp", "v1.0.0", "U123"),
 				prIssueJSON(2, "myapp", "v1.1.0", "U456"),
 			})
-		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/pulls/"):
-			// ClosePR
-			parts := strings.Split(r.URL.Path, "/")
-			var n int
-			fmt.Sscanf(parts[len(parts)-1], "%d", &n)
-			closedPRs = append(closedPRs, n)
-			json.NewEncoder(w).Encode(map[string]interface{}{"number": n, "state": "closed"})
-		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/labels/"):
-			// RemoveLabel
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/labels"):
+			// AddLabels
+			labelAdded.Store(true)
 			json.NewEncoder(w).Encode([]interface{}{})
 		default:
-			http.NotFound(w, r)
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{})
 		}
 	}))
 	t.Cleanup(ghServer.Close)
-
-	slackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		slackMsgs.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "channel": "U456", "ts": "123.456"})
-	}))
-	t.Cleanup(slackServer.Close)
 
 	ghClient, err := githubpkg.NewClientWithHTTP(&http.Client{}, ghServer.URL+"/", "org", "repo")
 	if err != nil {
 		t.Fatalf("create github client: %v", err)
 	}
-	slackClient := slack.New("test-token", slack.OptionAPIURL(slackServer.URL+"/"))
 
-	sw := New(st, ghClient, slackClient, nil, nil, newTestCfgHolder(), zap.NewNop())
+	sw := New(st, ghClient, nil, nil, nil, newTestCfgHolder(), zap.NewNop())
 	sw.ReconcileFromGitHub(ctx)
 
-	// Only PR #2 should have been closed.
-	if len(closedPRs) != 1 || closedPRs[0] != 2 {
-		t.Errorf("closed PRs = %v, want [2]", closedPRs)
+	// PR #2 should now be in Redis.
+	d, err := st.Get(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d == nil {
+		t.Fatal("expected PR #2 to be re-hydrated in Redis")
+	}
+	if d.App != "myapp" || d.Tag != "v1.1.0" {
+		t.Errorf("re-hydrated deploy = %+v", d)
+	}
+	if d.State != store.StatePending {
+		t.Errorf("state = %q, want pending", d.State)
 	}
 
-	// Lock for myapp must be released (PR #2 held it).
-	locked, _ := st.IsLocked(ctx, "dev", "myapp")
-	if locked {
-		t.Error("expected myapp lock to be released after reconcile")
+	// Pending label should have been added.
+	if !labelAdded.Load() {
+		t.Error("expected pending label to be added to re-hydrated PR")
 	}
 
-	// One DM should have been sent for PR #2's requester.
-	if n := slackMsgs.Load(); n != 1 {
-		t.Errorf("slack messages = %d, want 1", n)
+	// PR #1 should still be in Redis unchanged.
+	d1, _ := st.Get(ctx, 1)
+	if d1 == nil || d1.Tag != "v1.0.0" {
+		t.Error("PR #1 should be unchanged")
 	}
 }
 
