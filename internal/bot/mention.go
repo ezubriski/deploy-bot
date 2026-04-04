@@ -46,7 +46,7 @@ func (b *Bot) handleMention(ctx context.Context, evt queue.AppMentionEvent) {
 	}
 
 	switch cmd {
-	case "status":
+	case "list", "status":
 		envFilter := ""
 		appFilter := ""
 		if len(parts) >= 2 {

@@ -27,7 +27,7 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 	switch {
 	case len(parts) == 0:
 		b.openDeployModal(ctx, cmd, "", "")
-	case parts[0] == "status":
+	case parts[0] == "list" || parts[0] == "status":
 		envFilter := ""
 		appFilter := ""
 		if len(parts) >= 2 {
