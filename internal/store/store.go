@@ -266,11 +266,21 @@ func (s *Store) GetThreadTS(ctx context.Context, env string) (string, error) {
 	return ts, nil
 }
 
-// SetThreadTS atomically stores the Slack thread timestamp for an environment's
-// deploy thread. Uses SET NX so only the first caller wins — concurrent workers
-// will not create duplicate threads. Returns true if the value was set.
+// SetThreadTS atomically claims the thread slot for an environment. Uses SET NX
+// so only the first caller wins. Returns true if the value was set.
 func (s *Store) SetThreadTS(ctx context.Context, env, ts string, ttl time.Duration) (bool, error) {
 	return s.rdb.SetNX(ctx, threadPrefix+env, ts, ttl).Result()
+}
+
+// UpdateThreadTS overwrites the thread timestamp (e.g. replacing a "pending"
+// placeholder with the real Slack message timestamp).
+func (s *Store) UpdateThreadTS(ctx context.Context, env, ts string, ttl time.Duration) error {
+	return s.rdb.Set(ctx, threadPrefix+env, ts, ttl).Err()
+}
+
+// DeleteThreadTS removes the thread timestamp for an environment.
+func (s *Store) DeleteThreadTS(ctx context.Context, env string) error {
+	return s.rdb.Del(ctx, threadPrefix+env).Err()
 }
 
 // PRNumberFromKey extracts the PR number from a Redis key like "pending:123".

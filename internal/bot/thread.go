@@ -55,7 +55,26 @@ func (b *Bot) getThreadTS(ctx context.Context, env string) string {
 		}
 	}
 
-	// Post parent message.
+	// Claim the slot atomically before posting. Use a placeholder value so
+	// concurrent workers see the key exists and wait for the real timestamp.
+	claimed, err := b.store.SetThreadTS(ctx, env, "pending", threadTTL)
+	if err != nil {
+		b.log.Error("thread: claim thread slot", zap.String("env", env), zap.Error(err))
+		return ""
+	}
+	if !claimed {
+		// Another worker is creating the thread — poll briefly for the real TS.
+		for i := 0; i < 5; i++ {
+			time.Sleep(200 * time.Millisecond)
+			ts, _ := b.store.GetThreadTS(ctx, env)
+			if ts != "" && ts != "pending" {
+				return ts
+			}
+		}
+		return "" // timed out waiting — post flat
+	}
+
+	// We won the race — post the parent message.
 	deployChannel := cfg.Slack.DeployChannel
 	_, parentTS, err := b.slack.PostMessageContext(ctx, deployChannel,
 		slack.MsgOptionText(fmt.Sprintf(
@@ -65,22 +84,13 @@ func (b *Bot) getThreadTS(ctx context.Context, env string) string {
 	)
 	if err != nil {
 		b.log.Error("thread: post parent message", zap.String("env", env), zap.Error(err))
+		// Release the slot so another worker can try.
+		b.store.DeleteThreadTS(ctx, env)
 		return ""
 	}
 
-	// Atomically store the thread TS. If another worker beat us, use theirs.
-	set, err := b.store.SetThreadTS(ctx, env, parentTS, threadTTL)
-	if err != nil {
-		b.log.Error("thread: store thread ts", zap.String("env", env), zap.Error(err))
-		return parentTS
-	}
-	if !set {
-		// Another worker already created a thread — use theirs.
-		existing, _ := b.store.GetThreadTS(ctx, env)
-		if existing != "" {
-			return existing
-		}
-	}
+	// Update the placeholder with the real timestamp.
+	_ = b.store.UpdateThreadTS(ctx, env, parentTS, threadTTL)
 
 	return parentTS
 }
