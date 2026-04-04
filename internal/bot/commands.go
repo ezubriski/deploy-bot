@@ -221,12 +221,24 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	}
 
 	remaining := time.Until(d.ExpiresAt).Round(time.Minute)
+	cfg := b.cfg.Load()
 	approver := slackMention(d.ApproverID)
-	// If no specific approver (ECR deploys), address the approver team.
+	channel := cfg.Slack.DeployChannel
+	// If no specific approver (ECR deploys), mention the approver group.
 	if d.ApproverID == "" {
-		approver = "approver team"
+		if appCfg, ok := cfg.AppByName(d.App); ok && appCfg.AutoDeployApproverGroup != "" {
+			group := appCfg.AutoDeployApproverGroup
+			if strings.HasPrefix(group, "S") {
+				approver = fmt.Sprintf("<!subteam^%s>", group)
+			} else if strings.HasPrefix(group, "C") {
+				approver = "approvers"
+				channel = group // post to the approver channel directly
+			}
+		} else {
+			approver = "approvers"
+		}
 	}
-	_, _, err = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
+	_, _, err = b.slack.PostMessageContext(ctx, channel,
 		slack.MsgOptionText(fmt.Sprintf(
 			":bell: %s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for approval. Expires in *%s*. <%s|PR #%d>",
 			approver, d.App, d.Environment, d.Tag, slackMention(d.RequesterID), remaining, d.PRURL, d.PRNumber,
