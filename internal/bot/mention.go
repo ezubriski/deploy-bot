@@ -115,8 +115,13 @@ func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent
 			if envFilter != "" && !strings.EqualFold(d.Environment, envFilter) {
 				continue
 			}
-			if appFilter != "" && appFilter != "*" {
-				if !strings.EqualFold(d.App, appFilter) {
+			if appFilter != "" {
+				if strings.HasSuffix(appFilter, "*") {
+					prefix := strings.ToLower(strings.TrimSuffix(appFilter, "*"))
+					if !strings.HasPrefix(strings.ToLower(d.App), prefix) {
+						continue
+					}
+				} else if !strings.EqualFold(d.App, appFilter) {
 					continue
 				}
 			}
@@ -134,7 +139,7 @@ func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent
 			}
 			msg = fmt.Sprintf("No pending deployments matching *%s*.", strings.TrimSpace(filterDesc))
 
-			if appFilter != "" && appFilter != "*" {
+			if appFilter != "" && !strings.HasSuffix(appFilter, "*") {
 				all, _ := b.store.GetAll(ctx)
 				var suggestions []string
 				seen := map[string]struct{}{}
