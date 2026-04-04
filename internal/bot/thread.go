@@ -3,16 +3,20 @@ package bot
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
 )
 
+const threadTTL = 10 * time.Minute
+
 // getThreadTS returns the Slack thread timestamp for deploy notifications in
 // the given environment. If threading is disabled or the threshold hasn't been
 // met, it returns "" (post flat to channel). If a thread already exists for
 // this environment, its timestamp is returned. Otherwise a new parent message
-// is posted and its timestamp is stored for subsequent messages.
+// is posted and its timestamp is stored atomically (SET NX) so concurrent
+// workers don't create duplicate threads.
 func (b *Bot) getThreadTS(ctx context.Context, env string) string {
 	cfg := b.cfg.Load()
 	threshold := cfg.Slack.EffectiveThreadThreshold()
@@ -51,7 +55,7 @@ func (b *Bot) getThreadTS(ctx context.Context, env string) string {
 		}
 	}
 
-	// Post parent message and store the thread TS.
+	// Post parent message.
 	deployChannel := cfg.Slack.DeployChannel
 	_, parentTS, err := b.slack.PostMessageContext(ctx, deployChannel,
 		slack.MsgOptionText(fmt.Sprintf(
@@ -64,9 +68,18 @@ func (b *Bot) getThreadTS(ctx context.Context, env string) string {
 		return ""
 	}
 
-	staleDuration, _ := cfg.StaleDuration()
-	if err := b.store.SetThreadTS(ctx, env, parentTS, staleDuration); err != nil {
+	// Atomically store the thread TS. If another worker beat us, use theirs.
+	set, err := b.store.SetThreadTS(ctx, env, parentTS, threadTTL)
+	if err != nil {
 		b.log.Error("thread: store thread ts", zap.String("env", env), zap.Error(err))
+		return parentTS
+	}
+	if !set {
+		// Another worker already created a thread — use theirs.
+		existing, _ := b.store.GetThreadTS(ctx, env)
+		if existing != "" {
+			return existing
+		}
 	}
 
 	return parentTS

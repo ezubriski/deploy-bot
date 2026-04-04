@@ -174,7 +174,7 @@ func main() {
 				}
 				if callback.Type == slack.InteractionTypeViewSubmission &&
 					callback.View.CallbackID == bot.ModalCallbackDeploy {
-					validateAndDispatch(ctx, sm, rdb, redisStore, cfg, approverCache, evtBuffer, evt, callback, log)
+					validateAndDispatch(ctx, sm, rdb, cfg, approverCache, evtBuffer, evt, callback, log)
 				} else {
 					enqueueAndAck(ctx, sm, rdb, evtBuffer, evt, log)
 				}
@@ -218,7 +218,6 @@ func validateAndDispatch(
 	ctx context.Context,
 	sm *socketmode.Client,
 	rdb *redis.Client,
-	s *store.Store,
 	cfg *config.Config,
 	approverCache *approvers.Cache,
 	buf *buffer.Buffer,
@@ -233,24 +232,15 @@ func validateAndDispatch(
 
 	errs := make(map[string]string)
 
-	// Check per-app deploy lock.
-	if appVal != "" {
-		if appCfg, ok := cfg.AppByName(appVal); ok {
-			locked, err := s.IsLocked(ctx, appCfg.Environment, appVal)
-			if err != nil {
-				log.Error("receiver: check deploy lock", zap.String("app", appVal), zap.Error(err))
-			} else if locked {
-				errs[bot.BlockApp] = fmt.Sprintf("A deployment of *%s* (%s) is already in progress.", appVal, appCfg.Environment)
-			}
-		}
-	}
+	// Fast, in-memory checks only. Lock checks are deferred to the worker
+	// so the modal responds immediately even under heavy load.
 
-	// Check approver team membership via cache.
+	// Check approver team membership via cache (in-memory).
 	if approverID != "" && !approverCache.IsApprover(approverID) {
 		errs[bot.BlockApprover] = "Selected approver is not a member of the approver team."
 	}
 
-	// Validate manual tag override against the app's tag pattern.
+	// Validate manual tag override against the app's tag pattern (in-memory).
 	if manualTag != "" && appVal != "" {
 		appCfg, ok := cfg.AppByName(appVal)
 		if ok && !appCfg.CompiledTagPattern().MatchString(manualTag) {
