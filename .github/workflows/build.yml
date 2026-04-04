@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - "v*"
   pull_request:
     branches:
       - main
@@ -91,47 +89,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set tags
-        id: tags
-        run: |
-          SHA=$(git rev-parse --short HEAD)
-          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Set SHA
+        id: sha
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Login to ghcr.io
+      - name: Promote to latest on ghcr.io
         run: |
+          SHA=${{ steps.sha.outputs.sha }}
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             podman login ghcr.io -u ${{ github.actor }} --password-stdin
-
-      - name: Pull SHA image
-        run: podman pull ${{ env.GHCR_IMAGE }}:${{ steps.tags.outputs.sha }}
-
-      - name: Tag and push latest
-        run: |
-          podman tag ${{ env.GHCR_IMAGE }}:${{ steps.tags.outputs.sha }} ${{ env.GHCR_IMAGE }}:latest
+          podman pull ${{ env.GHCR_IMAGE }}:${SHA}
+          podman tag ${{ env.GHCR_IMAGE }}:${SHA} ${{ env.GHCR_IMAGE }}:latest
           podman push ${{ env.GHCR_IMAGE }}:latest
 
-      - name: Tag and push semver
-        if: steps.tags.outputs.version != ''
-        run: |
-          podman tag ${{ env.GHCR_IMAGE }}:${{ steps.tags.outputs.sha }} ${{ env.GHCR_IMAGE }}:${{ steps.tags.outputs.version }}
-          podman push ${{ env.GHCR_IMAGE }}:${{ steps.tags.outputs.version }}
-
-      - name: Promote ECR tags
+      - name: Promote to latest on ECR
         if: env.ECR_REGISTRY != ''
         env:
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
         run: |
-          SHA=${{ steps.tags.outputs.sha }}
-          VERSION=${{ steps.tags.outputs.version }}
+          SHA=${{ steps.sha.outputs.sha }}
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
             podman login --username AWS --password-stdin ${ECR_REGISTRY}
           podman pull ${ECR_REGISTRY}/deploy-bot:${SHA}
           podman tag ${ECR_REGISTRY}/deploy-bot:${SHA} ${ECR_REGISTRY}/deploy-bot:latest
           podman push ${ECR_REGISTRY}/deploy-bot:latest
-          if [ -n "${VERSION}" ]; then
-            podman tag ${ECR_REGISTRY}/deploy-bot:${SHA} ${ECR_REGISTRY}/deploy-bot:${VERSION}
-            podman push ${ECR_REGISTRY}/deploy-bot:${VERSION}
-          fi

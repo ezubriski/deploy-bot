@@ -1,21 +1,109 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  AWS_REGION: us-west-2
+  GHCR_IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  lint:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+
+      - name: Lint
+        run: golangci-lint run
+
+  test:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: make test
+
+  build:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: podman build -t deploy-bot:ci .
+
+  tag:
+    runs-on: self-hosted
+    needs: [lint, test, build]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Compute next version
+        id: version
+        run: |
+          LATEST=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          MAJOR=$(echo "${LATEST}" | sed 's/^v//' | cut -d. -f1)
+          MINOR=$(echo "${LATEST}" | sed 's/^v//' | cut -d. -f2)
+          PATCH=$(echo "${LATEST}" | sed 's/^v//' | cut -d. -f3)
+
+          case "${{ inputs.bump }}" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+
+          VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Bumping ${LATEST} -> ${VERSION} (${{ inputs.bump }})"
+
+      - name: Create and push tag
+        run: |
+          git tag ${{ steps.version.outputs.version }}
+          git push origin ${{ steps.version.outputs.version }}
+
+  release:
+    runs-on: self-hosted
+    needs: [tag]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.tag.outputs.version }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -29,3 +117,42 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  push:
+    runs-on: self-hosted
+    needs: [tag]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          VERSION=${{ needs.tag.outputs.version }}
+          SHA=$(git rev-parse --short HEAD)
+          podman build \
+            -t ${{ env.GHCR_IMAGE }}:${VERSION} \
+            -t ${{ env.GHCR_IMAGE }}:${SHA} \
+            -t ${{ env.GHCR_IMAGE }}:latest .
+
+      - name: Push to ghcr.io
+        run: |
+          VERSION=${{ needs.tag.outputs.version }}
+          SHA=$(git rev-parse --short HEAD)
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          podman push ${{ env.GHCR_IMAGE }}:${VERSION}
+          podman push ${{ env.GHCR_IMAGE }}:${SHA}
+          podman push ${{ env.GHCR_IMAGE }}:latest
+
+      - name: Push to ECR
+        if: env.ECR_REGISTRY != ''
+        env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        run: |
+          VERSION=${{ needs.tag.outputs.version }}
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
+            podman login --username AWS --password-stdin ${ECR_REGISTRY}
+          podman tag ${{ env.GHCR_IMAGE }}:${VERSION} ${ECR_REGISTRY}/deploy-bot:${VERSION}
+          podman tag ${{ env.GHCR_IMAGE }}:${VERSION} ${ECR_REGISTRY}/deploy-bot:latest
+          podman push ${ECR_REGISTRY}/deploy-bot:${VERSION}
+          podman push ${ECR_REGISTRY}/deploy-bot:latest
