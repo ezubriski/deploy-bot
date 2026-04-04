@@ -25,21 +25,21 @@ func (c *Client) AddComment(ctx context.Context, prNumber int, body string) erro
 // CommentRequested posts a "deployment requested" comment.
 func (c *Client) CommentRequested(ctx context.Context, prNumber int, requester, app, tag, reason string) error {
 	body := fmt.Sprintf(
-		"**Deployment requested** by @%s\n\n- **App:** %s\n- **Tag:** `%s`\n- **Reason:** %s",
-		requester, app, tag, sanitize.GitHubMarkdown(reason),
+		"**Deployment requested** by %s\n\n- **App:** %s\n- **Tag:** `%s`\n- **Reason:** %s",
+		formatRequester(requester), app, tag, sanitize.GitHubMarkdown(reason),
 	)
 	return c.AddComment(ctx, prNumber, body)
 }
 
 // CommentApproved posts an "approved" comment.
 func (c *Client) CommentApproved(ctx context.Context, prNumber int, approver string) error {
-	body := fmt.Sprintf("**Approved** by @%s — merging now.", approver)
+	body := fmt.Sprintf("**Approved** by %s — merging now.", formatRequester(approver))
 	return c.AddComment(ctx, prNumber, body)
 }
 
 // CommentRejected posts a "rejected" comment.
 func (c *Client) CommentRejected(ctx context.Context, prNumber int, approver, reason string) error {
-	body := fmt.Sprintf("**Rejected** by @%s\n\n**Reason:** %s", approver, sanitize.GitHubMarkdown(reason))
+	body := fmt.Sprintf("**Rejected** by %s\n\n**Reason:** %s", formatRequester(approver), sanitize.GitHubMarkdown(reason))
 	return c.AddComment(ctx, prNumber, body)
 }
 
@@ -51,6 +51,15 @@ func (c *Client) CommentExpired(ctx context.Context, prNumber int, staleDuration
 
 // CommentCancelled posts a "cancelled" comment.
 func (c *Client) CommentCancelled(ctx context.Context, prNumber int, requester string) error {
-	body := fmt.Sprintf("**Cancelled** by @%s.", requester)
+	body := fmt.Sprintf("**Cancelled** by %s.", formatRequester(requester))
 	return c.AddComment(ctx, prNumber, body)
+}
+
+// formatRequester formats a requester/approver name for GitHub comments.
+// Human users get an @mention; the ECR sentinel gets a descriptive label.
+func formatRequester(name string) string {
+	if name == "ECR" {
+		return "**deploy-bot** (ECR push auto-deploy)"
+	}
+	return "@" + name
 }

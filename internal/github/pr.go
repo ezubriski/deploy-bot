@@ -150,8 +150,8 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 		Tag:              params.Tag,
 	})
 	prBody := fmt.Sprintf(
-		"**Environment:** %s\n**App:** %s\n**Tag:** `%s`\n**Requester:** @%s\n**Reason:** %s\n\n<!-- deploy-bot-meta: %s -->",
-		params.Environment, params.App, params.Tag, params.Requester, sanitize.GitHubMarkdown(params.Reason), string(metaJSON),
+		"**Environment:** %s\n**App:** %s\n**Tag:** `%s`\n**Requester:** %s\n**Reason:** %s\n\n<!-- deploy-bot-meta: %s -->",
+		params.Environment, params.App, params.Tag, formatRequester(params.Requester), sanitize.GitHubMarkdown(params.Reason), string(metaJSON),
 	)
 
 	var pr *gh.PullRequest
