@@ -280,26 +280,20 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		}
 		_ = s.gh.RemoveLabel(ctx, d.PRNumber, s.cfg.Load().PendingLabel())
 
-		// DM requester
-		_, _, err := s.slack.PostMessageContext(ctx, d.RequesterID,
-			slack.MsgOptionText(fmt.Sprintf(
-				"Your deployment of *%s* (%s) `%s` (PR #%d) expired after %s with no approval.",
-				d.App, d.Environment, d.Tag, d.PRNumber, staleDurationStr,
-			), false),
-		)
-		if err != nil {
-			s.log.Error("DM requester expired", zap.Error(err))
+		// Post expiry notice to the deploy channel, @mentioning the requester if available.
+		deployChannel := s.cfg.Load().Slack.DeployChannel
+		requester := "deploy-bot (ECR)"
+		if d.RequesterID != "" {
+			requester = fmt.Sprintf("<@%s>", d.RequesterID)
 		}
-
-		// DM approver
-		_, _, err = s.slack.PostMessageContext(ctx, d.ApproverID,
+		_, _, err = s.slack.PostMessageContext(ctx, deployChannel,
 			slack.MsgOptionText(fmt.Sprintf(
-				"The deployment request for *%s* (%s) `%s` (PR #%d) expired after %s.",
-				d.App, d.Environment, d.Tag, d.PRNumber, staleDurationStr,
+				"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *expired* after %s with no approval. Requested by %s.",
+				d.App, d.Environment, d.Tag, d.PRURL, d.PRNumber, staleDurationStr, requester,
 			), false),
 		)
 		if err != nil {
-			s.log.Error("DM approver expired", zap.Error(err))
+			s.log.Error("post expiry notice", zap.Error(err))
 		}
 
 		_ = s.audit.Log(ctx, audit.AuditEvent{

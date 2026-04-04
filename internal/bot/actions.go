@@ -154,8 +154,8 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
 			_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
 				slack.MsgOptionText(fmt.Sprintf(
-					"<@%s> — <%s|PR #%d> (*%s* %s `%s`) is in draft state and cannot be merged. Ask <@%s> to mark it ready for review.",
-					approverID, d.PRURL, prNumber, d.App, d.Environment, d.Tag, d.RequesterID,
+					"%s — <%s|PR #%d> (*%s* %s `%s`) is in draft state and cannot be merged. Ask %s to mark it ready for review.",
+					slackMention(approverID), d.PRURL, prNumber, d.App, d.Environment, d.Tag, slackMention(d.RequesterID),
 				), false),
 			)
 			return
@@ -244,9 +244,9 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 func (b *Bot) notifyConflictFailed(ctx context.Context, d *store.PendingDeploy, prNumber int, approverID string) {
 	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
 		slack.MsgOptionText(fmt.Sprintf(
-			"<@%s> — merge conflict on <%s|PR #%d> (*%s* %s `%s`) could not be auto-resolved. "+
-				"Please resolve the conflict on GitHub and re-approve. <@%s> has been notified.",
-			approverID, d.PRURL, prNumber, d.App, d.Environment, d.Tag, d.RequesterID,
+			"%s — merge conflict on <%s|PR #%d> (*%s* %s `%s`) could not be auto-resolved. "+
+				"Please resolve the conflict on GitHub and re-approve. %s has been notified.",
+			slackMention(approverID), d.PRURL, prNumber, d.App, d.Environment, d.Tag, slackMention(d.RequesterID),
 		), false),
 	)
 	b.log.Warn("merge conflict unresolvable", zap.Int("pr", prNumber), zap.String("app", d.App))

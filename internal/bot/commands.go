@@ -160,7 +160,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 		return
 	}
 
-	if d.RequesterID != cmd.UserID {
+	if d.RequesterID != cmd.UserID && d.RequesterID != "" {
 		b.postEphemeralCommand(ctx, cmd, "You can only cancel your own deployments.")
 		return
 	}
@@ -221,10 +221,15 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	}
 
 	remaining := time.Until(d.ExpiresAt).Round(time.Minute)
+	approver := slackMention(d.ApproverID)
+	// If no specific approver (ECR deploys), address the approver team.
+	if d.ApproverID == "" {
+		approver = "approver team"
+	}
 	_, _, err = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
 		slack.MsgOptionText(fmt.Sprintf(
-			":bell: <@%s> — reminder: deployment of *%s* (%s) `%s` by <@%s> is waiting for your approval. Expires in *%s*. <%s|PR #%d>",
-			d.ApproverID, d.App, d.Environment, d.Tag, d.RequesterID, remaining, d.PRURL, d.PRNumber,
+			":bell: %s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for approval. Expires in *%s*. <%s|PR #%d>",
+			approver, d.App, d.Environment, d.Tag, slackMention(d.RequesterID), remaining, d.PRURL, d.PRNumber,
 		), false),
 	)
 	if err != nil {
