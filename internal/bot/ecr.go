@@ -111,17 +111,60 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 }
 
 // handleECRAutoDeploy immediately merges the PR and posts a completion notice.
+// On merge conflict, it attempts a rebase and retries once before notifying.
 func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, appCfg *config.AppConfig, cfg *config.Config, prNumber int, prURL string) {
 	env := appCfg.Environment
 	deployChannel := cfg.Slack.DeployChannel
 
 	mergeErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
 	if mergeErr != nil {
-		// On merge failure, fall back to approval-required path.
-		b.log.Error("ecr auto-deploy: merge failed, falling back to approval",
-			zap.Int("pr", prNumber), zap.Error(mergeErr))
-		b.handleECRApprovalRequest(ctx, evt, appCfg, cfg, prNumber, prURL)
-		return
+		if !errors.Is(mergeErr, githubPkg.ErrMergeConflict) {
+			b.log.Error("ecr auto-deploy: merge failed", zap.Int("pr", prNumber), zap.Error(mergeErr))
+			b.notifyECRAutoDeployFailed(ctx, evt, appCfg, cfg, prNumber, prURL, mergeErr)
+			return
+		}
+
+		// Merge conflict — attempt rebase and retry.
+		b.log.Info("ecr auto-deploy: merge conflict, attempting rebase", zap.Int("pr", prNumber))
+		baseBranch, err := b.gh.GetDefaultBranch(ctx)
+		if err != nil {
+			b.log.Error("ecr auto-deploy: get default branch for rebase", zap.Error(err))
+			b.notifyECRAutoDeployFailed(ctx, evt, appCfg, cfg, prNumber, prURL, mergeErr)
+			return
+		}
+
+		rebaseErr := b.gh.RebaseDeployBranch(ctx, githubPkg.CreatePRParams{
+			App:           evt.App,
+			Environment:   env,
+			Tag:           evt.Tag,
+			KustomizePath: appCfg.KustomizePath,
+			BaseBranch:    baseBranch,
+		})
+		if rebaseErr != nil {
+			if errors.Is(rebaseErr, githubPkg.ErrNoChange) {
+				// Tag already on default branch — close as no-op.
+				_ = b.gh.ClosePR(ctx, prNumber)
+				_ = b.store.ReleaseLock(ctx, env, evt.App)
+				b.log.Info("ecr auto-deploy: no-op after rebase, tag already current", zap.String("app", evt.App))
+				return
+			}
+			b.log.Error("ecr auto-deploy: rebase failed", zap.Int("pr", prNumber), zap.Error(rebaseErr))
+			b.notifyECRAutoDeployFailed(ctx, evt, appCfg, cfg, prNumber, prURL, rebaseErr)
+			return
+		}
+
+		// Give GitHub a moment to recalculate mergeability after the force-push.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(3 * time.Second):
+		}
+
+		if retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod); retryErr != nil {
+			b.log.Error("ecr auto-deploy: merge failed after rebase", zap.Int("pr", prNumber), zap.Error(retryErr))
+			b.notifyECRAutoDeployFailed(ctx, evt, appCfg, cfg, prNumber, prURL, retryErr)
+			return
+		}
 	}
 
 	_ = b.gh.CommentApproved(ctx, prNumber, ecrRequesterName)
@@ -260,4 +303,42 @@ func (b *Bot) postECRApprovalRequest(ctx context.Context, appCfg *config.AppConf
 	default:
 		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
 	}
+}
+
+// notifyECRAutoDeployFailed posts a failure notice mentioning the approver
+// group (if configured), closes the PR, and releases the lock.
+func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEvent, appCfg *config.AppConfig, cfg *config.Config, prNumber int, prURL string, failErr error) {
+	env := appCfg.Environment
+	_ = b.gh.ClosePR(ctx, prNumber)
+	_ = b.store.ReleaseLock(ctx, env, evt.App)
+
+	msg := fmt.Sprintf(
+		"Auto-deploy of *%s* (%s) `%s` failed — %v. <%s|PR #%d> has been closed.",
+		evt.App, env, evt.Tag, failErr, prURL, prNumber,
+	)
+
+	opts := []slack.MsgOption{slack.MsgOptionText(msg, false)}
+	opts = append(opts, threadOption(b.getThreadTS(ctx, env))...)
+
+	group := appCfg.AutoDeployApproverGroup
+	switch {
+	case strings.HasPrefix(group, "S"):
+		mention := fmt.Sprintf("<!subteam^%s> ", group)
+		opts = append(opts, slack.MsgOptionText(mention+msg, false))
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
+	case strings.HasPrefix(group, "C"):
+		_, _, _ = b.slack.PostMessageContext(ctx, group, opts...)
+	default:
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
+	}
+
+	_ = b.auditLog.Log(ctx, audit.AuditEvent{
+		EventType:   "conflict_failed",
+		App:         evt.App,
+		Environment: env,
+		Tag:         evt.Tag,
+		PRNumber:    prNumber,
+		PRURL:       prURL,
+		Requester:   ecrRequesterName,
+	})
 }
