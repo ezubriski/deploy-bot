@@ -93,7 +93,7 @@ func main() {
 		slack.OptionAppLevelToken(secrets.SlackAppToken),
 	)
 
-	evtBuffer := buffer.New(cfg.Slack.BufferSize, rdb, log)
+	evtBuffer := buffer.New(cfg.Slack.BufferSize, rdb, queue.StreamKeyUser, log)
 	go evtBuffer.Run(ctx)
 
 	approverCache := approvers.New(secrets.GitHubToken, slackClient, cfg.GitHub.Org, cfg.GitHub.ApproverTeam, log)
@@ -107,7 +107,7 @@ func main() {
 	// Start ECR poller if configured. It enqueues to the same Redis stream
 	// as Slack events, using its own buffer for Redis backpressure.
 	if cfg.ECREvents.SQSQueueURL != "" {
-		ecrBuf := buffer.New(buffer.DefaultSize, rdb, log)
+		ecrBuf := buffer.New(buffer.DefaultSize, rdb, queue.StreamKeyECR, log)
 		go ecrBuf.Run(ctx)
 		poller, err := ecrpoller.New(ctx, rdb, ecrBuf, redisStore, config.NewHolder(cfg, configPath), log)
 		if err != nil {

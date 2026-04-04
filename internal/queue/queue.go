@@ -15,13 +15,25 @@ import (
 )
 
 const (
-	StreamKey     = "slack:events"
+	// StreamKeyUser carries user-initiated events (slash commands, interactions, mentions).
+	StreamKeyUser = "user:events"
+	// StreamKeyECR carries ECR push events.
+	StreamKeyECR = "ecr:events"
+
+	// StreamKey is kept for backward compatibility. New code should use
+	// StreamKeyUser or StreamKeyECR.
+	StreamKey = StreamKeyUser
+
 	ConsumerGroup = "bot-workers"
 	streamMaxLen  = 10_000
 	claimMinIdle  = 60 * time.Second
 	readTimeout   = 5 * time.Second
 	batchSize     = 10
 )
+
+// AllStreams is the list of streams the worker reads from. User stream is
+// listed first so it has priority when both streams have pending messages.
+var AllStreams = []string{StreamKeyUser, StreamKeyECR}
 
 // envelope carries the event type alongside the raw JSON payload so the
 // worker can reconstruct the concrete socketmode.Event.Data type.
@@ -30,8 +42,8 @@ type envelope struct {
 	Data json.RawMessage `json:"data"`
 }
 
-// Enqueue serializes evt and appends it to the Redis stream.
-func Enqueue(ctx context.Context, rdb *redis.Client, evt socketmode.Event) error {
+// EnqueueTo serializes evt and appends it to the given Redis stream.
+func EnqueueTo(ctx context.Context, rdb *redis.Client, streamKey string, evt socketmode.Event) error {
 	data, err := json.Marshal(evt.Data)
 	if err != nil {
 		return fmt.Errorf("marshal event data: %w", err)
@@ -42,11 +54,26 @@ func Enqueue(ctx context.Context, rdb *redis.Client, evt socketmode.Event) error
 		return fmt.Errorf("marshal envelope: %w", err)
 	}
 	return rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: StreamKey,
+		Stream: streamKey,
 		MaxLen: streamMaxLen,
 		Approx: true,
 		Values: map[string]interface{}{"payload": string(payload)},
 	}).Err()
+}
+
+// Enqueue appends an event to the user stream. Kept for backward compatibility.
+func Enqueue(ctx context.Context, rdb *redis.Client, evt socketmode.Event) error {
+	return EnqueueUser(ctx, rdb, evt)
+}
+
+// EnqueueUser appends an event to the user stream (slash commands, interactions, mentions).
+func EnqueueUser(ctx context.Context, rdb *redis.Client, evt socketmode.Event) error {
+	return EnqueueTo(ctx, rdb, StreamKeyUser, evt)
+}
+
+// EnqueueECR appends an event to the ECR stream.
+func EnqueueECR(ctx context.Context, rdb *redis.Client, evt socketmode.Event) error {
+	return EnqueueTo(ctx, rdb, StreamKeyECR, evt)
 }
 
 // decode reconstructs a socketmode.Event from a stream message.
@@ -91,7 +118,7 @@ func decode(msg redis.XMessage) (socketmode.Event, error) {
 	return evt, nil
 }
 
-// Worker reads events from the stream and dispatches them.
+// Worker reads events from the streams and dispatches them.
 type Worker struct {
 	rdb      *redis.Client
 	consumer string
@@ -113,21 +140,33 @@ func NewWorkerWithName(rdb *redis.Client, name string, log *zap.Logger) *Worker 
 	return &Worker{rdb: rdb, consumer: name, log: log}
 }
 
-// Init creates the consumer group, tolerating the error if it already exists.
+// Init creates the consumer group on all streams, tolerating the error if it
+// already exists.
 func (w *Worker) Init(ctx context.Context) error {
-	err := w.rdb.XGroupCreateMkStream(ctx, StreamKey, ConsumerGroup, "0").Err()
-	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
-		return fmt.Errorf("create consumer group: %w", err)
+	for _, stream := range AllStreams {
+		err := w.rdb.XGroupCreateMkStream(ctx, stream, ConsumerGroup, "0").Err()
+		if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+			return fmt.Errorf("create consumer group on %s: %w", stream, err)
+		}
 	}
 	return nil
 }
 
-// Run reads from the stream and calls handle for each event until ctx is
-// cancelled. It reclaims messages idle for over claimMinIdle every 30s so
-// that events stuck on a crashed worker are not lost.
+// Run reads from both streams and calls handle for each event until ctx is
+// cancelled. The user stream is listed first so user actions take priority
+// over ECR bulk when both streams have pending messages. It reclaims messages
+// idle for over claimMinIdle every 30s so that events stuck on a crashed
+// worker are not lost.
 func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmode.Event)) {
 	claimTicker := time.NewTicker(30 * time.Second)
 	defer claimTicker.Stop()
+
+	// Build multi-stream args: [stream1, stream2, ">", ">"]
+	streams := make([]string, 0, len(AllStreams)*2)
+	streams = append(streams, AllStreams...)
+	for range AllStreams {
+		streams = append(streams, ">")
+	}
 
 	for {
 		// Check for stuck messages on the ticker, non-blocking.
@@ -142,7 +181,7 @@ func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmod
 		msgs, err := w.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
 			Group:    ConsumerGroup,
 			Consumer: w.consumer,
-			Streams:  []string{StreamKey, ">"},
+			Streams:  streams,
 			Count:    batchSize,
 			Block:    readTimeout,
 		}).Result()
@@ -164,42 +203,44 @@ func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmod
 
 		for _, stream := range msgs {
 			for _, msg := range stream.Messages {
-				w.process(ctx, msg, handle)
+				w.process(ctx, stream.Stream, msg, handle)
 			}
 		}
 	}
 }
 
-func (w *Worker) process(ctx context.Context, msg redis.XMessage, handle func(context.Context, socketmode.Event)) {
+func (w *Worker) process(ctx context.Context, streamKey string, msg redis.XMessage, handle func(context.Context, socketmode.Event)) {
 	evt, err := decode(msg)
 	if err != nil {
-		w.log.Error("queue: decode message", zap.String("id", msg.ID), zap.Error(err))
+		w.log.Error("queue: decode message", zap.String("stream", streamKey), zap.String("id", msg.ID), zap.Error(err))
 		// ACK malformed messages so they don't block the queue.
-		_ = w.rdb.XAck(context.Background(), StreamKey, ConsumerGroup, msg.ID)
+		_ = w.rdb.XAck(context.Background(), streamKey, ConsumerGroup, msg.ID)
 		return
 	}
 	handle(ctx, evt)
 	// Use Background context for ACK: this is a cleanup operation that must
 	// succeed even if the worker is shutting down and ctx is already canceled.
-	if err := w.rdb.XAck(context.Background(), StreamKey, ConsumerGroup, msg.ID).Err(); err != nil {
-		w.log.Error("queue: xack", zap.String("id", msg.ID), zap.Error(err))
+	if err := w.rdb.XAck(context.Background(), streamKey, ConsumerGroup, msg.ID).Err(); err != nil {
+		w.log.Error("queue: xack", zap.String("stream", streamKey), zap.String("id", msg.ID), zap.Error(err))
 	}
 }
 
 func (w *Worker) reclaimStuck(ctx context.Context, handle func(context.Context, socketmode.Event)) {
-	msgs, _, err := w.rdb.XAutoClaim(ctx, &redis.XAutoClaimArgs{
-		Stream:   StreamKey,
-		Group:    ConsumerGroup,
-		Consumer: w.consumer,
-		MinIdle:  claimMinIdle,
-		Start:    "0-0",
-		Count:    batchSize,
-	}).Result()
-	if err != nil {
-		w.log.Error("queue: xautoclaim", zap.Error(err))
-		return
-	}
-	for _, msg := range msgs {
-		w.process(ctx, msg, handle)
+	for _, stream := range AllStreams {
+		msgs, _, err := w.rdb.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			Stream:   stream,
+			Group:    ConsumerGroup,
+			Consumer: w.consumer,
+			MinIdle:  claimMinIdle,
+			Start:    "0-0",
+			Count:    batchSize,
+		}).Result()
+		if err != nil {
+			w.log.Error("queue: xautoclaim", zap.String("stream", stream), zap.Error(err))
+			continue
+		}
+		for _, msg := range msgs {
+			w.process(ctx, stream, msg, handle)
+		}
 	}
 }

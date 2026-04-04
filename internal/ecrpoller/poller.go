@@ -184,7 +184,7 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 			Repository: appCfg.ECRRepo,
 		})
 
-		if err := queue.Enqueue(ctx, p.rdb, evt); err != nil {
+		if err := queue.EnqueueECR(ctx, p.rdb, evt); err != nil {
 			p.log.Warn("ecrpoller: enqueue failed, buffering", zap.String("app", appCfg.App), zap.Error(err))
 			p.buf.Add(evt)
 		}

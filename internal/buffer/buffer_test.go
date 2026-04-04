@@ -22,7 +22,7 @@ func newTestBuffer(t *testing.T, size int) (*Buffer, *redis.Client) {
 	}
 	t.Cleanup(mr.Close)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	return New(size, rdb, zap.NewNop()), rdb
+	return New(size, rdb, queue.StreamKeyUser, zap.NewNop()), rdb
 }
 
 func newTestBufferWithMR(t *testing.T, size int) (*Buffer, *redis.Client, *miniredis.Miniredis) {
@@ -33,7 +33,7 @@ func newTestBufferWithMR(t *testing.T, size int) (*Buffer, *redis.Client, *minir
 	}
 	t.Cleanup(mr.Close)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	return New(size, rdb, zap.NewNop()), rdb, mr
+	return New(size, rdb, queue.StreamKeyUser, zap.NewNop()), rdb, mr
 }
 
 func slashCommandEvent() socketmode.Event {

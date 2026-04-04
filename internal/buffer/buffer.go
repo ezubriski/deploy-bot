@@ -21,19 +21,22 @@ const (
 // Slack from the buffer — Slack continues retrying unACKed events in parallel,
 // providing a second delivery path if the receiver restarts.
 type Buffer struct {
-	ch  chan socketmode.Event
-	rdb *redis.Client
-	log *zap.Logger
+	ch        chan socketmode.Event
+	rdb       *redis.Client
+	streamKey string
+	log       *zap.Logger
 }
 
-func New(size int, rdb *redis.Client, log *zap.Logger) *Buffer {
+// New creates a buffer that retries enqueues to the given stream key.
+func New(size int, rdb *redis.Client, streamKey string, log *zap.Logger) *Buffer {
 	if size <= 0 {
 		size = DefaultSize
 	}
 	return &Buffer{
-		ch:  make(chan socketmode.Event, size),
-		rdb: rdb,
-		log: log,
+		ch:        make(chan socketmode.Event, size),
+		rdb:       rdb,
+		streamKey: streamKey,
+		log:       log,
 	}
 }
 
@@ -75,7 +78,7 @@ func (b *Buffer) Run(ctx context.Context) {
 func (b *Buffer) drainOne(ctx context.Context, evt socketmode.Event) {
 	backoff := time.Second
 	for {
-		if err := queue.Enqueue(ctx, b.rdb, evt); err == nil {
+		if err := queue.EnqueueTo(ctx, b.rdb, b.streamKey, evt); err == nil {
 			b.log.Info("buffer: event drained", zap.String("type", string(evt.Type)))
 			return
 		}

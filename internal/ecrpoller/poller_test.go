@@ -112,7 +112,7 @@ func TestPoller_MatchesApp(t *testing.T) {
 	p.poll(ctx)
 
 	// Verify event was enqueued.
-	msgs, err := rdb.XRange(ctx, queue.StreamKey, "-", "+").Result()
+	msgs, err := rdb.XRange(ctx, queue.StreamKeyECR, "-", "+").Result()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestPoller_TagPatternMismatch(t *testing.T) {
 	p.poll(ctx)
 
 	// No event should be enqueued.
-	msgs, err := rdb.XRange(ctx, queue.StreamKey, "-", "+").Result()
+	msgs, err := rdb.XRange(ctx, queue.StreamKeyECR, "-", "+").Result()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestPoller_UnknownRepo(t *testing.T) {
 
 	p.poll(ctx)
 
-	msgs, err := rdb.XRange(ctx, queue.StreamKey, "-", "+").Result()
+	msgs, err := rdb.XRange(ctx, queue.StreamKeyECR, "-", "+").Result()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestPoller_LockedApp(t *testing.T) {
 	p.poll(ctx)
 
 	// No event should be enqueued when locked.
-	msgs, err := rdb.XRange(ctx, queue.StreamKey, "-", "+").Result()
+	msgs, err := rdb.XRange(ctx, queue.StreamKeyECR, "-", "+").Result()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestPoller_NonPushEvent(t *testing.T) {
 
 	p.poll(ctx)
 
-	msgs, err := rdb.XRange(ctx, queue.StreamKey, "-", "+").Result()
+	msgs, err := rdb.XRange(ctx, queue.StreamKeyECR, "-", "+").Result()
 	if err != nil {
 		t.Fatal(err)
 	}
