@@ -30,8 +30,8 @@ deploy-bot-config: ## Build cmd/deploy-bot-config -> bin/deploy-bot-config
 
 test: test-unit ## Run unit tests (alias for test-unit)
 
-test-unit: ## Run all unit tests (no integration tag)
-	go test ./...
+test-unit: ## Run all unit tests with race detector (no integration tag)
+	go test -race ./...
 
 test-pkg: ## Run tests for a single package: make test-pkg PKG=./internal/store/...
 	go test $(PKG)

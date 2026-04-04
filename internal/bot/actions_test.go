@@ -134,6 +134,83 @@ type nopAudit struct{}
 
 func (nopAudit) Log(_ context.Context, _ audit.AuditEvent) error { return nil }
 
+// captureAudit records audit events for assertions.
+type captureAudit struct {
+	mu     sync.Mutex
+	events []audit.AuditEvent
+}
+
+func (c *captureAudit) Log(_ context.Context, e audit.AuditEvent) error {
+	c.mu.Lock()
+	c.events = append(c.events, e)
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *captureAudit) hasEvent(eventType string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, e := range c.events {
+		if e.EventType == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+// trackingGH wraps stubGH and tracks which methods were called.
+type trackingGH struct {
+	stubGH
+	mu    sync.Mutex
+	calls []string
+}
+
+func (t *trackingGH) record(name string) {
+	t.mu.Lock()
+	t.calls = append(t.calls, name)
+	t.mu.Unlock()
+}
+
+func (t *trackingGH) called(name string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, c := range t.calls {
+		if c == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *trackingGH) CommentApproved(ctx context.Context, pr int, approver string) error {
+	t.record("CommentApproved")
+	return t.stubGH.CommentApproved(ctx, pr, approver)
+}
+func (t *trackingGH) CommentRejected(ctx context.Context, pr int, approver, reason string) error {
+	t.record("CommentRejected")
+	return t.stubGH.CommentRejected(ctx, pr, approver, reason)
+}
+func (t *trackingGH) CommentCancelled(ctx context.Context, pr int, requester string) error {
+	t.record("CommentCancelled")
+	return t.stubGH.CommentCancelled(ctx, pr, requester)
+}
+func (t *trackingGH) CommentRequested(ctx context.Context, pr int, requester, app, tag, reason string) error {
+	t.record("CommentRequested")
+	return t.stubGH.CommentRequested(ctx, pr, requester, app, tag, reason)
+}
+func (t *trackingGH) RemoveLabel(ctx context.Context, pr int, label string) error {
+	t.record("RemoveLabel")
+	return t.stubGH.RemoveLabel(ctx, pr, label)
+}
+func (t *trackingGH) ClosePR(ctx context.Context, pr int) error {
+	t.record("ClosePR")
+	return t.stubGH.ClosePR(ctx, pr)
+}
+func (t *trackingGH) MergePR(ctx context.Context, pr int, method string) error {
+	t.record("MergePR")
+	return t.stubGH.MergePR(ctx, pr, method)
+}
+
 // --- test harness helpers ---
 
 func newTestStore(t *testing.T) *store.Store {
@@ -495,5 +572,275 @@ func TestHandleEvent_DeploySubmit_NoChange(t *testing.T) {
 
 	if !sl.hasMessageTo("C_DEPLOY") {
 		t.Error("expected no-op notice via HandleEvent dispatch")
+	}
+}
+
+// TestHandleDeploySubmit_HappyPath verifies the full deploy request path:
+// PR created, pending deploy stored, lock held, audit logged, Slack notified.
+func TestHandleDeploySubmit_HappyPath(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	al := &captureAudit{}
+	gh := &trackingGH{}
+
+	b := &Bot{
+		slack: sl, store: st, gh: gh,
+		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
+		metrics: metrics.New(prometheus.NewRegistry()),
+		cfg:     config.NewHolder(&config.Config{
+			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
+			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
+			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
+		}, ""),
+		log: zap.NewNop(),
+	}
+
+	b.handleDeploySubmit(context.Background(), deploySubmitCallback())
+
+	// Pending deploy stored.
+	d, err := st.Get(context.Background(), 1)
+	if err != nil || d == nil {
+		t.Fatal("expected pending deploy stored")
+	}
+	if d.App != "myapp" || d.Tag != "v2.0.0" || d.Environment != "prod" {
+		t.Errorf("deploy = %+v", d)
+	}
+
+	// Lock held.
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	if !locked {
+		t.Error("expected deploy lock held")
+	}
+
+	// GitHub comment posted.
+	if !gh.called("CommentRequested") {
+		t.Error("expected CommentRequested called")
+	}
+
+	// Slack deploy channel notified.
+	if !sl.hasMessageTo("C_DEPLOY") {
+		t.Error("expected deploy channel notified")
+	}
+
+	// Audit event logged.
+	if !al.hasEvent(audit.EventRequested) {
+		t.Error("expected audit event logged")
+	}
+}
+
+// TestHandleApprove_HappyPath verifies the full approve path: PR merged,
+// pending deploy deleted, lock released, audit logged, history pushed.
+func TestHandleApprove_HappyPath(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	al := &captureAudit{}
+	gh := &trackingGH{}
+
+	b := &Bot{
+		slack: sl, store: st, gh: gh,
+		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
+		metrics: metrics.New(prometheus.NewRegistry()),
+		cfg:     config.NewHolder(&config.Config{
+			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
+			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
+			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
+		}, ""),
+		log: zap.NewNop(),
+	}
+
+	seedPendingDeploy(t, st, 1)
+
+	b.handleApprove(context.Background(), approveCallback(), approveAction())
+
+	// Pending deploy deleted.
+	d, _ := st.Get(context.Background(), 1)
+	if d != nil {
+		t.Error("expected pending deploy deleted after merge")
+	}
+
+	// Lock released.
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	if locked {
+		t.Error("expected lock released after merge")
+	}
+
+	// GitHub side effects.
+	if !gh.called("MergePR") {
+		t.Error("expected MergePR called")
+	}
+	if !gh.called("CommentApproved") {
+		t.Error("expected CommentApproved called")
+	}
+	if !gh.called("RemoveLabel") {
+		t.Error("expected RemoveLabel called")
+	}
+
+	// Slack notified.
+	if !sl.hasMessageTo("C_DEPLOY") {
+		t.Error("expected deploy channel notified")
+	}
+
+	// Audit event.
+	if !al.hasEvent(audit.EventApproved) {
+		t.Error("expected approved audit event")
+	}
+
+	// History entry.
+	entries, _ := st.GetHistory(context.Background(), 10)
+	if len(entries) == 0 {
+		t.Error("expected history entry pushed")
+	} else if entries[0].EventType != audit.EventApproved {
+		t.Errorf("history event = %q, want %q", entries[0].EventType, audit.EventApproved)
+	}
+}
+
+// TestHandleRejectSubmit_HappyPath verifies the full reject path: PR closed,
+// pending deploy deleted, lock released, audit logged, history pushed.
+func TestHandleRejectSubmit_HappyPath(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	al := &captureAudit{}
+	gh := &trackingGH{}
+
+	b := &Bot{
+		slack: sl, store: st, gh: gh,
+		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
+		metrics: metrics.New(prometheus.NewRegistry()),
+		cfg:     config.NewHolder(&config.Config{
+			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
+			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
+			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
+		}, ""),
+		log: zap.NewNop(),
+	}
+
+	seedPendingDeploy(t, st, 1)
+
+	rejectCallback := slack.InteractionCallback{
+		Type: slack.InteractionTypeViewSubmission,
+		View: slack.View{
+			CallbackID:      ModalCallbackReject,
+			PrivateMetadata: "1",
+			State: &slack.ViewState{
+				Values: map[string]map[string]slack.BlockAction{
+					BlockRejReason: {ActionRejReason: {Value: "not ready"}},
+				},
+			},
+		},
+		User: slack.User{ID: "U_APPROVER"},
+	}
+
+	b.handleRejectSubmit(context.Background(), rejectCallback)
+
+	// Pending deploy deleted.
+	d, _ := st.Get(context.Background(), 1)
+	if d != nil {
+		t.Error("expected pending deploy deleted after reject")
+	}
+
+	// Lock released.
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	if locked {
+		t.Error("expected lock released after reject")
+	}
+
+	// GitHub side effects.
+	if !gh.called("CommentRejected") {
+		t.Error("expected CommentRejected called")
+	}
+	if !gh.called("ClosePR") {
+		t.Error("expected ClosePR called")
+	}
+	if !gh.called("RemoveLabel") {
+		t.Error("expected RemoveLabel called")
+	}
+
+	// Slack notified.
+	if !sl.hasMessageTo("C_DEPLOY") {
+		t.Error("expected deploy channel notified")
+	}
+
+	// Audit event.
+	if !al.hasEvent(audit.EventRejected) {
+		t.Error("expected rejected audit event")
+	}
+
+	// History entry.
+	entries, _ := st.GetHistory(context.Background(), 10)
+	if len(entries) == 0 {
+		t.Error("expected history entry pushed")
+	} else if entries[0].EventType != audit.EventRejected {
+		t.Errorf("history event = %q, want %q", entries[0].EventType, audit.EventRejected)
+	}
+}
+
+// TestHandleCancel_HappyPath verifies the full cancel path: PR closed,
+// pending deploy deleted, lock released, audit logged, history pushed.
+func TestHandleCancel_HappyPath(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	al := &captureAudit{}
+	gh := &trackingGH{}
+
+	b := &Bot{
+		slack: sl, store: st, gh: gh,
+		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
+		metrics: metrics.New(prometheus.NewRegistry()),
+		cfg:     config.NewHolder(&config.Config{
+			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
+			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
+			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
+		}, ""),
+		log: zap.NewNop(),
+	}
+
+	seedPendingDeploy(t, st, 1)
+
+	cmd := slack.SlashCommand{
+		UserID:   "U_REQUESTER",
+		UserName: "requester",
+	}
+
+	b.handleCancel(context.Background(), cmd, "1")
+
+	// Pending deploy deleted.
+	d, _ := st.Get(context.Background(), 1)
+	if d != nil {
+		t.Error("expected pending deploy deleted after cancel")
+	}
+
+	// Lock released.
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	if locked {
+		t.Error("expected lock released after cancel")
+	}
+
+	// GitHub side effects.
+	if !gh.called("CommentCancelled") {
+		t.Error("expected CommentCancelled called")
+	}
+	if !gh.called("ClosePR") {
+		t.Error("expected ClosePR called")
+	}
+	if !gh.called("RemoveLabel") {
+		t.Error("expected RemoveLabel called")
+	}
+
+	// Slack notified.
+	if !sl.hasMessageTo("C_DEPLOY") {
+		t.Error("expected deploy channel notified")
+	}
+
+	// Audit event.
+	if !al.hasEvent(audit.EventCancelled) {
+		t.Error("expected cancelled audit event")
+	}
+
+	// History entry.
+	entries, _ := st.GetHistory(context.Background(), 10)
+	if len(entries) == 0 {
+		t.Error("expected history entry pushed")
+	} else if entries[0].EventType != audit.EventCancelled {
+		t.Errorf("history event = %q, want %q", entries[0].EventType, audit.EventCancelled)
 	}
 }
