@@ -8,13 +8,15 @@ or deploying autonomously depending on per-app and global configuration.
 
 ## Event Pipeline
 
-ECR push events flow through the same Redis Stream pipeline as Slack events:
+ECR push events flow through a dedicated Redis Stream, separate from user events:
 
 ```
-EventBridge -> SQS -> ecrpoller (receiver) -> buffer -> Redis Stream -> worker -> bot handler
+EventBridge -> SQS -> ecrpoller (receiver) -> buffer -> ecr:events stream -> worker -> bot handler
 ```
 
-This gives ECR-triggered deploys the same delivery guarantees as Slack events:
+User events (slash commands, button clicks, mentions) use the `user:events` stream. The worker drains `user:events` with priority before checking `ecr:events`, so user interactions are never delayed by ECR bulk processing.
+
+This gives ECR-triggered deploys the same delivery guarantees as user events:
 - If Redis is temporarily unavailable, the buffer retries with backoff until
   the SQS visibility timeout expires.
 - The worker's consumer group ensures each event is processed exactly once
@@ -91,8 +93,9 @@ Relevant fields in the event `detail`:
 On each SQS message, the poller:
 1. Parses the EventBridge envelope and extracts `repository-name` and
    `image-tag`.
-2. Finds the app config whose `ecr_repo` contains `repository-name` (suffix
-   match).
+2. Finds all app configs whose `ecr_repo` contains `repository-name` (suffix
+   match). A single ECR push triggers deploys for every app sharing that
+   ECR repo (e.g. the same image deployed to dev and prod).
 3. Validates `image-tag` against `tag_pattern`. Discards if no match (build
    intermediates, `latest`, cache layers, etc.).
 4. Checks the deploy lock. If already locked, discards and deletes the SQS
@@ -149,6 +152,17 @@ released, a brief notice is posted to the deploy channel, and no PR is
 created.
 
 See [no-op-deploy-handling.md](no-op-deploy-handling.md) for full details.
+
+### Threaded Notifications
+
+When multiple ECR pushes (or a mix of ECR and user deploys) target the same
+environment and the number of pending deploys meets the `slack.thread_threshold`
+(default 4), the bot posts a parent message ("Processing multiple deployment
+requests for *env*...") and threads individual approval requests under it. This
+keeps the deploy channel readable during high-volume push bursts. Thread parent
+timestamps are stored in Redis as `thread:<env>` keys with a 10-minute TTL,
+created atomically (SET NX) to prevent duplicate parent messages from concurrent
+workers.
 
 ### Duplicate / Rapid Push Protection
 

@@ -16,8 +16,10 @@ no degraded mode; Redis is not optional.
 | Pending deployments | `pending:<pr_number>` | `stale_duration` (default 2h) |
 | Per-app deploy locks | `lock:<env>/<app>` | `lock_ttl` (default 5m) |
 | System locks (sweeper, reconcile) | `syslock:<name>` | Varies |
-| Event stream | `slack:events` | MAXLEN ~10,000 entries |
-| Consumer group | (stream metadata) | Permanent until deleted |
+| User event stream | `user:events` | MAXLEN ~10,000 entries |
+| ECR event stream | `ecr:events` | MAXLEN ~10,000 entries |
+| Consumer groups | (stream metadata) | Permanent until deleted |
+| Deploy thread parents | `thread:<env>` | 10 minutes |
 | Deployment history | `history` | Permanent (capped at 100 entries) |
 
 ## Temporary unavailability

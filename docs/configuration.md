@@ -113,6 +113,7 @@ The Terraform module scopes each role's Secrets Manager read permission to its o
 | `slack.deploy_channel` | | Channel where deployment notifications are posted |
 | `slack.allowed_channels` | `[]` (all) | Channel IDs where `/deploy` is accepted. Omit to allow all. Use IDs (`C01234567`), not names |
 | `slack.buffer_size` | `500` | Events buffered in memory when Redis is unavailable. Buffered events are retried with backoff; Slack retries in parallel since they are never ACKed from the buffer |
+| `slack.thread_threshold` | `4` | Controls when the bot threads deploy notifications under a parent message per environment. `0` or omitted: default threshold of 4 (thread when 4+ deploys are pending in the same environment). `-1`: never thread. `1`: always thread |
 | `slack.rate_limit_max_retries` | `3` | Max retries on Slack 429 responses |
 | `slack.rate_limit_retry_wait` | `"30s"` | Max wait between Slack rate-limit retries |
 

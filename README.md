@@ -10,7 +10,7 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 
 🔒 **No public network exposure.** Socket Mode (outbound WebSocket) and SQS long-polling. No ingress, no webhooks, no load balancer. Deploy it in a private subnet and forget about it.
 
-📦 **ECR push-triggered deploys.** One EventBridge rule captures all ECR pushes account-wide. The bot filters by app and tag pattern. Add a new app and it works immediately:
+📦 **ECR push-triggered deploys.** One EventBridge rule captures all ECR pushes account-wide. The bot filters by app and tag pattern. A single push triggers deploys for all apps sharing that ECR repo. Add a new app and it works immediately:
 - No EventBridge changes
 - No GitHub webhooks
 - No per-repo CI pipelines
@@ -30,7 +30,7 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 - Automatic rebase on merge conflicts
 - GitHub reconciliation after data loss
 
-📈 **Horizontal scaling.** Receiver and worker scale independently. Consumer groups ensure each event processes once. Distributed Redis locks coordinate singleton work across replicas.
+📈 **Horizontal scaling.** Receiver and worker scale independently. Consumer groups ensure each event processes once. Distributed Redis locks coordinate singleton work across replicas. User events and ECR events use separate Redis streams (`user:events` and `ecr:events`), so user button clicks and slash commands are never delayed by ECR bulk processing.
 
 🔑 **Least-privilege IAM.** Separate roles and policies for bot and receiver. The Terraform module handles it. IRSA is optional.
 
@@ -54,7 +54,7 @@ Approver               |                   |               |                    
     |                  |                   |               |                     |
 ECR Push               |                   |               |                     |
     |  EventBridge --->|                   |               |                     |
-    |  (SQS)           |-- enqueue ------->|               |                     |
+    |  (SQS)           |-- enqueue ------->| ecr:events    |                     |
     |                  |                   |-- event ----->|                     |
     |                  |                   |               |-- create PR ------->|
     |                  |                   |               |   (auto-merge or    |
@@ -63,8 +63,8 @@ ECR Push               |                   |               |                    
 
 Two processes share a single container image:
 
-- **receiver** -- connects to Slack via Socket Mode, validates incoming events, and enqueues them to a Redis Stream. Also polls SQS for ECR push events and scans repos for app config (when enabled). Stateless; run 2+ replicas.
-- **worker** -- consumes events from the stream, runs all business logic (GitHub API, ECR, audit logging). Run 2+ replicas; Redis Streams consumer groups ensure each event is processed once.
+- **receiver** -- connects to Slack via Socket Mode, validates incoming events, and enqueues them to a Redis Stream. User events (slash commands, button clicks, mentions) go to `user:events`; ECR push events go to `ecr:events`. Also polls SQS for ECR push events and scans repos for app config (when enabled). Stateless; run 2+ replicas.
+- **worker** -- consumes events from both streams, prioritizing `user:events` (drains it before checking `ecr:events`). Runs all business logic (GitHub API, ECR, audit logging). Run 2+ replicas; Redis Streams consumer groups ensure each event is processed once. When multiple deploys target the same environment, the bot threads individual approval requests under a parent message to reduce channel noise (configurable via `slack.thread_threshold`).
 
 ### Redis
 
