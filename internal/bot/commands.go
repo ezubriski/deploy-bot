@@ -235,7 +235,7 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 				channel = group // post to the approver channel directly
 			}
 		} else {
-			approver = "approvers"
+			approver = "approver team"
 		}
 	}
 	_, _, err = b.slack.PostMessageContext(ctx, channel,
