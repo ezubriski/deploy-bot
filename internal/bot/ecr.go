@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -167,42 +168,51 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 		}
 	}
 
-	_ = b.gh.CommentApproved(ctx, prNumber, ecrRequesterName)
-	_ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel())
-	_ = b.store.ReleaseLock(ctx, env, evt.App)
-
-	autoDeployOpts := []slack.MsgOption{
-		slack.MsgOptionText(fmt.Sprintf(
-			"Auto-deployed *%s* (%s) `%s` (ECR push). <%s|PR #%d> merged.",
-			evt.App, env, evt.Tag, prURL, prNumber,
-		), false),
-	}
-	autoDeployOpts = append(autoDeployOpts, threadOption(b.getThreadTS(ctx, env))...)
-	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, autoDeployOpts...)
-
-	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType:   audit.EventApproved,
-		App:         evt.App,
-		Environment: env,
-		Tag:         evt.Tag,
-		PRNumber:    prNumber,
-		PRURL:       prURL,
-		Requester:   ecrRequesterName,
-		Approver:    ecrRequesterName,
-	})
-
+	var wg sync.WaitGroup
+	wg.Add(6)
+	go func() { defer wg.Done(); _ = b.gh.CommentApproved(ctx, prNumber, ecrRequesterName) }()
+	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
+	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, env, evt.App) }()
+	go func() {
+		defer wg.Done()
+		autoDeployOpts := []slack.MsgOption{
+			slack.MsgOptionText(fmt.Sprintf(
+				"Auto-deployed *%s* (%s) `%s` (ECR push). <%s|PR #%d> merged.",
+				evt.App, env, evt.Tag, prURL, prNumber,
+			), false),
+		}
+		autoDeployOpts = append(autoDeployOpts, threadOption(b.getThreadTS(ctx, env))...)
+		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, autoDeployOpts...)
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+			EventType:   audit.EventApproved,
+			App:         evt.App,
+			Environment: env,
+			Tag:         evt.Tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
+			Requester:   ecrRequesterName,
+			Approver:    ecrRequesterName,
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.store.PushHistory(ctx, store.HistoryEntry{
+			EventType:   audit.EventApproved,
+			App:         evt.App,
+			Environment: env,
+			Tag:         evt.Tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
+			RequesterID: ecrRequesterID,
+			CompletedAt: time.Now(),
+		})
+	}()
 	b.metrics.RecordDeploy(evt.App, audit.EventApproved)
+	wg.Wait()
 	b.updatePendingGauge(ctx)
-	_ = b.store.PushHistory(ctx, store.HistoryEntry{
-		EventType:   audit.EventApproved,
-		App:         evt.App,
-		Environment: env,
-		Tag:         evt.Tag,
-		PRNumber:    prNumber,
-		PRURL:       prURL,
-		RequesterID: ecrRequesterID,
-		CompletedAt: time.Now(),
-	})
 	b.log.Info("ecr auto-deploy complete", zap.String("app", evt.App), zap.String("tag", evt.Tag), zap.Int("pr", prNumber))
 }
 
@@ -232,31 +242,40 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 		b.log.Error("ecr push: store deploy", zap.Error(err))
 	}
 
-	_ = b.gh.CommentRequested(ctx, prNumber, ecrRequesterName, evt.App, evt.Tag, reason)
-
-	// Post approval request to the appropriate channel.
-	b.postECRApprovalRequest(ctx, appCfg, cfg, pendingInfo{
-		App:         evt.App,
-		Environment: env,
-		Tag:         evt.Tag,
-		PRNumber:    prNumber,
-		PRURL:       prURL,
-		RequesterID: ecrRequesterID,
-		Reason:      reason,
-	})
-
-	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType:   audit.EventRequested,
-		App:         evt.App,
-		Environment: env,
-		Tag:         evt.Tag,
-		PRNumber:    prNumber,
-		PRURL:       prURL,
-		Requester:   ecrRequesterName,
-		Reason:      reason,
-	})
-
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		_ = b.gh.CommentRequested(ctx, prNumber, ecrRequesterName, evt.App, evt.Tag, reason)
+	}()
+	go func() {
+		defer wg.Done()
+		// Post approval request to the appropriate channel.
+		b.postECRApprovalRequest(ctx, appCfg, cfg, pendingInfo{
+			App:         evt.App,
+			Environment: env,
+			Tag:         evt.Tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
+			RequesterID: ecrRequesterID,
+			Reason:      reason,
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+			EventType:   audit.EventRequested,
+			App:         evt.App,
+			Environment: env,
+			Tag:         evt.Tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
+			Requester:   ecrRequesterName,
+			Reason:      reason,
+		})
+	}()
 	b.metrics.RecordDeploy(evt.App, audit.EventRequested)
+	wg.Wait()
 	b.updatePendingGauge(ctx)
 	b.log.Info("ecr push: approval requested", zap.String("app", evt.App), zap.String("tag", evt.Tag), zap.Int("pr", prNumber))
 }
@@ -309,36 +328,44 @@ func (b *Bot) postECRApprovalRequest(ctx context.Context, appCfg *config.AppConf
 // group (if configured), closes the PR, and releases the lock.
 func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEvent, appCfg *config.AppConfig, cfg *config.Config, prNumber int, prURL string, failErr error) {
 	env := appCfg.Environment
-	_ = b.gh.ClosePR(ctx, prNumber)
-	_ = b.store.ReleaseLock(ctx, env, evt.App)
 
 	msg := fmt.Sprintf(
 		"Auto-deploy of *%s* (%s) `%s` failed — %v. <%s|PR #%d> has been closed.",
 		evt.App, env, evt.Tag, failErr, prURL, prNumber,
 	)
 
-	opts := []slack.MsgOption{slack.MsgOptionText(msg, false)}
-	opts = append(opts, threadOption(b.getThreadTS(ctx, env))...)
+	var wg sync.WaitGroup
+	wg.Add(4)
+	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
+	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, env, evt.App) }()
+	go func() {
+		defer wg.Done()
+		opts := []slack.MsgOption{slack.MsgOptionText(msg, false)}
+		opts = append(opts, threadOption(b.getThreadTS(ctx, env))...)
 
-	group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
-	switch {
-	case strings.HasPrefix(group, "S"):
-		mention := fmt.Sprintf("<!subteam^%s> ", group)
-		opts = append(opts, slack.MsgOptionText(mention+msg, false))
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
-	case strings.HasPrefix(group, "C"):
-		_, _, _ = b.slack.PostMessageContext(ctx, group, opts...)
-	default:
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
-	}
-
-	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType:   "conflict_failed",
-		App:         evt.App,
-		Environment: env,
-		Tag:         evt.Tag,
-		PRNumber:    prNumber,
-		PRURL:       prURL,
-		Requester:   ecrRequesterName,
-	})
+		group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
+		switch {
+		case strings.HasPrefix(group, "S"):
+			mention := fmt.Sprintf("<!subteam^%s> ", group)
+			opts = append(opts, slack.MsgOptionText(mention+msg, false))
+			_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
+		case strings.HasPrefix(group, "C"):
+			_, _, _ = b.slack.PostMessageContext(ctx, group, opts...)
+		default:
+			_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+			EventType:   "conflict_failed",
+			App:         evt.App,
+			Environment: env,
+			Tag:         evt.Tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
+			Requester:   ecrRequesterName,
+		})
+	}()
+	wg.Wait()
 }

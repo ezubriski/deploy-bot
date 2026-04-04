@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -226,40 +227,52 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 		requesterGH = cmd.UserName
 	}
 
-	_ = b.gh.CommentCancelled(ctx, prNumber, requesterGH)
-	_ = b.gh.ClosePR(ctx, prNumber)
-	_ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel())
-	_ = b.store.ReleaseLock(ctx, d.Environment, d.App)
-	_ = b.store.Delete(ctx, prNumber)
+	cfg := b.cfg.Load()
 
-	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType:   audit.EventCancelled,
-		App:         d.App,
-		Environment: d.Environment,
-		Tag:         d.Tag,
-		PRNumber:    prNumber,
-		PRURL:       d.PRURL,
-		Requester:   requesterGH,
-	})
-
+	var wg sync.WaitGroup
+	wg.Add(8)
+	go func() { defer wg.Done(); _ = b.gh.CommentCancelled(ctx, prNumber, requesterGH) }()
+	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
+	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
+	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
+	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
+	go func() {
+		defer wg.Done()
+		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+			EventType:   audit.EventCancelled,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			Requester:   requesterGH,
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		_ = b.store.PushHistory(ctx, store.HistoryEntry{
+			EventType:   audit.EventCancelled,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			RequesterID: d.RequesterID,
+			CompletedAt: time.Now(),
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel,
+			slack.MsgOptionText(fmt.Sprintf(
+				"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *cancelled* by <@%s>.",
+				d.App, d.Environment, d.Tag, d.PRURL, prNumber, cmd.UserID,
+			), false),
+		)
+	}()
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
+	wg.Wait()
 	b.updatePendingGauge(ctx)
-	_ = b.store.PushHistory(ctx, store.HistoryEntry{
-		EventType:   audit.EventCancelled,
-		App:         d.App,
-		Environment: d.Environment,
-		Tag:         d.Tag,
-		PRNumber:    prNumber,
-		PRURL:       d.PRURL,
-		RequesterID: d.RequesterID,
-		CompletedAt: time.Now(),
-	})
-	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
-		slack.MsgOptionText(fmt.Sprintf(
-			"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *cancelled* by <@%s>.",
-			d.App, d.Environment, d.Tag, d.PRURL, prNumber, cmd.UserID,
-		), false),
-	)
 	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cmd.UserName))
 }
 

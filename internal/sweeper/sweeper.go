@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -249,43 +250,43 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 	}
 	staleDurationStr := fmt.Sprintf("%v", staleDuration)
 
+	cfg := s.cfg.Load()
 	for _, d := range expired {
 		s.log.Info("expiring deployment", zap.Int("pr", d.PRNumber), zap.String("app", d.App))
 
-		if err := s.gh.CommentExpired(ctx, d.PRNumber, staleDurationStr); err != nil {
-			s.log.Error("comment expired", zap.Error(err))
-		}
-		if err := s.gh.ClosePR(ctx, d.PRNumber); err != nil {
-			s.log.Error("close expired PR", zap.Error(err))
-		}
-		_ = s.gh.RemoveLabel(ctx, d.PRNumber, s.cfg.Load().PendingLabel())
-
-		// Post expiry notice to the deploy channel, @mentioning the requester if available.
-		deployChannel := s.cfg.Load().Slack.DeployChannel
 		requester := "deploy-bot (ECR)"
 		if d.RequesterID != "" {
 			requester = fmt.Sprintf("<@%s>", d.RequesterID)
 		}
-		_, _, err = s.slack.PostMessageContext(ctx, deployChannel,
-			slack.MsgOptionText(fmt.Sprintf(
-				"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *expired* after %s with no approval. Requested by %s.",
-				d.App, d.Environment, d.Tag, d.PRURL, d.PRNumber, staleDurationStr, requester,
-			), false),
-		)
-		if err != nil {
-			s.log.Error("post expiry notice", zap.Error(err))
-		}
 
-		_ = s.audit.Log(ctx, audit.AuditEvent{
-			EventType:   audit.EventExpired,
-			App:         d.App,
-			Environment: d.Environment,
-			Tag:         d.Tag,
-			PRNumber:    d.PRNumber,
-			PRURL:       d.PRURL,
-			Requester:   d.Requester,
-		})
-
+		var wg sync.WaitGroup
+		wg.Add(7)
+		go func() { defer wg.Done(); _ = s.gh.CommentExpired(ctx, d.PRNumber, staleDurationStr) }()
+		go func() { defer wg.Done(); _ = s.gh.ClosePR(ctx, d.PRNumber) }()
+		go func() { defer wg.Done(); _ = s.gh.RemoveLabel(ctx, d.PRNumber, cfg.PendingLabel()) }()
+		go func() { defer wg.Done(); _ = s.store.ReleaseLock(ctx, d.Environment, d.App) }()
+		go func() { defer wg.Done(); _ = s.store.Delete(ctx, d.PRNumber) }()
+		go func() {
+			defer wg.Done()
+			_, _, _ = s.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel,
+				slack.MsgOptionText(fmt.Sprintf(
+					"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *expired* after %s with no approval. Requested by %s.",
+					d.App, d.Environment, d.Tag, d.PRURL, d.PRNumber, staleDurationStr, requester,
+				), false),
+			)
+		}()
+		go func() {
+			defer wg.Done()
+			_ = s.audit.Log(ctx, audit.AuditEvent{
+				EventType:   audit.EventExpired,
+				App:         d.App,
+				Environment: d.Environment,
+				Tag:         d.Tag,
+				PRNumber:    d.PRNumber,
+				PRURL:       d.PRURL,
+				Requester:   d.Requester,
+			})
+		}()
 		s.metrics.RecordDeploy(d.App, audit.EventExpired)
 		_ = s.store.PushHistory(ctx, store.HistoryEntry{
 			EventType:   audit.EventExpired,
@@ -297,8 +298,7 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 			RequesterID: d.RequesterID,
 			CompletedAt: time.Now(),
 		})
-		_ = s.store.ReleaseLock(ctx, d.Environment, d.App)
-		_ = s.store.Delete(ctx, d.PRNumber)
+		wg.Wait()
 	}
 
 	// Close any orphaned PRs whose Redis entries have already expired.
