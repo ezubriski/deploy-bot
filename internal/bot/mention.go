@@ -47,7 +47,11 @@ func (b *Bot) handleMention(ctx context.Context, evt queue.AppMentionEvent) {
 
 	switch cmd {
 	case "status":
-		b.handleMentionStatus(ctx, evt)
+		filter := ""
+		if len(parts) >= 2 {
+			filter = parts[1]
+		}
+		b.handleMentionStatus(ctx, evt, filter)
 	case "history":
 		appFilter := ""
 		if len(parts) >= 2 {
@@ -94,16 +98,33 @@ func (b *Bot) handleMention(ctx context.Context, evt queue.AppMentionEvent) {
 	}
 }
 
-func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent) {
+func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent, filter string) {
 	deploys, err := b.store.GetAll(ctx)
 	if err != nil {
 		b.replyMention(ctx, evt, fmt.Sprintf("Failed to fetch deployments: %v", err))
 		return
 	}
+
+	if filter != "" {
+		var filtered []*store.PendingDeploy
+		for _, d := range deploys {
+			if strings.EqualFold(d.Environment, filter) ||
+				strings.HasPrefix(strings.ToLower(d.App), strings.ToLower(filter)) {
+				filtered = append(filtered, d)
+			}
+		}
+		deploys = filtered
+	}
+
 	if len(deploys) == 0 {
-		b.replyMention(ctx, evt, "No pending deployments.")
+		msg := "No pending deployments."
+		if filter != "" {
+			msg = fmt.Sprintf("No pending deployments matching *%s*.", filter)
+		}
+		b.replyMention(ctx, evt, msg)
 		return
 	}
+
 	now := time.Now()
 	var lines []string
 	for _, d := range deploys {

@@ -28,7 +28,11 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 	case len(parts) == 0:
 		b.openDeployModal(ctx, cmd, "", "")
 	case parts[0] == "status":
-		b.handleStatus(ctx, cmd)
+		filter := ""
+		if len(parts) >= 2 {
+			filter = parts[1]
+		}
+		b.handleStatus(ctx, cmd, filter)
 	case parts[0] == "history":
 		appFilter := ""
 		if len(parts) >= 2 {
@@ -105,15 +109,35 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 	}
 }
 
-func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand) {
+// handleStatus lists pending deployments, optionally filtered by app name or
+// environment. The filter matches as a prefix against both app name and
+// environment, so "prod" matches all prod apps and "nginx-01" matches that
+// specific app across environments.
+func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand, filter string) {
 	deploys, err := b.store.GetAll(ctx)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to fetch deployments: %v", err))
 		return
 	}
 
+	// Apply filter if provided.
+	if filter != "" {
+		var filtered []*store.PendingDeploy
+		for _, d := range deploys {
+			if strings.EqualFold(d.Environment, filter) ||
+				strings.HasPrefix(strings.ToLower(d.App), strings.ToLower(filter)) {
+				filtered = append(filtered, d)
+			}
+		}
+		deploys = filtered
+	}
+
 	if len(deploys) == 0 {
-		b.postEphemeralCommand(ctx, cmd, "No pending deployments.")
+		msg := "No pending deployments."
+		if filter != "" {
+			msg = fmt.Sprintf("No pending deployments matching *%s*.", filter)
+		}
+		b.postEphemeralCommand(ctx, cmd, msg)
 		return
 	}
 
@@ -123,10 +147,7 @@ func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand) {
 	byEnv := map[string][]string{}
 	for _, d := range deploys {
 		age := now.Sub(d.RequestedAt).Round(time.Minute)
-		requester := "<@" + d.RequesterID + ">"
-		if d.RequesterID == "" {
-			requester = "ECR"
-		}
+		requester := slackMention(d.RequesterID)
 		line := fmt.Sprintf("• *%s* `%s` — <%s|PR #%d> — %s — %s old — _%s_",
 			d.App, d.Tag, d.PRURL, d.PRNumber, requester, age, d.State,
 		)
