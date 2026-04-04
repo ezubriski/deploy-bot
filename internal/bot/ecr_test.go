@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -214,6 +215,155 @@ func TestHandleECRPush_ProdGuard(t *testing.T) {
 	}
 	if d == nil {
 		t.Fatal("expected pending deploy in store")
+	}
+}
+
+func TestHandleECRPush_AutoDeploy_MergeConflict_RebaseSucceeds(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	apps := []config.AppConfig{{
+		App: "myapp", Environment: "dev",
+		KustomizePath: "apps/myapp/kustomization.yaml",
+		AutoDeploy:    true,
+	}}
+
+	mergeAttempts := 0
+	gh := &stubGH{
+		mergePR: func(_ context.Context, _ int, _ string) error {
+			mergeAttempts++
+			if mergeAttempts == 1 {
+				return githubpkg.ErrMergeConflict
+			}
+			return nil // retry succeeds
+		},
+		rebaseDeployBranch: func(_ context.Context, _ githubpkg.CreatePRParams) error {
+			return nil
+		},
+	}
+	b := newECRTestBot(t, gh, sl, st, apps)
+
+	b.handleECRPush(context.Background(), queue.ECRPushEvent{
+		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+	})
+
+	if mergeAttempts != 2 {
+		t.Errorf("expected 2 merge attempts, got %d", mergeAttempts)
+	}
+	// Should complete successfully — no pending deploy stored.
+	d, _ := st.Get(context.Background(), 1)
+	if d != nil {
+		t.Error("expected no pending deploy after successful rebase+merge")
+	}
+	// Lock should be released.
+	locked, _ := st.IsLocked(context.Background(), "dev", "myapp")
+	if locked {
+		t.Error("lock should be released after successful auto-deploy")
+	}
+}
+
+func TestHandleECRPush_AutoDeploy_MergeConflict_RebaseFails(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	apps := []config.AppConfig{{
+		App: "myapp", Environment: "dev",
+		KustomizePath: "apps/myapp/kustomization.yaml",
+		AutoDeploy:    true,
+	}}
+
+	prClosed := false
+	gh := &stubGH{
+		mergePR: func(_ context.Context, _ int, _ string) error {
+			return githubpkg.ErrMergeConflict
+		},
+		rebaseDeployBranch: func(_ context.Context, _ githubpkg.CreatePRParams) error {
+			return fmt.Errorf("rebase failed")
+		},
+		closePR: func(_ context.Context, _ int) error {
+			prClosed = true
+			return nil
+		},
+	}
+	b := newECRTestBot(t, gh, sl, st, apps)
+
+	b.handleECRPush(context.Background(), queue.ECRPushEvent{
+		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+	})
+
+	if !prClosed {
+		t.Error("expected PR to be closed on rebase failure")
+	}
+	if !sl.hasMessageTo("C_DEPLOY") {
+		t.Error("expected failure notice to deploy channel")
+	}
+	// Lock should be released.
+	locked, _ := st.IsLocked(context.Background(), "dev", "myapp")
+	if locked {
+		t.Error("lock should be released after failure")
+	}
+}
+
+func TestHandleECRPush_AutoDeploy_MergeConflict_NoOp(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	apps := []config.AppConfig{{
+		App: "myapp", Environment: "dev",
+		KustomizePath: "apps/myapp/kustomization.yaml",
+		AutoDeploy:    true,
+	}}
+
+	prClosed := false
+	gh := &stubGH{
+		mergePR: func(_ context.Context, _ int, _ string) error {
+			return githubpkg.ErrMergeConflict
+		},
+		rebaseDeployBranch: func(_ context.Context, _ githubpkg.CreatePRParams) error {
+			return githubpkg.ErrNoChange
+		},
+		closePR: func(_ context.Context, _ int) error {
+			prClosed = true
+			return nil
+		},
+	}
+	b := newECRTestBot(t, gh, sl, st, apps)
+
+	b.handleECRPush(context.Background(), queue.ECRPushEvent{
+		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+	})
+
+	if !prClosed {
+		t.Error("expected PR to be closed on no-op")
+	}
+	// Lock should be released.
+	locked, _ := st.IsLocked(context.Background(), "dev", "myapp")
+	if locked {
+		t.Error("lock should be released after no-op")
+	}
+}
+
+func TestHandleECRPush_AutoDeploy_FailureNotifiesApproverGroup(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	apps := []config.AppConfig{{
+		App: "myapp", Environment: "dev",
+		KustomizePath:          "apps/myapp/kustomization.yaml",
+		AutoDeploy:             true,
+		AutoDeployApproverGroup: "C_APPROVERS",
+	}}
+
+	gh := &stubGH{
+		mergePR: func(_ context.Context, _ int, _ string) error {
+			return fmt.Errorf("unexpected error")
+		},
+	}
+	b := newECRTestBot(t, gh, sl, st, apps)
+
+	b.handleECRPush(context.Background(), queue.ECRPushEvent{
+		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+	})
+
+	// Should post failure notice to the approver channel.
+	if !sl.hasMessageTo("C_APPROVERS") {
+		t.Error("expected failure notice to approver channel")
 	}
 }
 
