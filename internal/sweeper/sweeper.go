@@ -11,6 +11,8 @@ import (
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
 
+	gh "github.com/google/go-github/v60/github"
+
 	"github.com/ezubriski/deploy-bot/internal/audit"
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/github"
@@ -92,24 +94,37 @@ type recoveryCandidate struct {
 	meta   *github.PRMeta
 }
 
-// ReconcileFromGitHub scans open PRs carrying the pending label and closes any
-// that are missing from Redis — which happens after a cache flush. Each
-// requester is notified with the exact command to reproduce their request.
+// ReconcileFromGitHub scans open PRs carrying the deploy-bot label (pending or
+// base) and closes any that are missing from Redis — which happens after a
+// cache flush or when labels weren't fully applied. Each requester is notified
+// with the exact command to reproduce their request.
 //
 // PRs are grouped by app so requesters are aware of concurrent requests for the
 // same app when deciding whether to re-request.
 func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 	cfg := s.cfg.Load()
 
-	issues, err := s.gh.ListOpenPRsWithLabel(ctx, cfg.PendingLabel())
-	if err != nil {
-		s.log.Error("reconcile: list labeled PRs", zap.Error(err))
-		return
+	// Search both the pending and base labels to catch orphaned PRs that
+	// may have lost their pending label or never received it.
+	seen := map[int]struct{}{}
+	var allIssues []*gh.Issue
+	for _, label := range []string{cfg.PendingLabel(), cfg.DeployLabel()} {
+		issues, err := s.gh.ListOpenPRsWithLabel(ctx, label)
+		if err != nil {
+			s.log.Error("reconcile: list labeled PRs", zap.String("label", label), zap.Error(err))
+			continue
+		}
+		for _, issue := range issues {
+			if _, ok := seen[issue.GetNumber()]; !ok {
+				seen[issue.GetNumber()] = struct{}{}
+				allIssues = append(allIssues, issue)
+			}
+		}
 	}
 
 	// Filter to PRs not already tracked in Redis and group by app.
 	byApp := make(map[string][]recoveryCandidate)
-	for _, issue := range issues {
+	for _, issue := range allIssues {
 		prNumber := issue.GetNumber()
 
 		existing, err := s.store.Get(ctx, prNumber)
