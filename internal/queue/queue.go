@@ -118,11 +118,18 @@ func decode(msg redis.XMessage) (socketmode.Event, error) {
 	return evt, nil
 }
 
+const (
+	// DefaultECRConcurrency is the default number of ECR events processed
+	// concurrently per worker.
+	DefaultECRConcurrency = 10
+)
+
 // Worker reads events from the streams and dispatches them.
 type Worker struct {
-	rdb      *redis.Client
-	consumer string
-	log      *zap.Logger
+	rdb            *redis.Client
+	consumer       string
+	ecrConcurrency int
+	log            *zap.Logger
 }
 
 func NewWorker(rdb *redis.Client, log *zap.Logger) *Worker {
@@ -137,7 +144,15 @@ func NewWorker(rdb *redis.Client, log *zap.Logger) *Worker {
 // when running multiple workers in the same process (e.g. tests) where
 // os.Hostname would produce the same name for all of them.
 func NewWorkerWithName(rdb *redis.Client, name string, log *zap.Logger) *Worker {
-	return &Worker{rdb: rdb, consumer: name, log: log}
+	return &Worker{rdb: rdb, consumer: name, ecrConcurrency: DefaultECRConcurrency, log: log}
+}
+
+// SetECRConcurrency sets the maximum number of ECR events processed
+// concurrently. Must be called before Run.
+func (w *Worker) SetECRConcurrency(n int) {
+	if n > 0 {
+		w.ecrConcurrency = n
+	}
 }
 
 // Init creates the consumer group on all streams, tolerating the error if it
@@ -161,6 +176,8 @@ func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmod
 	claimTicker := time.NewTicker(30 * time.Second)
 	defer claimTicker.Stop()
 
+	ecrSem := make(chan struct{}, w.ecrConcurrency)
+
 	for {
 		// Check for stuck messages on the ticker, non-blocking.
 		select {
@@ -174,16 +191,18 @@ func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmod
 		// Priority read: drain user stream first, then ECR.
 		// This ensures interactive events (button clicks, modal submits)
 		// are never delayed by an ECR bulk backlog.
-		if w.readStream(ctx, StreamKeyUser, handle) {
+		if w.readStream(ctx, StreamKeyUser, handle, nil) {
 			continue // user stream had messages — check it again before ECR
 		}
-		w.readStream(ctx, StreamKeyECR, handle)
+		w.readStream(ctx, StreamKeyECR, handle, ecrSem)
 	}
 }
 
 // readStream reads a batch from a single stream and processes messages.
+// If sem is non-nil, messages are processed concurrently using the semaphore
+// to bound concurrency. If sem is nil, messages are processed sequentially.
 // Returns true if any messages were read.
-func (w *Worker) readStream(ctx context.Context, streamKey string, handle func(context.Context, socketmode.Event)) bool {
+func (w *Worker) readStream(ctx context.Context, streamKey string, handle func(context.Context, socketmode.Event), sem chan struct{}) bool {
 	msgs, err := w.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group:    ConsumerGroup,
 		Consumer: w.consumer,
@@ -209,7 +228,17 @@ func (w *Worker) readStream(ctx context.Context, streamKey string, handle func(c
 	processed := false
 	for _, stream := range msgs {
 		for _, msg := range stream.Messages {
-			w.process(ctx, streamKey, msg, handle)
+			if sem != nil {
+				// Concurrent: acquire semaphore slot, process in goroutine.
+				sem <- struct{}{}
+				go func(m redis.XMessage) {
+					defer func() { <-sem }()
+					w.process(ctx, streamKey, m, handle)
+				}(msg)
+			} else {
+				// Sequential: process inline.
+				w.process(ctx, streamKey, msg, handle)
+			}
 			processed = true
 		}
 	}
