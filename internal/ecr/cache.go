@@ -107,7 +107,9 @@ func newAppCache(app config.AppConfig) (*appCache, error) {
 	}, nil
 }
 
-// Populate fetches tags for all apps. Fails open — logs warnings on error.
+// Populate fetches tags for all apps concurrently. Apps sharing the same ECR
+// repo are deduplicated so the API is called once per unique repository.
+// Fails open — logs warnings on error.
 func (c *Cache) Populate(ctx context.Context) {
 	c.mu.RLock()
 	apps := make(map[string]*appCache, len(c.apps))
@@ -116,11 +118,33 @@ func (c *Cache) Populate(ctx context.Context) {
 	}
 	c.mu.RUnlock()
 
+	// Deduplicate by repo — multiple apps may share the same ECR repo.
+	type repoGroup struct {
+		firstName string
+		ac        *appCache
+	}
+	byRepo := map[string]*repoGroup{}
 	for name, ac := range apps {
-		if err := c.refresh(ctx, name, ac); err != nil {
-			c.log.Warn("ecr cache populate failed", zap.String("app", name), zap.Error(err))
+		key := ac.registryID + "/" + ac.repoName
+		if _, ok := byRepo[key]; !ok {
+			byRepo[key] = &repoGroup{firstName: name, ac: ac}
 		}
 	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5)
+	for _, group := range byRepo {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(g *repoGroup) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := c.refresh(ctx, g.firstName, g.ac); err != nil {
+				c.log.Warn("ecr cache populate failed", zap.String("app", g.firstName), zap.Error(err))
+			}
+		}(group)
+	}
+	wg.Wait()
 }
 
 // StartRefresh runs background refresh every 5 minutes until ctx is cancelled.

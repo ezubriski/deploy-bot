@@ -146,19 +146,19 @@ func main() {
 		}
 	}, log)
 
-	// Populate ECR cache; mark ready once done.
+	// Populate ECR cache; mark ready once done. This blocks so the readiness
+	// probe gates traffic until tags are loaded.
 	ecrCache.Populate(ctx)
 	hh.SetCacheReady()
 	ecrCache.StartRefresh(ctx)
 
-	// Recover any deploys stuck in merging state from a previous crash.
-	sw.RecoverStuck(ctx)
-
-	// Re-insert any deploys missing from Redis (e.g. after a cache flush).
-	sw.ReconcileFromGitHub(ctx)
-
-	// Asynchronously reconstruct history from GitHub commit log if Redis is empty.
-	go sw.ReconstructHistory(ctx)
+	// Run startup recovery tasks concurrently — they don't need to finish
+	// before the worker starts processing events.
+	go func() {
+		sw.RecoverStuck(ctx)
+		sw.ReconcileFromGitHub(ctx)
+		sw.ReconstructHistory(ctx)
+	}()
 
 	// Optional periodic reconciliation (disabled by default).
 	if interval := cfgHolder.Load().Deployment.ReconcileInterval; interval != "" {
