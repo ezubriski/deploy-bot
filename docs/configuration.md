@@ -2,7 +2,7 @@
 
 The bot uses two configuration sources:
 
-- **`config.json`** — mounted as a ConfigMap, hot-reloaded on file change (30s poll) or SIGHUP
+- **`config.json`** — mounted as a ConfigMap, hot-reloaded on file change (30s poll) or SIGHUP. The base Kustomize manifests mount ConfigMaps as directories (not `subPath`) so Kubernetes updates files in place without requiring a pod restart. Avoid `subPath` in overlays or hot-reload will not work.
 - **`discovered.json`** — written by the repo scanner (optional), merged at load time
 
 ## Secrets

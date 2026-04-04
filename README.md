@@ -21,7 +21,7 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 - Slack app manifest for one-click app setup
 - GitHub Action and CLI for config validation
 
-⚙️ **Simple app configuration.** Define apps in `config.json` and the bot picks them up on the next hot-reload (30s poll or SIGHUP). For self-service, optional [repo-sourced discovery](docs/repo-sourced-app-discovery.md) lets app teams drop a `.deploy-bot.json` in their repo -- the bot discovers it, validates it, and starts deploying with no operator intervention.
+⚙️ **Simple app configuration.** Define apps in `config.json` and the bot picks them up on the next hot-reload (30s poll or SIGHUP). ConfigMaps are mounted as directories so Kubernetes updates them in place — no pod restart needed. For self-service, optional [repo-sourced discovery](docs/repo-sourced-app-discovery.md) lets app teams drop a `.deploy-bot.json` in their repo -- the bot discovers it, validates it, and starts deploying with no operator intervention.
 
 🛡️ **Built for resilience.** The bot handles the rough edges of distributed systems:
 - Redis Streams consumer groups for exactly-once processing
@@ -200,30 +200,35 @@ See [docs/configuration.md](docs/configuration.md) for the full reference.
 
 The `deploy/` directory is a Kustomize base. Create an overlay for your cluster:
 
-```bash
+```yaml
 # overlay/kustomization.yaml
-cat <<'EOF' > kustomization.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
 resources:
   - github.com/ezubriski/deploy-bot/deploy
+
 images:
-  - name: deploy-bot
-    newName: ghcr.io/ezubriski/deploy-bot
+  - name: ghcr.io/ezubriski/deploy-bot
     newTag: latest
+
 configMapGenerator:
   - name: deploy-bot-config
-    behavior: replace
     files:
       - config.json
-EOF
+    behavior: replace
+
+generatorOptions:
+  disableNameSuffixHash: true
 ```
 
 Apply:
 
 ```bash
-kubectl apply -k .
+kustomize build . | kubectl apply -f -
 ```
+
+**Config hot-reload:** The base manifests mount ConfigMaps as directories (not `subPath`), so Kubernetes automatically updates the mounted files when the ConfigMap changes. The bot watches for file changes every 30 seconds (or on SIGHUP) and reloads without restarting. If you use `subPath` mounts in your overlay, Kubernetes will **not** update the files — avoid `subPath` for config volumes.
 
 ### 7. Test it
 
