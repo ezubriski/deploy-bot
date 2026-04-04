@@ -133,8 +133,10 @@ func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand, envFilte
 			if envFilter != "" && !strings.EqualFold(d.Environment, envFilter) {
 				continue
 			}
-			if appFilter != "" && !strings.Contains(strings.ToLower(d.App), strings.ToLower(appFilter)) {
-				continue
+			if appFilter != "" && appFilter != "*" {
+				if !strings.EqualFold(d.App, appFilter) {
+					continue
+				}
 			}
 			filtered = append(filtered, d)
 		}
@@ -144,14 +146,33 @@ func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand, envFilte
 	if len(deploys) == 0 {
 		msg := "No pending deployments."
 		if envFilter != "" || appFilter != "" {
-			parts := []string{}
-			if envFilter != "" {
-				parts = append(parts, envFilter)
-			}
+			filterDesc := envFilter
 			if appFilter != "" {
-				parts = append(parts, appFilter)
+				filterDesc += " " + appFilter
 			}
-			msg = fmt.Sprintf("No pending deployments matching *%s*.", strings.Join(parts, " "))
+			msg = fmt.Sprintf("No pending deployments matching *%s*.", strings.TrimSpace(filterDesc))
+
+			// Suggest similar apps if the app filter didn't match exactly.
+			if appFilter != "" && appFilter != "*" {
+				all, _ := b.store.GetAll(ctx)
+				var suggestions []string
+				seen := map[string]struct{}{}
+				for _, d := range all {
+					if envFilter != "" && !strings.EqualFold(d.Environment, envFilter) {
+						continue
+					}
+					if _, ok := seen[d.App]; ok {
+						continue
+					}
+					if strings.Contains(strings.ToLower(d.App), strings.ToLower(appFilter)) {
+						suggestions = append(suggestions, d.App)
+						seen[d.App] = struct{}{}
+					}
+				}
+				if len(suggestions) > 0 {
+					msg += "\n\nDid you mean: " + strings.Join(suggestions, ", ")
+				}
+			}
 		}
 		b.postEphemeralCommand(ctx, cmd, msg)
 		return
