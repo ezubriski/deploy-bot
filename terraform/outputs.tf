@@ -1,11 +1,31 @@
 output "bot_role_arn" {
-  description = "IAM role ARN for the bot (worker) ServiceAccount annotation (empty if no trust source configured)"
+  description = "IAM role ARN for the bot (worker) ServiceAccount annotation (empty if identity_type is \"user\" or no trust source configured)"
   value       = local.create_roles ? aws_iam_role.bot[0].arn : ""
 }
 
 output "receiver_role_arn" {
-  description = "IAM role ARN for the receiver ServiceAccount annotation (empty if no trust source configured)"
+  description = "IAM role ARN for the receiver ServiceAccount annotation (empty if identity_type is \"user\" or no trust source configured)"
   value       = local.create_roles ? aws_iam_role.receiver[0].arn : ""
+}
+
+output "bot_user_name" {
+  description = "IAM user name for the bot (worker) component (empty if identity_type is \"role\")"
+  value       = local.create_users ? aws_iam_user.bot[0].name : ""
+}
+
+output "bot_user_arn" {
+  description = "IAM user ARN for the bot (worker) component (empty if identity_type is \"role\")"
+  value       = local.create_users ? aws_iam_user.bot[0].arn : ""
+}
+
+output "receiver_user_name" {
+  description = "IAM user name for the receiver component (empty if identity_type is \"role\")"
+  value       = local.create_users ? aws_iam_user.receiver[0].name : ""
+}
+
+output "receiver_user_arn" {
+  description = "IAM user ARN for the receiver component (empty if identity_type is \"role\")"
+  value       = local.create_users ? aws_iam_user.receiver[0].arn : ""
 }
 
 output "bot_policy_arn" {

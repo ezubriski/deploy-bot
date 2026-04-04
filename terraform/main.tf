@@ -9,7 +9,8 @@ terraform {
 
 locals {
   create_irsa_roles = var.eks_oidc_provider_arn != "" && var.eks_oidc_provider_url != ""
-  create_roles      = local.create_irsa_roles || var.enable_ec2_trust
+  create_roles      = var.identity_type == "role" && (local.create_irsa_roles || var.enable_ec2_trust)
+  create_users      = var.identity_type == "user"
 }
 
 # --- SQS queue for ECR push events (optional, shared infra) ---
@@ -28,8 +29,8 @@ data "aws_iam_policy_document" "sqs_policy" {
   count = var.ecr_events_enabled ? 1 : 0
 
   statement {
-    sid     = "AllowEventBridge"
-    actions = ["sqs:SendMessage"]
+    sid       = "AllowEventBridge"
+    actions   = ["sqs:SendMessage"]
     resources = [aws_sqs_queue.ecr_events[0].arn]
 
     principals {

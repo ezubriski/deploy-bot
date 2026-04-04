@@ -74,8 +74,19 @@ variable "ecr_events_visibility_timeout" {
   default     = 300
 }
 
+variable "identity_type" {
+  description = "Type of IAM identity to create: \"role\" (default, requires trust source) or \"user\" (no trust policy needed)"
+  type        = string
+  default     = "role"
+
+  validation {
+    condition     = contains(["role", "user"], var.identity_type)
+    error_message = "identity_type must be \"role\" or \"user\""
+  }
+}
+
 variable "enable_ec2_trust" {
-  description = "Add an EC2 trust policy to the roles, allowing EC2 instances to assume them"
+  description = "Add an EC2 trust policy to the roles, allowing EC2 instances to assume them. Only applies when identity_type is \"role\""
   type        = bool
   default     = false
 }
