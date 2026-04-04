@@ -1,4 +1,4 @@
-name: Build and Push
+name: CI
 
 on:
   push:
@@ -15,11 +15,8 @@ env:
   GHCR_IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
+  lint:
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,17 +31,8 @@ jobs:
         with:
           version: latest
 
-      - name: Test
-        run: make test
-
-  build:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'push'
-    permissions:
-      contents: read
-      packages: write
-
+  test:
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,6 +41,16 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+
+      - name: Test
+        run: make test
+
+  build:
+    runs-on: self-hosted
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set image tag
         id: tag
@@ -63,30 +61,52 @@ jobs:
             echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Login to ghcr.io
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | \
-            podman login ghcr.io -u ${{ github.actor }} --password-stdin
-
-      - name: Build and push to ghcr.io
+      - name: Build image
         run: |
           TAG=${{ steps.tag.outputs.tag }}
           podman build -t ${{ env.GHCR_IMAGE }}:${TAG} -t ${{ env.GHCR_IMAGE }}:latest .
+
+  push:
+    runs-on: self-hosted
+    needs: [lint, test, build]
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Set image tag
+        id: tag
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push to ghcr.io
+        run: |
+          TAG=${{ steps.tag.outputs.tag }}
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            podman login ghcr.io -u ${{ github.actor }} --password-stdin
           podman push ${{ env.GHCR_IMAGE }}:${TAG}
           podman push ${{ env.GHCR_IMAGE }}:latest
 
       - name: Configure AWS credentials
+        if: env.ECR_REGISTRY != ''
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build and push to ECR
+      - name: Push to ECR
         if: env.ECR_REGISTRY != ''
         env:
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
         run: |
           TAG=${{ steps.tag.outputs.tag }}
           make ecr-login REGISTRY=${ECR_REGISTRY}
-          make push TAG=${TAG} REGISTRY=${ECR_REGISTRY}
+          podman tag ${{ env.GHCR_IMAGE }}:${TAG} ${ECR_REGISTRY}/deploy-bot:${TAG}
+          podman tag ${{ env.GHCR_IMAGE }}:${TAG} ${ECR_REGISTRY}/deploy-bot:latest
+          podman push ${ECR_REGISTRY}/deploy-bot:${TAG}
+          podman push ${ECR_REGISTRY}/deploy-bot:latest
