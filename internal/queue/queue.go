@@ -161,13 +161,6 @@ func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmod
 	claimTicker := time.NewTicker(30 * time.Second)
 	defer claimTicker.Stop()
 
-	// Build multi-stream args: [stream1, stream2, ">", ">"]
-	streams := make([]string, 0, len(AllStreams)*2)
-	streams = append(streams, AllStreams...)
-	for range AllStreams {
-		streams = append(streams, ">")
-	}
-
 	for {
 		// Check for stuck messages on the ticker, non-blocking.
 		select {
@@ -178,35 +171,49 @@ func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmod
 		default:
 		}
 
-		msgs, err := w.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    ConsumerGroup,
-			Consumer: w.consumer,
-			Streams:  streams,
-			Count:    batchSize,
-			Block:    readTimeout,
-		}).Result()
-		if err != nil {
-			if err == context.Canceled || err == redis.Nil {
-				continue
-			}
-			// Consumer group was removed (e.g. Redis flush). Re-initialise and continue.
-			if strings.Contains(err.Error(), "NOGROUP") {
-				w.log.Warn("queue: consumer group missing, re-initializing")
-				if initErr := w.Init(ctx); initErr != nil {
-					w.log.Error("queue: re-init consumer group", zap.Error(initErr))
-				}
-				continue
-			}
-			w.log.Error("queue: xreadgroup", zap.Error(err))
-			continue
+		// Priority read: drain user stream first, then ECR.
+		// This ensures interactive events (button clicks, modal submits)
+		// are never delayed by an ECR bulk backlog.
+		if w.readStream(ctx, StreamKeyUser, handle) {
+			continue // user stream had messages — check it again before ECR
 		}
+		w.readStream(ctx, StreamKeyECR, handle)
+	}
+}
 
-		for _, stream := range msgs {
-			for _, msg := range stream.Messages {
-				w.process(ctx, stream.Stream, msg, handle)
+// readStream reads a batch from a single stream and processes messages.
+// Returns true if any messages were read.
+func (w *Worker) readStream(ctx context.Context, streamKey string, handle func(context.Context, socketmode.Event)) bool {
+	msgs, err := w.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
+		Group:    ConsumerGroup,
+		Consumer: w.consumer,
+		Streams:  []string{streamKey, ">"},
+		Count:    batchSize,
+		Block:    time.Second, // short block so we cycle back to check user stream
+	}).Result()
+	if err != nil {
+		if err == context.Canceled || err == redis.Nil {
+			return false
+		}
+		if strings.Contains(err.Error(), "NOGROUP") {
+			w.log.Warn("queue: consumer group missing, re-initializing", zap.String("stream", streamKey))
+			if initErr := w.Init(ctx); initErr != nil {
+				w.log.Error("queue: re-init consumer group", zap.Error(initErr))
 			}
+			return false
+		}
+		w.log.Error("queue: xreadgroup", zap.String("stream", streamKey), zap.Error(err))
+		return false
+	}
+
+	processed := false
+	for _, stream := range msgs {
+		for _, msg := range stream.Messages {
+			w.process(ctx, streamKey, msg, handle)
+			processed = true
 		}
 	}
+	return processed
 }
 
 func (w *Worker) process(ctx context.Context, streamKey string, msg redis.XMessage, handle func(context.Context, socketmode.Event)) {
