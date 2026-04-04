@@ -144,6 +144,7 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 		if rebaseErr != nil {
 			if errors.Is(rebaseErr, githubPkg.ErrNoChange) {
 				// Tag already on default branch — close as no-op.
+				_ = b.gh.CommentNoOp(ctx, prNumber, evt.App, evt.Tag)
 				_ = b.gh.ClosePR(ctx, prNumber)
 				_ = b.store.ReleaseLock(ctx, env, evt.App)
 				b.log.Info("ecr auto-deploy: no-op after rebase, tag already current", zap.String("app", evt.App))
@@ -335,7 +336,8 @@ func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEv
 	)
 
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(5)
+	go func() { defer wg.Done(); _ = b.gh.CommentAutoDeployFailed(ctx, prNumber, failErr) }()
 	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
 	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, env, evt.App) }()
 	go func() {

@@ -31,6 +31,8 @@ type githubClient interface {
 	CommentRejected(ctx context.Context, prNumber int, approver, reason string) error
 	CommentExpired(ctx context.Context, prNumber int, staleDuration string) error
 	CommentCancelled(ctx context.Context, prNumber int, requester string) error
+	CommentNoOp(ctx context.Context, prNumber int, app, tag string) error
+	CommentAutoDeployFailed(ctx context.Context, prNumber int, reason error) error
 	RemoveLabel(ctx context.Context, prNumber int, label string) error
 }
 

@@ -74,6 +74,8 @@ func (s *stubGH) CommentApproved(_ context.Context, _ int, _ string) error      
 func (s *stubGH) CommentRejected(_ context.Context, _ int, _, _ string) error        { return nil }
 func (s *stubGH) CommentExpired(_ context.Context, _ int, _ string) error            { return nil }
 func (s *stubGH) CommentCancelled(_ context.Context, _ int, _ string) error          { return nil }
+func (s *stubGH) CommentNoOp(_ context.Context, _ int, _, _ string) error            { return nil }
+func (s *stubGH) CommentAutoDeployFailed(_ context.Context, _ int, _ error) error    { return nil }
 func (s *stubGH) RemoveLabel(_ context.Context, _ int, _ string) error               { return nil }
 
 // stubValidator always approves/deploys and maps slack IDs to "gh-user".
@@ -201,6 +203,14 @@ func (t *trackingGH) CommentRequested(ctx context.Context, pr int, requester, ap
 func (t *trackingGH) RemoveLabel(ctx context.Context, pr int, label string) error {
 	t.record("RemoveLabel")
 	return t.stubGH.RemoveLabel(ctx, pr, label)
+}
+func (t *trackingGH) CommentNoOp(ctx context.Context, pr int, app, tag string) error {
+	t.record("CommentNoOp")
+	return t.stubGH.CommentNoOp(ctx, pr, app, tag)
+}
+func (t *trackingGH) CommentAutoDeployFailed(ctx context.Context, pr int, reason error) error {
+	t.record("CommentAutoDeployFailed")
+	return t.stubGH.CommentAutoDeployFailed(ctx, pr, reason)
 }
 func (t *trackingGH) ClosePR(ctx context.Context, pr int) error {
 	t.record("ClosePR")

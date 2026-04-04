@@ -267,7 +267,8 @@ func (b *Bot) notifyConflictFailed(ctx context.Context, d *store.PendingDeploy, 
 // conflict resolution reveals the deploy already happened via another path.
 func (b *Bot) closeNoOpPR(ctx context.Context, d *store.PendingDeploy, prNumber int) {
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(5)
+	go func() { defer wg.Done(); _ = b.gh.CommentNoOp(ctx, prNumber, d.App, d.Tag) }()
 	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
 	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel()) }()
 	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
