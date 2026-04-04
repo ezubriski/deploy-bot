@@ -9,6 +9,7 @@ terraform {
 
 locals {
   create_irsa_roles = var.eks_oidc_provider_arn != "" && var.eks_oidc_provider_url != ""
+  create_roles      = local.create_irsa_roles || var.enable_ec2_trust
 }
 
 # --- SQS queue for ECR push events (optional, shared infra) ---
