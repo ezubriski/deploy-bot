@@ -57,12 +57,12 @@ func (r *RepoDiscoveryConfig) ConfigFileName() string {
 	return ".deploy-bot.json"
 }
 
-// DiscoveredFilePath returns the path for discovered apps, defaulting to "/etc/deploy-bot/discovered.json".
+// DiscoveredFilePath returns the path for discovered apps, defaulting to "/etc/deploy-bot/discovered/discovered.json".
 func (r *RepoDiscoveryConfig) DiscoveredFilePath() string {
 	if r.DiscoveredPath != "" {
 		return r.DiscoveredPath
 	}
-	return "/etc/deploy-bot/discovered.json"
+	return "/etc/deploy-bot/discovered/discovered.json"
 }
 
 // ConfigMapTargetName returns the ConfigMap name, defaulting to "deploy-bot-discovered".

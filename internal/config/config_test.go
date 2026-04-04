@@ -441,7 +441,7 @@ func TestRepoDiscoveryDefaults(t *testing.T) {
 	if rd.ConfigFileName() != ".deploy-bot.json" {
 		t.Errorf("ConfigFileName = %q, want .deploy-bot.json", rd.ConfigFileName())
 	}
-	if rd.DiscoveredFilePath() != "/etc/deploy-bot/discovered.json" {
+	if rd.DiscoveredFilePath() != "/etc/deploy-bot/discovered/discovered.json" {
 		t.Errorf("DiscoveredFilePath = %q", rd.DiscoveredFilePath())
 	}
 	if rd.ConfigMapTargetName() != "deploy-bot-discovered" {

@@ -30,7 +30,7 @@ spec:
           command: ["/bot"]
           env:
             - name: CONFIG_PATH
-              value: /etc/deploy-bot/config.json
+              value: /etc/deploy-bot/config/config.json
             - name: AWS_SECRET_NAME
               value: deploy-bot/secrets
           securityContext:
@@ -40,12 +40,10 @@ spec:
               drop: ["ALL"]
           volumeMounts:
             - name: config
-              mountPath: /etc/deploy-bot/config.json
-              subPath: config.json
+              mountPath: /etc/deploy-bot/config
               readOnly: true
             - name: discovered
-              mountPath: /etc/deploy-bot/discovered.json
-              subPath: discovered.json
+              mountPath: /etc/deploy-bot/discovered
               readOnly: true
           ports:
             - name: metrics
