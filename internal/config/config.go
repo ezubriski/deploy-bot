@@ -133,6 +133,10 @@ type SlackConfig struct {
 	DeployChannel   string   `json:"deploy_channel"`
 	AllowedChannels []string `json:"allowed_channels,omitempty"`
 	BufferSize      int      `json:"buffer_size,omitempty"`
+	// ApproverGroup is the default Slack user group (S...) or channel (C...) to
+	// mention when requesting approval. Per-app auto_deploy_approver_group
+	// overrides this.
+	ApproverGroup string `json:"approver_group,omitempty"`
 	// ThreadThreshold controls when deploy notifications are threaded by
 	// environment to avoid channel flooding:
 	//   0 or omitted: default to 4
@@ -244,6 +248,16 @@ type AppConfig struct {
 func (a *AppConfig) IsProd() bool {
 	env := strings.ToLower(a.Environment)
 	return env == "prod" || env == "production"
+}
+
+// EffectiveApproverGroup returns the Slack group to mention for approval
+// requests. Per-app auto_deploy_approver_group takes precedence over the
+// global slack.approver_group default.
+func (a *AppConfig) EffectiveApproverGroup(globalDefault string) string {
+	if a.AutoDeployApproverGroup != "" {
+		return a.AutoDeployApproverGroup
+	}
+	return globalDefault
 }
 
 // EffectiveAutoDeploy returns whether this app should auto-deploy, taking the

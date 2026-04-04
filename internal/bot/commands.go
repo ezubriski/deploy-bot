@@ -226,8 +226,8 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	channel := cfg.Slack.DeployChannel
 	// If no specific approver (ECR deploys), mention the approver group.
 	if d.ApproverID == "" {
-		if appCfg, ok := cfg.AppByName(d.App); ok && appCfg.AutoDeployApproverGroup != "" {
-			group := appCfg.AutoDeployApproverGroup
+		if appCfg, ok := cfg.AppByName(d.App); ok {
+			group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
 			if strings.HasPrefix(group, "S") {
 				approver = fmt.Sprintf("<!subteam^%s>", group)
 			} else if strings.HasPrefix(group, "C") {

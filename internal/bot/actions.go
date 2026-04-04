@@ -483,7 +483,7 @@ func (b *Bot) postNoOpNotice(ctx context.Context, appName, msg string) {
 		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, slack.MsgOptionText(msg, false))
 		return
 	}
-	group := appCfg.AutoDeployApproverGroup
+	group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
 	switch {
 	case strings.HasPrefix(group, "S"):
 		// User group: mention in the deploy channel.

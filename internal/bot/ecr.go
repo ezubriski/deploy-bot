@@ -290,7 +290,7 @@ func (b *Bot) postECRApprovalRequest(ctx context.Context, appCfg *config.AppConf
 	// Thread if volume threshold is met.
 	opts := append(blocks, threadOption(b.getThreadTS(ctx, deploy.Environment))...)
 
-	group := appCfg.AutoDeployApproverGroup
+	group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
 	switch {
 	case strings.HasPrefix(group, "S"):
 		// User group: mention in the deploy channel.
@@ -320,7 +320,7 @@ func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEv
 	opts := []slack.MsgOption{slack.MsgOptionText(msg, false)}
 	opts = append(opts, threadOption(b.getThreadTS(ctx, env))...)
 
-	group := appCfg.AutoDeployApproverGroup
+	group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
 	switch {
 	case strings.HasPrefix(group, "S"):
 		mention := fmt.Sprintf("<!subteam^%s> ", group)
