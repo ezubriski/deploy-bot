@@ -321,6 +321,9 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		_ = s.store.Delete(ctx, d.PRNumber)
 	}
 
+	// Close any orphaned PRs whose Redis entries have already expired.
+	s.ReconcileFromGitHub(ctx)
+
 	// Refresh the pending gauge after each sweep pass.
 	remaining, err := s.store.GetAll(ctx)
 	if err == nil {
