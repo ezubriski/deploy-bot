@@ -86,6 +86,12 @@ func Validate(cfg *RepoConfigFile) []ValidationError {
 	var errs []ValidationError
 	seen := make(map[string]int) // "app\x00env" -> first index
 
+	type kpathEntry struct {
+		index int
+		app   string
+	}
+	kpaths := make(map[string]kpathEntry) // kustomize_path -> first occurrence
+
 	for i, e := range cfg.Apps {
 		app := strings.TrimSpace(e.App)
 		if app == "" {
@@ -121,6 +127,16 @@ func Validate(cfg *RepoConfigFile) []ValidationError {
 			continue
 		}
 		seen[key] = i
+
+		kpath := strings.TrimSpace(e.KustomizePath)
+		if first, ok := kpaths[kpath]; ok {
+			errs = append(errs, ValidationError{
+				Index: i, App: app, Field: "kustomize_path",
+				Msg: fmt.Sprintf("conflicts with apps[%d] (%s) — both target %s", first.index, first.app, kpath),
+			})
+		} else {
+			kpaths[kpath] = kpathEntry{index: i, app: app}
+		}
 	}
 
 	return errs

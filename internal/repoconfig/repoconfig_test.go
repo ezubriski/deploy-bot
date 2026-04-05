@@ -67,8 +67,8 @@ func TestValidate(t *testing.T) {
 		cfg := &RepoConfigFile{
 			APIVersion: VersionV1,
 			Apps: []AppEntry{
-				{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r"},
-				{App: "b", Environment: "prod", KustomizePath: "p", ECRRepo: "r", TagPattern: `^v\d+$`},
+				{App: "a", Environment: "dev", KustomizePath: "apps/a/dev", ECRRepo: "r"},
+				{App: "b", Environment: "prod", KustomizePath: "apps/b/prod", ECRRepo: "r", TagPattern: `^v\d+$`},
 			},
 		}
 		errs := Validate(cfg)
@@ -143,9 +143,9 @@ func TestValidate(t *testing.T) {
 func TestValidEntries(t *testing.T) {
 	cfg := &RepoConfigFile{
 		Apps: []AppEntry{
-			{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r"},
+			{App: "a", Environment: "dev", KustomizePath: "apps/a", ECRRepo: "r"},
 			{},
-			{App: "b", Environment: "prod", KustomizePath: "p", ECRRepo: "r"},
+			{App: "b", Environment: "prod", KustomizePath: "apps/b", ECRRepo: "r"},
 		},
 	}
 	errs := Validate(cfg)

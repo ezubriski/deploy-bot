@@ -105,6 +105,7 @@ func ValidateConfig(cfg *Config) []ValidationError {
 	}
 
 	seen := map[string]bool{}
+	kustomizePaths := map[string]string{} // kustomize_path -> "app (env)"
 	for i, app := range cfg.Apps {
 		prefix := fmt.Sprintf("apps[%d]", i)
 		if app.App == "" {
@@ -131,6 +132,18 @@ func ValidateConfig(cfg *Config) []ValidationError {
 				add(prefix, "app", fmt.Sprintf("duplicate app+environment: %s", key))
 			}
 			seen[key] = true
+		}
+
+		if app.KustomizePath != "" {
+			if other, ok := kustomizePaths[app.KustomizePath]; ok {
+				add(prefix, "kustomize_path", fmt.Sprintf("conflicts with %s — both target %s", other, app.KustomizePath))
+			} else {
+				label := app.App
+				if app.Environment != "" {
+					label += " (" + app.Environment + ")"
+				}
+				kustomizePaths[app.KustomizePath] = label
+			}
 		}
 	}
 

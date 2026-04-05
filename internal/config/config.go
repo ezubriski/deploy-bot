@@ -353,6 +353,7 @@ func Load(path string) (*Config, error) {
 	if cfg.Deployment.MergeMethod == "" {
 		cfg.Deployment.MergeMethod = "squash"
 	}
+	kpaths := map[string]string{} // kustomize_path -> app name
 	for _, app := range cfg.Apps {
 		if app.Environment == "" {
 			return nil, fmt.Errorf("app %q is missing required field \"environment\"", app.App)
@@ -361,6 +362,12 @@ func Load(path string) (*Config, error) {
 			if _, err := regexp.Compile(app.TagPattern); err != nil {
 				return nil, fmt.Errorf("app %q has invalid tag_pattern: %w", app.App, err)
 			}
+		}
+		if app.KustomizePath != "" {
+			if other, ok := kpaths[app.KustomizePath]; ok {
+				return nil, fmt.Errorf("app %q and %q both target kustomize_path %q", app.App, other, app.KustomizePath)
+			}
+			kpaths[app.KustomizePath] = app.App
 		}
 	}
 	return &cfg, nil

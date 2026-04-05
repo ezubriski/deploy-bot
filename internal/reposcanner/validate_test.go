@@ -85,9 +85,9 @@ func TestParseRepoConfig_InvalidRegex(t *testing.T) {
 func TestParseRepoConfig_PartialValid(t *testing.T) {
 	data := []byte(`{
 		"apps": [
-			{"app": "good", "environment": "dev", "kustomize_path": "path", "ecr_repo": "repo"},
-			{"app": "", "environment": "dev", "kustomize_path": "path", "ecr_repo": "repo"},
-			{"app": "also-good", "environment": "prod", "kustomize_path": "path", "ecr_repo": "repo"}
+			{"app": "good", "environment": "dev", "kustomize_path": "path/dev", "ecr_repo": "repo"},
+			{"app": "", "environment": "dev", "kustomize_path": "path/broken", "ecr_repo": "repo"},
+			{"app": "also-good", "environment": "prod", "kustomize_path": "path/prod", "ecr_repo": "repo"}
 		]
 	}`)
 

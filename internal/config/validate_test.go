@@ -133,3 +133,46 @@ func TestValidateConfig_DuplicateApps(t *testing.T) {
 	}
 	t.Error("expected duplicate app error")
 }
+
+func TestValidateConfig_ConflictingKustomizePaths(t *testing.T) {
+	cfg := &Config{
+		GitHub:     GitHubConfig{Org: "o", Repo: "r", DeployerTeam: "d", ApproverTeam: "a"},
+		Slack:      SlackConfig{DeployChannel: "C1"},
+		Deployment: DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
+		AWS:        AWSConfig{ECRRegion: "us-east-1"},
+		Apps: []AppConfig{
+			{App: "frontend", Environment: "dev", KustomizePath: "apps/web/kustomization.yaml", ECRRepo: "r1"},
+			{App: "backend", Environment: "dev", KustomizePath: "apps/web/kustomization.yaml", ECRRepo: "r2"},
+		},
+	}
+
+	errs := ValidateConfig(cfg)
+	for _, e := range errs {
+		if e.Field == "kustomize_path" && e.Section == "apps[1]" {
+			return
+		}
+	}
+	t.Error("expected conflicting kustomize_path error")
+}
+
+func TestValidateConfig_SameKustomizePathDifferentAppsIsConflict(t *testing.T) {
+	// Same path, different app names and environments — still a conflict.
+	cfg := &Config{
+		GitHub:     GitHubConfig{Org: "o", Repo: "r", DeployerTeam: "d", ApproverTeam: "a"},
+		Slack:      SlackConfig{DeployChannel: "C1"},
+		Deployment: DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
+		AWS:        AWSConfig{ECRRegion: "us-east-1"},
+		Apps: []AppConfig{
+			{App: "myapp", Environment: "dev", KustomizePath: "apps/shared/kustomization.yaml", ECRRepo: "r1"},
+			{App: "myapp", Environment: "prod", KustomizePath: "apps/shared/kustomization.yaml", ECRRepo: "r1"},
+		},
+	}
+
+	errs := ValidateConfig(cfg)
+	for _, e := range errs {
+		if e.Field == "kustomize_path" {
+			return
+		}
+	}
+	t.Error("expected conflicting kustomize_path error for same path across environments")
+}
