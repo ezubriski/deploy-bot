@@ -90,9 +90,15 @@ func (ct *conflictTracker) emitWarnings(ctx context.Context, slack slackclient.P
 	for _, info := range newConflicts {
 		switch info.Reason {
 		case "kustomize_path":
-			lines = append(lines, fmt.Sprintf("- `%s` (`%s`) from %s — kustomize_path conflicts with %s", info.App, info.Env, repoLink(info.SourceRepo), info.Detail))
+			lines = append(lines, fmt.Sprintf(
+				"- `%s` (`%s`) from %s — `kustomize_path` conflicts with %s. "+
+					"Each app must target a unique kustomization file. Update the `kustomize_path` in one of the configs to resolve this.",
+				info.App, info.Env, repoLink(info.SourceRepo), info.Detail))
 		default:
-			lines = append(lines, fmt.Sprintf("- `%s` (`%s`) from %s — already defined in operator config", info.App, info.Env, repoLink(info.SourceRepo)))
+			lines = append(lines, fmt.Sprintf(
+				"- `%s` (`%s`) from %s — already defined in operator config. "+
+					"Remove the app from operator config to use the repo-sourced definition, or remove it from `%s` to keep the operator definition.",
+				info.App, info.Env, repoLink(info.SourceRepo), configFile))
 		}
 	}
 	msg := fmt.Sprintf(
