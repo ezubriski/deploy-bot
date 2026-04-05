@@ -12,6 +12,8 @@ spec:
     metadata:
       labels:
         app: redis
+      annotations:
+        kubectl.kubernetes.io/restartedAt: "2026-04-04T00:00:00Z"
     spec:
       securityContext:
         runAsNonRoot: true
