@@ -40,6 +40,8 @@ make ecr-login      # authenticate Podman to ECR
 
 **Before pushing, always run `make check`.** This runs `gofmt` verification, `golangci-lint`, and unit tests. Do not push code that fails any of these.
 
+To create a release, use `make release BUMP=patch|minor|major`. This triggers the GitHub Actions release workflow. Never create tags locally.
+
 Unit tests use `miniredis` -- no real Redis needed.
 
 Integration tests require `.env.integration` with `AWS_SECRET_NAME`,

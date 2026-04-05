@@ -129,7 +129,7 @@ Two paths depending on your goals:
 | Guide | Time | What you get |
 |---|---|---|
 | **[Quickstart](docs/quickstart.md)** | ~30 min | IRSA roles, in-cluster Redis, no ECR events. Kick the tires, run `/deploy`, see it work. |
-| **[Production setup](docs/production-setup.md)** | ~1 hour | IRSA, ElastiCache IAM auth, WORM audit bucket, CMK encryption, ECR push deploys, repo discovery. Ready for SOC 2. |
+| **[Production setup](docs/production-setup.md)** | ~1 hour | IRSA, ElastiCache IAM auth, WORM audit bucket, CMK encryption, ECR push deploys, repo discovery. Designed with compliance in mind. |
 
 Start with the quickstart. Move to the production guide when you're ready to harden.
 
@@ -280,6 +280,7 @@ make lint               # golangci-lint
 make image              # build container image with Podman
 make push               # build and push to ECR
 make push TAG=v1.2.3    # push with a specific tag
+make release BUMP=minor # trigger release workflow (patch|minor|major)
 make clean              # remove ./bin
 ```
 
