@@ -14,7 +14,36 @@ existing config hot-reload mechanism.
 
 Each repository may place a config file (name is configurable -- defaults to
 `.deploy-bot.json`) in the root of its default branch. A single file can
-declare multiple apps (e.g. one per environment):
+declare multiple apps (e.g. one per environment).
+
+### Recommended: convention-based (v2)
+
+When the operator enables `enforce_repo_naming`, teams use `apiVersion: deploy-bot/v2`
+and only specify the environment and ECR repo. App name and kustomize path are
+derived from the repository name (see [naming-conventions.md](naming-conventions.md)):
+
+```json
+{
+  "apiVersion": "deploy-bot/v2",
+  "apps": [
+    {
+      "environment": "dev",
+      "ecr_repo": "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp",
+      "auto_deploy": true,
+      "auto_deploy_approver_group": "C01234567"
+    },
+    {
+      "environment": "prod",
+      "ecr_repo": "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp"
+    }
+  ]
+}
+```
+
+### Flexible naming (v1)
+
+Without `enforce_repo_naming`, or for repos listed in `exempt_repos`, teams
+use `apiVersion: deploy-bot/v1` and specify all fields explicitly:
 
 ```json
 {
@@ -41,10 +70,18 @@ declare multiple apps (e.g. one per environment):
 }
 ```
 
-The `apiVersion` field should be set to `"deploy-bot/v1"`. If omitted, it
-defaults to `v1`. Fields mirror the per-app config in the bot's primary
-config. The collector validates each entry against the same schema rules
-(e.g. `environment` is required, `tag_pattern` compiles as a regex).
+### API versions
+
+| Version | `app` | `kustomize_path` | `tag_pattern` | When to use |
+|---|---|---|---|---|
+| `deploy-bot/v2` | Optional (derived from repo name) | Optional (derived from template) | Optional (falls back to operator default) | Recommended. Use with `enforce_repo_naming` |
+| `deploy-bot/v1` | Required | Required | Optional | Flexible naming, or exempt repos during migration |
+
+If `apiVersion` is omitted, it defaults to `v1`.
+
+The collector validates each entry against the same schema rules as the
+primary config (e.g. `environment` is required, `tag_pattern` compiles as
+a regex).
 
 ### Validating config before commit
 

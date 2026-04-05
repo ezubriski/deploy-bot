@@ -238,10 +238,32 @@ Example:
 
 ## Repo-sourced app config (`.deploy-bot.json`)
 
-Repositories can declare their own app entries by placing a JSON file (default `.deploy-bot.json`) in the repo root on the default branch:
+Repositories can declare their own app entries by placing a JSON file (default `.deploy-bot.json`) in the repo root on the default branch. The `apiVersion` field is required.
+
+**Recommended (v2)** -- with `enforce_repo_naming` enabled, app name and kustomize path are derived from the repo name. Teams only specify what's unique to their app:
 
 ```json
 {
+  "apiVersion": "deploy-bot/v2",
+  "apps": [
+    {
+      "environment": "dev",
+      "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",
+      "auto_deploy": true
+    },
+    {
+      "environment": "prod",
+      "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp"
+    }
+  ]
+}
+```
+
+**Flexible (v1)** -- all fields specified explicitly. Use without `enforce_repo_naming`, or for repos listed in `exempt_repos`:
+
+```json
+{
+  "apiVersion": "deploy-bot/v1",
   "apps": [
     {
       "app": "myapp-dev",
@@ -262,6 +284,8 @@ Repositories can declare their own app entries by placing a JSON file (default `
   ]
 }
 ```
+
+See [repo-sourced-app-discovery.md](repo-sourced-app-discovery.md) for the full design including API version differences, naming conventions, and conflict handling.
 
 The file name is configurable via `repo_discovery.config_file` to support installations where the bot has a different name.
 

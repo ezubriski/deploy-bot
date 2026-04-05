@@ -9,21 +9,40 @@ jobs:
   check:
     runs-on: ${{ github.actor == 'dependabot[bot]' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
+      - name: Check for code changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - "**/*.go"
+              - "go.mod"
+              - "go.sum"
+              - "Makefile"
+              - "Dockerfile"
+              - ".golangci.yml"
+              - ".github/workflows/pr.yml"
+
       - name: Checkout
+        if: steps.filter.outputs.code == 'true'
         uses: actions/checkout@v6
 
       - name: Set up Go
+        if: steps.filter.outputs.code == 'true'
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
       - name: Install golangci-lint
+        if: steps.filter.outputs.code == 'true'
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
       - name: Check
+        if: steps.filter.outputs.code == 'true'
         run: make check
 
       - name: Build
+        if: steps.filter.outputs.code == 'true'
         env:
           CGO_ENABLED: "0"
           GOOS: linux
