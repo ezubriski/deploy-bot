@@ -6,6 +6,23 @@ A Slack bot that gates Kubernetes deployments behind an approval workflow. Devel
 
 Built for organizations running Kubernetes + Argo CD that want centralized, auditable deployment control without leaving Slack.
 
+## Table of contents
+
+- [Why deploy-bot](#why-deploy-bot)
+- [Architecture](#architecture)
+- [Security](#security)
+- [Networking](#networking)
+- [Getting started](#getting-started)
+- [Commands](#commands)
+- [Terraform module](#terraform-module)
+- [deploy-bot-config CLI](#deploy-bot-config-cli)
+- [Endpoints](#endpoints)
+- [Development](#development)
+- [Monitoring](#monitoring)
+- [Example](#example)
+- [CI](#ci)
+- [Further reading](#further-reading)
+
 ## Why deploy-bot
 
 🔒 **No public network exposure.** Socket Mode (outbound WebSocket) and SQS long-polling. No ingress, no webhooks, no load balancer. Deploy it in a private subnet and forget about it.
