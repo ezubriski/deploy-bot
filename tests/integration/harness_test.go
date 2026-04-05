@@ -90,7 +90,7 @@ func TestMain(m *testing.M) {
 		fatalf("redis ping: %v", err)
 	}
 
-	ghHTTP, err := secrets.GitHubHTTPClient()
+	ghHTTP, err := secrets.GitHubHTTPClient(cfg.GitHub.Repo)
 	if err != nil {
 		fatalf("github client: %v", err)
 	}

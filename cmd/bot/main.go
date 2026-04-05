@@ -108,7 +108,7 @@ func main() {
 	hh.SetHealthy()
 	log.Info("redis connected")
 
-	ghHTTP, err := secrets.GitHubHTTPClient()
+	ghHTTP, err := secrets.GitHubHTTPClient(cfgHolder.Load().GitHub.Repo)
 	if err != nil {
 		log.Fatal("github client", zap.Error(err))
 	}

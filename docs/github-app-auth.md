@@ -100,12 +100,12 @@ Both `github_token` (PAT) and the App fields can coexist during migration. When 
 
 Each component requests only the permissions it needs when minting its installation token, regardless of the broader permissions the App was installed with.
 
-| Component | Token permissions | Purpose |
-|---|---|---|
-| Worker (bot + sweeper) | contents:write, pull_requests:write, issues:write, members:read | PR creation, merge, close, labels, team membership checks |
-| Validator | members:read | Slack-to-GitHub identity resolution, team membership gating |
-| Approver cache | members:read | Periodic approver team membership refresh |
-| Scanner | contents:read, statuses:write | Config file reads, conflict commit statuses |
+| Component | Token permissions | Repository scope | Purpose |
+|---|---|---|---|
+| Worker (bot + sweeper) | contents:write, pull_requests:write, issues:write, members:read | Gitops repo only | PR creation, merge, close, labels, team membership checks |
+| Validator | members:read | All | Slack-to-GitHub identity resolution, team membership gating |
+| Approver cache | members:read | All | Periodic approver team membership refresh |
+| Scanner | contents:read, statuses:write | All | Config file reads, conflict commit statuses |
 
 This scoping is not possible with PATs, which always carry their full scope.
 

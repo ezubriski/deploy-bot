@@ -35,10 +35,12 @@ func (s *Secrets) patClient(token string) *http.Client {
 func ptr(s string) *string { return &s }
 
 // GitHubHTTPClient returns an *http.Client for the worker (bot + sweeper).
-// Scoped to: contents (rw), pull requests (rw), issues (rw), members (read).
-func (s *Secrets) GitHubHTTPClient() (*http.Client, error) {
+// Scoped to: contents (rw), pull requests (rw), issues (rw), members (read),
+// restricted to the gitops repository.
+func (s *Secrets) GitHubHTTPClient(gitopsRepo string) (*http.Client, error) {
 	if s.UseGitHubApp() {
 		itr, err := s.newAppTransport(&ghv84.InstallationTokenOptions{
+			Repositories: []string{gitopsRepo},
 			Permissions: &ghv84.InstallationPermissions{
 				Contents:     ptr("write"),
 				PullRequests: ptr("write"),

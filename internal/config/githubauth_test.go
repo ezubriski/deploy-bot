@@ -9,7 +9,7 @@ import (
 func TestGitHubHTTPClient_PAT(t *testing.T) {
 	s := &Secrets{GitHubToken: "ghp_testtoken123"}
 
-	client, err := s.GitHubHTTPClient()
+	client, err := s.GitHubHTTPClient("test-repo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestGitHubHTTPClient_AppCredentials(t *testing.T) {
 	}
 
 	// With an invalid key, ghinstallation should return an error.
-	_, err := s.GitHubHTTPClient()
+	_, err := s.GitHubHTTPClient("test-repo")
 	if err == nil {
 		t.Fatal("expected error with invalid private key")
 	}
