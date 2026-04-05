@@ -116,27 +116,77 @@ Use the `slack-manifest.json` file at the root of this repository:
 
 Fine-grained PATs cannot mix permission levels across repositories. You need one token for the gitops repo (read/write) and, if using repo-sourced app discovery, a second read-only token for discoverable repos.
 
-**Primary token** (`github_token`) -- scope to the gitops repo only:
+Set these shell variables first — they're used in the creation URLs and validation script below:
+
+```bash
+export GITHUB_ORG=your-org
+export GITHUB_REPO=your-gitops-repo
+```
+
+**Primary token** (`github_token`) — [create here](https://github.com/settings/personal-access-tokens/new), scoped to the gitops repo only:
+
+| Scope | Setting |
+|---|---|
+| Resource owner | `$GITHUB_ORG` |
+| Repository access | Only select repositories → `$GITHUB_REPO` |
+
+Repository permissions:
 
 | Permission | Level | Why |
 |---|---|---|
 | Contents | Read & write | Push kustomization branches |
 | Pull requests | Read & write | Create, merge, close PRs and post comments |
+| Issues | Read & write | PR comments, labels |
+| Commit statuses | Read & write | Set commit statuses |
+| Metadata | Read | Repository info (granted automatically) |
 
-**Organization permissions** (on the primary token):
+Organization permissions:
 
 | Permission | Level | Why |
 |---|---|---|
 | Members | Read | Check deployer/approver team membership |
 
-**Scanner token** (`github_scanner_token`, optional) -- scope to all repos (or repos with your discovery prefix):
+**Scanner token** (`github_scanner_token`, optional) — [create here](https://github.com/settings/personal-access-tokens/new), scoped to all repos (or repos with your discovery prefix):
+
+| Scope | Setting |
+|---|---|
+| Resource owner | `$GITHUB_ORG` |
+| Repository access | All repositories (or select repos with your prefix) |
+
+Repository permissions:
 
 | Permission | Level | Why |
 |---|---|---|
 | Contents | Read | Read `.deploy-bot.json` from repos |
 | Commit statuses | Read & write | Set config validation status on discovered repos |
+| Metadata | Read | Repository info (granted automatically) |
 
 If `github_scanner_token` is not set, the primary `github_token` is used for scanning. This works if your primary token has access to all repos, but means the gitops write permissions are shared with the scanner.
+
+**Validate your tokens:**
+
+```bash
+export DEPLOY_BOT_TOKEN=github_pat_...
+export DEPLOY_BOT_SCANNER_TOKEN=github_pat_...  # optional
+./scripts/validate-token.sh
+```
+
+The script checks every required permission and reports what's missing:
+
+```
+Validating primary token (DEPLOY_BOT_TOKEN)
+─────────────────────────────────────────────
+  ✓ Token is valid
+  ✓ Can access your-org/gitops
+  ✓ Contents: read (git refs)
+  ✓ Contents: write (can create branches)
+  ✓ Pull requests: read
+  ✓ Pull requests: write (can create PRs)
+  ✓ Issues: write (can manage labels)
+  ✓ Organization members: read (team listing)
+
+All checks passed.
+```
 
 ### 3. Set up AWS resources
 
