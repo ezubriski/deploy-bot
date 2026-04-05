@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  check:
+  lint-test-build:
     runs-on: ${{ github.actor == 'dependabot[bot]' && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       - name: Check for code changes
