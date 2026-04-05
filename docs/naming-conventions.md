@@ -116,7 +116,7 @@ The `kustomize_path_template` uses `{env}` and `{repo}` variables. Examples:
 | `{repo}/{env}/kustomization.yaml` | `my-service/dev/kustomization.yaml` |
 | `clusters/prod/{env}/{repo}/kustomization.yaml` | `clusters/prod/dev/my-service/kustomization.yaml` |
 
-### Exempt repos (break-glass)
+### Exempt repos
 
 Some repos may need to break convention — for example, during a migration or when a legacy app has a non-standard directory structure. The operator can exempt specific repos:
 
