@@ -17,7 +17,7 @@ require (
 	github.com/google/go-github/v84 v84.0.0
 	github.com/prometheus/client_golang v1.19.0
 	github.com/redis/go-redis/v9 v9.18.0
-	github.com/slack-go/slack v0.13.0
+	github.com/slack-go/slack v0.21.0
 	go.uber.org/zap v1.27.1
 	golang.org/x/oauth2 v0.36.0
 	k8s.io/api v0.35.3
