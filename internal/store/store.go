@@ -247,11 +247,17 @@ func deployLockKey(env, app string) string {
 // holder is stored as the lock value (use the requester's Slack user ID so
 // "who holds this?" is answerable by inspecting Redis directly).
 func (s *Store) AcquireLock(ctx context.Context, env, app, holder string, ttl time.Duration) (bool, error) {
-	ok, err := s.rdb.SetNX(ctx, deployLockKey(env, app), holder, ttl).Result()
+	err := s.rdb.SetArgs(ctx, deployLockKey(env, app), holder, redis.SetArgs{
+		Mode: "NX",
+		TTL:  ttl,
+	}).Err()
+	if err == redis.Nil {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("acquire lock %s/%s: %w", env, app, err)
 	}
-	return ok, nil
+	return true, nil
 }
 
 // IsLocked returns true if a deploy lock is currently held for the given app.
@@ -272,11 +278,17 @@ func (s *Store) ReleaseLock(ctx context.Context, env, app string) error {
 // Returns true if the lock was acquired. Used for single-instance coordination
 // of background processes (e.g. the sweeper) without leader election.
 func (s *Store) TryLock(ctx context.Context, name string, ttl time.Duration) (bool, error) {
-	ok, err := s.rdb.SetNX(ctx, sysLockPrefix+name, "1", ttl).Result()
+	err := s.rdb.SetArgs(ctx, sysLockPrefix+name, "1", redis.SetArgs{
+		Mode: "NX",
+		TTL:  ttl,
+	}).Err()
+	if err == redis.Nil {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("trylock %s: %w", name, err)
 	}
-	return ok, nil
+	return true, nil
 }
 
 // GetThreadTS returns the Slack thread timestamp for an environment's deploy
@@ -295,7 +307,14 @@ func (s *Store) GetThreadTS(ctx context.Context, env string) (string, error) {
 // SetThreadTS atomically claims the thread slot for an environment. Uses SET NX
 // so only the first caller wins. Returns true if the value was set.
 func (s *Store) SetThreadTS(ctx context.Context, env, ts string, ttl time.Duration) (bool, error) {
-	return s.rdb.SetNX(ctx, threadPrefix+env, ts, ttl).Result()
+	err := s.rdb.SetArgs(ctx, threadPrefix+env, ts, redis.SetArgs{
+		Mode: "NX",
+		TTL:  ttl,
+	}).Err()
+	if err == redis.Nil {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // UpdateThreadTS overwrites the thread timestamp (e.g. replacing a "pending"
