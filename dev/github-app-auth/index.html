@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../github-app-auth/">
+        <link rel="prev" href="../naming-conventions/">
       
       
-        <link rel="next" href="../merge-conflict-handling/">
+        <link rel="next" href="../redis-resilience/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Redis Resilience - deploy-bot</title>
+        <title>GitHub App Authentication - deploy-bot</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#redis-resilience" class="md-skip">
+        <a href="#github-app-authentication" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Redis Resilience
+              GitHub App Authentication
             
           </span>
         </div>
@@ -630,34 +630,6 @@
                 
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="../github-app-auth/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    GitHub App Authentication
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
     
   
   
@@ -677,7 +649,7 @@
   <span class="md-ellipsis">
     
   
-    Redis Resilience
+    GitHub App Authentication
   
 
     
@@ -695,7 +667,7 @@
   <span class="md-ellipsis">
     
   
-    Redis Resilience
+    GitHub App Authentication
   
 
     
@@ -721,44 +693,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-redis-holds" class="md-nav__link">
+  <a href="#why-consider-a-github-app" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What Redis holds
+        Why consider a GitHub App
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#temporary-unavailability" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Temporary unavailability
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#flushall-data-loss" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        FLUSHALL / data loss
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="FLUSHALL / data loss">
+    <nav class="md-nav" aria-label="Why consider a GitHub App">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-consumer-group-re-initialisation" class="md-nav__link">
+  <a href="#rate-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Consumer group re-initialisation
+        Rate limits
       
     </span>
   </a>
@@ -766,43 +716,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-stuck-merge-recovery" class="md-nav__link">
+  <a href="#operational-benefits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Stuck-merge recovery
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-github-reconciliation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. GitHub reconciliation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-history-list-reconstruction" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. History list reconstruction
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#optional-periodic-reconciliation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optional periodic reconciliation
+        Operational benefits
       
     </span>
   </a>
@@ -815,10 +732,115 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#recommended-elasticache-configuration" class="md-nav__link">
+  <a href="#when-pats-are-fine" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recommended ElastiCache configuration
+        When PATs are fine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-app-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub App setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GitHub App setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Create the app
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-set-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Set permissions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-generate-a-private-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Generate a private key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-install-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Install the app
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-note-the-ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Note the IDs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secret-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secret configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-component-token-scoping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-component token scoping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring-rate-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring rate limits
       
     </span>
   </a>
@@ -829,6 +851,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../redis-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Redis Resilience
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1013,44 +1063,22 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-redis-holds" class="md-nav__link">
+  <a href="#why-consider-a-github-app" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What Redis holds
+        Why consider a GitHub App
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#temporary-unavailability" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Temporary unavailability
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#flushall-data-loss" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        FLUSHALL / data loss
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="FLUSHALL / data loss">
+    <nav class="md-nav" aria-label="Why consider a GitHub App">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-consumer-group-re-initialisation" class="md-nav__link">
+  <a href="#rate-limits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Consumer group re-initialisation
+        Rate limits
       
     </span>
   </a>
@@ -1058,43 +1086,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-stuck-merge-recovery" class="md-nav__link">
+  <a href="#operational-benefits" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Stuck-merge recovery
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-github-reconciliation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. GitHub reconciliation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-history-list-reconstruction" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. History list reconstruction
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#optional-periodic-reconciliation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optional periodic reconciliation
+        Operational benefits
       
     </span>
   </a>
@@ -1107,10 +1102,115 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#recommended-elasticache-configuration" class="md-nav__link">
+  <a href="#when-pats-are-fine" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recommended ElastiCache configuration
+        When PATs are fine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#github-app-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub App setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GitHub App setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Create the app
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-set-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Set permissions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-generate-a-private-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Generate a private key
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-install-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Install the app
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-note-the-ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Note the IDs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secret-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secret configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#per-component-token-scoping" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-component token scoping
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring-rate-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Monitoring rate limits
       
     </span>
   </a>
@@ -1137,143 +1237,194 @@
   
 
 
-<h1 id="redis-resilience">Redis resilience<a class="headerlink" href="#redis-resilience" title="Permanent link">&para;</a></h1>
-<p>deploy-bot requires Redis to function. On startup, both the receiver and worker
-attempt to connect to Redis with retries every 5 seconds for up to 60 seconds.
-During this window the pod reports both unhealthy (<code>/healthz</code> returns 503) and
-not ready (<code>/readyz</code> returns 503). If Redis is still unreachable after 60
-seconds, the process exits. Kubernetes liveness probes will restart the pod if
-the failure threshold is reached before the 60-second timeout, which is the
-expected behaviour — the restart backoff gives Redis time to come up. There is
-no degraded mode; Redis is not optional.</p>
-<h2 id="what-redis-holds">What Redis holds<a class="headerlink" href="#what-redis-holds" title="Permanent link">&para;</a></h2>
+<h1 id="github-app-authentication">GitHub App Authentication<a class="headerlink" href="#github-app-authentication" title="Permanent link">&para;</a></h1>
+<p>By default, deploy-bot authenticates to GitHub using fine-grained personal access tokens (PATs). This works well for most deployments, but organizations running at scale may benefit from using a GitHub App instead.</p>
+<h2 id="why-consider-a-github-app">Why consider a GitHub App<a class="headerlink" href="#why-consider-a-github-app" title="Permanent link">&para;</a></h2>
+<h3 id="rate-limits">Rate limits<a class="headerlink" href="#rate-limits" title="Permanent link">&para;</a></h3>
+<p>GitHub rate limits are per-token:</p>
 <table>
 <thead>
 <tr>
-<th>Data</th>
-<th>Key pattern</th>
-<th>TTL</th>
+<th>Auth method</th>
+<th>Primary rate limit</th>
+<th>Secondary rate limits</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Pending deployments</td>
-<td><code>pending:&lt;pr_number&gt;</code></td>
-<td><code>stale_duration</code> (default 2h)</td>
+<td>Fine-grained PAT</td>
+<td>5,000 requests/hour</td>
+<td>Shared across all tokens owned by the same user</td>
 </tr>
 <tr>
-<td>Per-app deploy locks</td>
-<td><code>lock:&lt;env&gt;/&lt;app&gt;</code></td>
-<td><code>lock_ttl</code> (default 5m)</td>
-</tr>
-<tr>
-<td>System locks (sweeper, reconcile)</td>
-<td><code>syslock:&lt;name&gt;</code></td>
-<td>Varies</td>
-</tr>
-<tr>
-<td>User event stream</td>
-<td><code>user:events</code></td>
-<td>MAXLEN ~10,000 entries</td>
-</tr>
-<tr>
-<td>ECR event stream</td>
-<td><code>ecr:events</code></td>
-<td>MAXLEN ~10,000 entries</td>
-</tr>
-<tr>
-<td>Consumer groups</td>
-<td>(stream metadata)</td>
-<td>Permanent until deleted</td>
-</tr>
-<tr>
-<td>Deploy thread parents</td>
-<td><code>thread:&lt;env&gt;</code></td>
-<td>10 minutes</td>
-</tr>
-<tr>
-<td>Deployment history</td>
-<td><code>history</code></td>
-<td>Permanent (capped at 100 entries)</td>
+<td>GitHub App installation</td>
+<td>5,000+ requests/hour (scales with org size, up to 12,500)</td>
+<td>Independent per installation</td>
 </tr>
 </tbody>
 </table>
-<h2 id="temporary-unavailability">Temporary unavailability<a class="headerlink" href="#temporary-unavailability" title="Permanent link">&para;</a></h2>
-<p>If Redis becomes unreachable after startup (e.g. a primary node failure during
-ElastiCache failover, typically 1–2 minutes):</p>
-<p><strong>Receiver</strong>
-- New Slack events cannot be enqueued (XADD fails).
-- Failed events are placed in an in-memory buffer (default 500 events, configurable via <code>slack.buffer_size</code>).
-- The buffer drains automatically with exponential backoff (1s → 30s) once Redis recovers.
-- Slack is never ACKed from the buffer — Slack retries unACKed events in
-  parallel, providing a second delivery path if the receiver restarts while the
-  buffer is non-empty.
-- If the buffer fills (extended outage or very high event rate), incoming events
-  are dropped. Slack will retry these since they were never ACKed.</p>
-<p><strong>Worker</strong>
-- The event loop continues running but <code>XReadGroup</code> calls fail.
-- Errors are logged and the loop retries on each iteration.
-- If the Redis consumer group is missing on recovery (see flush scenario below),
-  the worker re-initialises it automatically.
-- In-flight events that were claimed but not yet ACKed before the outage are
-  recovered via <code>XAUTOCLAIM</code> once Redis is back (claim idle threshold: 60s).</p>
-<p><strong>Sweeper</strong>
-- The expiry sweep is skipped for any tick where Redis is unavailable.
-- Stale deployments are not expired until the next successful sweep.
-- No data is lost; the sweep catches up on recovery.</p>
-<h2 id="flushall-data-loss">FLUSHALL / data loss<a class="headerlink" href="#flushall-data-loss" title="Permanent link">&para;</a></h2>
-<p>If Redis is flushed (<code>FLUSHALL</code> or equivalent), all state is lost. The
-following recovery sequence runs automatically on the next worker startup:</p>
-<h3 id="1-consumer-group-re-initialisation">1. Consumer group re-initialisation<a class="headerlink" href="#1-consumer-group-re-initialisation" title="Permanent link">&para;</a></h3>
-<p>The worker detects the missing consumer group (<code>NOGROUP</code> error on <code>XReadGroup</code>)
-and calls <code>Init</code> to recreate it. The stream is empty after a flush so no events
-are replayed — any events that arrived during the outage window are covered by
-the receiver buffer and Slack's retries.</p>
-<h3 id="2-stuck-merge-recovery">2. Stuck-merge recovery<a class="headerlink" href="#2-stuck-merge-recovery" title="Permanent link">&para;</a></h3>
-<p><code>RecoverStuck</code> scans Redis for deployments in <code>merging</code> state and attempts to
-merge their PRs. After a flush there are no Redis entries, so this pass is a
-no-op. Any PR that was genuinely mid-merge at flush time will have been merged
-on GitHub already (or will require manual review).</p>
-<h3 id="3-github-reconciliation">3. GitHub reconciliation<a class="headerlink" href="#3-github-reconciliation" title="Permanent link">&para;</a></h3>
-<p><code>ReconcileFromGitHub</code> queries GitHub for open PRs carrying the <code>deploy-bot/pending</code>
-label (configurable via <code>deployment.label</code>). These are PRs the bot created that
-have not yet been approved, rejected, cancelled, or expired.</p>
-<p>For each such PR that is absent from Redis:</p>
+<p>deploy-bot already uses separate tokens for the worker (<code>github_token</code>) and scanner (<code>github_scanner_token</code>), which helps spread primary rate limit usage. However, because both PATs belong to the same user, they share secondary rate limits (GitHub's abuse detection limits on concurrent requests to the same endpoint). A GitHub App avoids this -- its installation tokens have fully independent rate limits.</p>
+<p>The repo scanner is the heaviest consumer: paginating org repos, fetching config files, and setting commit statuses. At ~200+ repos, scanner activity alone can push close to the 5,000/hour PAT limit, especially during the initial scan after a restart.</p>
+<h3 id="operational-benefits">Operational benefits<a class="headerlink" href="#operational-benefits" title="Permanent link">&para;</a></h3>
 <ul>
-<li>The PR is <strong>closed</strong> on GitHub and the pending label is removed.</li>
-<li>The per-app lock is released.</li>
-<li>The requester receives a DM with the exact command to re-request:
-  <code>/deploy &lt;app&gt;</code> selecting tag <code>&lt;tag&gt;</code>.</li>
+<li><strong>No personal account dependency.</strong> PATs are tied to a user. If that person leaves the org or rotates their token, the bot breaks. A GitHub App is owned by the organization.</li>
+<li><strong>Granular permissions.</strong> GitHub App permissions are declared at installation time and visible in the org settings. No guessing which scopes a PAT was created with.</li>
+<li><strong>Automatic token rotation.</strong> Installation tokens expire after 1 hour and are re-generated automatically. No manual rotation, no long-lived credentials.</li>
+<li><strong>Audit trail.</strong> GitHub App actions appear as the app in audit logs, not as a personal user.</li>
 </ul>
-<p>If multiple PRs for the same app are found, each requester's DM includes a list
-of the concurrent requests so they can coordinate before re-requesting.</p>
-<blockquote>
-<p><strong>Note:</strong> The <code>deploy-bot/pending</code> label is only present on open PRs. Closed
-PRs (approved, rejected, cancelled, expired) retain only the <code>deploy-bot</code>
-audit label and are never surfaced by reconciliation.</p>
-</blockquote>
-<h3 id="4-history-list-reconstruction">4. History list reconstruction<a class="headerlink" href="#4-history-list-reconstruction" title="Permanent link">&para;</a></h3>
-<p>The deployment history (<code>/deploy history</code>) is empty after a flush. On startup,
-the worker detects the empty history list and asynchronously reconstructs it
-from GitHub commit history (<code>ReconstructHistory</code>). It scans deploy commits
-for each configured app's kustomize path, extracts app/tag/environment from
-the commit message format <code>deploy(&lt;env&gt;/&lt;app&gt;): update image tag to &lt;tag&gt;</code>,
-and populates history entries. Reconstructed entries are missing requester IDs
-and PR links since those are not derivable from commit messages alone.</p>
-<h3 id="optional-periodic-reconciliation">Optional periodic reconciliation<a class="headerlink" href="#optional-periodic-reconciliation" title="Permanent link">&para;</a></h3>
-<p>Reconciliation also runs on a configurable interval if <code>deployment.reconcile_interval</code>
-is set (e.g. <code>1h</code>). This is disabled by default. Only one worker pod runs
-reconciliation per interval, coordinated via a Redis lock.</p>
-<h2 id="recommended-elasticache-configuration">Recommended ElastiCache configuration<a class="headerlink" href="#recommended-elasticache-configuration" title="Permanent link">&para;</a></h2>
-<p>To minimise the impact of node failures and make data loss scenarios unlikely:</p>
+<h2 id="when-pats-are-fine">When PATs are fine<a class="headerlink" href="#when-pats-are-fine" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Multi-AZ with automatic failover</strong> — primary failure triggers automatic
-  promotion of a replica, typically within 1–2 minutes.</li>
-<li><strong>AOF persistence enabled</strong> (<code>appendonly yes</code>) — data survives a node restart.
-  Use <code>appendfsync everysec</code> for a balance of durability and performance.</li>
-<li><strong>Do not run FLUSHALL in production.</strong> If you must, coordinate with the team
-  first — requesters with pending deployments will need to re-request.</li>
+<li>Small to mid-size orgs (under ~100 repos scanned)</li>
+<li>Repo discovery disabled (scanner is the main rate limit consumer)</li>
+<li>Single-team setups where the bot operator controls the PAT lifecycle</li>
 </ul>
+<h2 id="github-app-setup">GitHub App setup<a class="headerlink" href="#github-app-setup" title="Permanent link">&para;</a></h2>
+<h3 id="1-create-the-app">1. Create the app<a class="headerlink" href="#1-create-the-app" title="Permanent link">&para;</a></h3>
+<p>Go to your org settings: <strong>Settings &gt; Developer settings &gt; GitHub Apps &gt; New GitHub App</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GitHub App name</td>
+<td><code>deploy-bot</code> (or your preferred name)</td>
+</tr>
+<tr>
+<td>Homepage URL</td>
+<td>Your docs site or repo URL</td>
+</tr>
+<tr>
+<td>Webhook</td>
+<td><strong>Inactive</strong> (deploy-bot uses Socket Mode and SQS, not webhooks)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="2-set-permissions">2. Set permissions<a class="headerlink" href="#2-set-permissions" title="Permanent link">&para;</a></h3>
+<p><strong>Repository permissions:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Permission</th>
+<th>Level</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Contents</td>
+<td>Read &amp; write</td>
+<td>Worker (PR branches, commits), Scanner (config file reads)</td>
+</tr>
+<tr>
+<td>Pull requests</td>
+<td>Read &amp; write</td>
+<td>Worker (create, merge, close PRs)</td>
+</tr>
+<tr>
+<td>Issues</td>
+<td>Read &amp; write</td>
+<td>Worker (labels)</td>
+</tr>
+<tr>
+<td>Commit statuses</td>
+<td>Read &amp; write</td>
+<td>Scanner (conflict status checks)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Organization permissions:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Permission</th>
+<th>Level</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Members</td>
+<td>Read</td>
+<td>Worker and Receiver (team membership checks for deployer/approver gating)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="3-generate-a-private-key">3. Generate a private key<a class="headerlink" href="#3-generate-a-private-key" title="Permanent link">&para;</a></h3>
+<p>After creating the app, generate a private key (PEM file) from the app settings page. Store it securely -- this is used to mint short-lived installation tokens.</p>
+<h3 id="4-install-the-app">4. Install the app<a class="headerlink" href="#4-install-the-app" title="Permanent link">&para;</a></h3>
+<p>Install the app on your organization. You can scope it to:</p>
+<ul>
+<li><strong>All repositories</strong> -- required if using repo discovery without <code>repo_prefix</code></li>
+<li><strong>Selected repositories</strong> -- choose the gitops repo and any repos the scanner should discover</li>
+</ul>
+<h3 id="5-note-the-ids">5. Note the IDs<a class="headerlink" href="#5-note-the-ids" title="Permanent link">&para;</a></h3>
+<p>You'll need:
+- <strong>App ID</strong> -- shown on the app settings page
+- <strong>Installation ID</strong> -- visible in the URL after installing (<code>https://github.com/settings/installations/&lt;ID&gt;</code>)
+- <strong>Private key</strong> -- the PEM file from step 3</p>
+<h2 id="secret-configuration">Secret configuration<a class="headerlink" href="#secret-configuration" title="Permanent link">&para;</a></h2>
+<p>Store the App ID, Installation ID, and private key in your secret. These replace <code>github_token</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;slack_bot_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;xoxb-...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;slack_app_token&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;xapp-...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;github_app_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">12345</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;github_app_installation_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">67890</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;github_app_private_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;redis_addr&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;redis:6379&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Installation tokens are minted on demand, cached for up to 1 hour, and refreshed before expiry.</p>
+<p>Both <code>github_token</code> (PAT) and the App fields can coexist during migration. When App credentials are present, they take precedence. The <code>github_scanner_token</code> PAT can still be set independently if you want the scanner to use a separate identity.</p>
+<h2 id="per-component-token-scoping">Per-component token scoping<a class="headerlink" href="#per-component-token-scoping" title="Permanent link">&para;</a></h2>
+<p>Each component requests only the permissions it needs when minting its installation token, regardless of the broader permissions the App was installed with.</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Token permissions</th>
+<th>Repository scope</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Worker (bot + sweeper)</td>
+<td>contents:write, pull_requests:write, issues:write, members:read</td>
+<td>Gitops repo only</td>
+<td>PR creation, merge, close, labels, team membership checks</td>
+</tr>
+<tr>
+<td>Validator</td>
+<td>members:read</td>
+<td>All</td>
+<td>Slack-to-GitHub identity resolution, team membership gating</td>
+</tr>
+<tr>
+<td>Approver cache</td>
+<td>members:read</td>
+<td>All</td>
+<td>Periodic approver team membership refresh</td>
+</tr>
+<tr>
+<td>Scanner</td>
+<td>contents:read, statuses:write</td>
+<td>All</td>
+<td>Config file reads, conflict commit statuses</td>
+</tr>
+</tbody>
+</table>
+<p>This scoping is not possible with PATs, which always carry their full scope.</p>
+<h2 id="monitoring-rate-limits">Monitoring rate limits<a class="headerlink" href="#monitoring-rate-limits" title="Permanent link">&para;</a></h2>
+<p>Watch for these log messages that indicate rate limit pressure:</p>
+<ul>
+<li><strong>Scanner:</strong> <code>rate limit remaining below floor, pausing scan</code> -- the scanner's <code>rate_limit_floor</code> (default 500) was hit</li>
+<li><strong>Worker:</strong> <code>GitHub secondary rate limit</code> -- concurrent request limit reached, retrying with backoff</li>
+</ul>
+<p>If you see these frequently with PATs, switching to a GitHub App is the recommended next step.</p>
 
 
 

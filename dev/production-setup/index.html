@@ -453,13 +453,41 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-create-github-pats" class="md-nav__link">
+  <a href="#2-github-authentication" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Create GitHub PATs
+        2. GitHub authentication
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="2. GitHub authentication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#option-a-github-app-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option A: GitHub App (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-b-fine-grained-pats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option B: Fine-grained PATs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -526,10 +554,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#with-elasticache-iam-auth" class="md-nav__link">
+  <a href="#github-app-elasticache-iam-auth" class="md-nav__link">
     <span class="md-ellipsis">
       
-        With ElastiCache IAM auth
+        GitHub App + ElastiCache IAM auth
       
     </span>
   </a>
@@ -537,10 +565,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#with-password-auth-non-elasticache-redis" class="md-nav__link">
+  <a href="#pats-password-auth-non-elasticache-redis" class="md-nav__link">
     <span class="md-ellipsis">
       
-        With password auth (non-ElastiCache Redis)
+        PATs + password auth (non-ElastiCache Redis)
       
     </span>
   </a>
@@ -868,6 +896,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../github-app-auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub App Authentication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../redis-resilience/" class="md-nav__link">
         
   
@@ -1090,13 +1146,41 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-create-github-pats" class="md-nav__link">
+  <a href="#2-github-authentication" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. Create GitHub PATs
+        2. GitHub authentication
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="2. GitHub authentication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#option-a-github-app-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option A: GitHub App (recommended)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-b-fine-grained-pats" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option B: Fine-grained PATs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1163,10 +1247,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#with-elasticache-iam-auth" class="md-nav__link">
+  <a href="#github-app-elasticache-iam-auth" class="md-nav__link">
     <span class="md-ellipsis">
       
-        With ElastiCache IAM auth
+        GitHub App + ElastiCache IAM auth
       
     </span>
   </a>
@@ -1174,10 +1258,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#with-password-auth-non-elasticache-redis" class="md-nav__link">
+  <a href="#pats-password-auth-non-elasticache-redis" class="md-nav__link">
     <span class="md-ellipsis">
       
-        With password auth (non-ElastiCache Redis)
+        PATs + password auth (non-ElastiCache Redis)
       
     </span>
   </a>
@@ -1291,8 +1375,12 @@
 <li><strong>Socket Mode</strong> → Generate Token → name it <code>socket</code>, add <code>connections:write</code> scope. Copy the <code>xapp-</code> token.</li>
 <li><strong>OAuth &amp; Permissions</strong> → Install to Workspace. Copy the <code>xoxb-</code> token.</li>
 </ol>
-<h2 id="2-create-github-pats">2. Create GitHub PATs<a class="headerlink" href="#2-create-github-pats" title="Permanent link">&para;</a></h2>
-<p>You need two tokens: one for the gitops repo (read/write) and one for repo discovery (read-only, broader scope).</p>
+<h2 id="2-github-authentication">2. GitHub authentication<a class="headerlink" href="#2-github-authentication" title="Permanent link">&para;</a></h2>
+<h3 id="option-a-github-app-recommended">Option A: GitHub App (recommended)<a class="headerlink" href="#option-a-github-app-recommended" title="Permanent link">&para;</a></h3>
+<p>A GitHub App provides automatic token rotation, per-component least-privilege scoping, and no dependency on a personal account. See <a href="../github-app-auth/">GitHub App Authentication</a> for the full setup.</p>
+<p>Once installed, you'll have an <strong>App ID</strong>, <strong>Installation ID</strong>, and <strong>private key</strong> (PEM file). These go into the secret in step 4.</p>
+<h3 id="option-b-fine-grained-pats">Option B: Fine-grained PATs<a class="headerlink" href="#option-b-fine-grained-pats" title="Permanent link">&para;</a></h3>
+<p>If a GitHub App is not practical for your organization, create two fine-grained PATs.</p>
 <p><strong>Primary token</strong> — <a href="https://github.com/settings/personal-access-tokens/new">create here</a>, scoped to the gitops repo:</p>
 <table>
 <thead>
@@ -1464,13 +1552,15 @@
 </tbody>
 </table>
 <h2 id="4-populate-secrets">4. Populate secrets<a class="headerlink" href="#4-populate-secrets" title="Permanent link">&para;</a></h2>
-<h3 id="with-elasticache-iam-auth">With ElastiCache IAM auth<a class="headerlink" href="#with-elasticache-iam-auth" title="Permanent link">&para;</a></h3>
+<h3 id="github-app-elasticache-iam-auth">GitHub App + ElastiCache IAM auth<a class="headerlink" href="#github-app-elasticache-iam-auth" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Bot secret</span>
 aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-value<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--secret-id<span class="w"> </span>deploy-bot/bot-secrets<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--secret-string<span class="w"> </span><span class="s1">&#39;{</span>
 <span class="s1">    &quot;slack_bot_token&quot;:              &quot;xoxb-...&quot;,</span>
-<span class="s1">    &quot;github_token&quot;:                 &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;github_app_id&quot;:                12345,</span>
+<span class="s1">    &quot;github_app_installation_id&quot;:   67890,</span>
+<span class="s1">    &quot;github_app_private_key&quot;:       &quot;-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----&quot;,</span>
 <span class="s1">    &quot;redis_addr&quot;:                   &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
 <span class="s1">    &quot;redis_iam_auth&quot;:               true,</span>
 <span class="s1">    &quot;redis_user_id&quot;:                &quot;deploy-bot-iam&quot;,</span>
@@ -1483,8 +1573,9 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <span class="w">  </span>--secret-string<span class="w"> </span><span class="s1">&#39;{</span>
 <span class="s1">    &quot;slack_bot_token&quot;:              &quot;xoxb-...&quot;,</span>
 <span class="s1">    &quot;slack_app_token&quot;:              &quot;xapp-...&quot;,</span>
-<span class="s1">    &quot;github_token&quot;:                 &quot;github_pat_...&quot;,</span>
-<span class="s1">    &quot;github_scanner_token&quot;:         &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;github_app_id&quot;:                12345,</span>
+<span class="s1">    &quot;github_app_installation_id&quot;:   67890,</span>
+<span class="s1">    &quot;github_app_private_key&quot;:       &quot;-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----&quot;,</span>
 <span class="s1">    &quot;redis_addr&quot;:                   &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
 <span class="s1">    &quot;redis_iam_auth&quot;:               true,</span>
 <span class="s1">    &quot;redis_user_id&quot;:                &quot;deploy-bot-iam&quot;,</span>
@@ -1492,7 +1583,7 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <span class="s1">  }&#39;</span>
 </code></pre></div>
 <p>The <code>redis_user_id</code> must match the ElastiCache user configured with IAM authentication. The <code>redis_replication_group_id</code> is the replication group ID (not the endpoint) — it's used to generate SigV4 presigned auth tokens. TLS is enabled automatically when <code>redis_iam_auth</code> is true.</p>
-<h3 id="with-password-auth-non-elasticache-redis">With password auth (non-ElastiCache Redis)<a class="headerlink" href="#with-password-auth-non-elasticache-redis" title="Permanent link">&para;</a></h3>
+<h3 id="pats-password-auth-non-elasticache-redis">PATs + password auth (non-ElastiCache Redis)<a class="headerlink" href="#pats-password-auth-non-elasticache-redis" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Bot secret</span>
 aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-value<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--secret-id<span class="w"> </span>deploy-bot/bot-secrets<span class="w"> </span><span class="se">\</span>
@@ -1515,6 +1606,7 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <span class="s1">    &quot;redis_token&quot;:          &quot;your-auth-token&quot;</span>
 <span class="s1">  }&#39;</span>
 </code></pre></div>
+<p>See <a href="../configuration/">configuration.md</a> for all secret fields and auth combinations.</p>
 <h2 id="5-write-your-config">5. Write your config<a class="headerlink" href="#5-write-your-config" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">&quot;github&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
@@ -1721,8 +1813,8 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <td>Default manifests</td>
 </tr>
 <tr>
-<td>GitHub PATs are fine-grained, least-privilege</td>
-<td>Validated with <code>validate-token.sh</code></td>
+<td>GitHub App auth (no long-lived PATs, scoped tokens)</td>
+<td><code>github_app_id</code> set, or PATs validated with <code>validate-token.sh</code></td>
 </tr>
 </tbody>
 </table>
