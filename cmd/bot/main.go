@@ -139,7 +139,11 @@ func main() {
 		log.Fatal("init audit logger", zap.Error(err))
 	}
 
-	val := validator.New(ghHTTP, rawSlack, cfgHolder.Load(), log)
+	valHTTP, err := secrets.ValidatorHTTPClient()
+	if err != nil {
+		log.Fatal("validator github client", zap.Error(err))
+	}
+	val := validator.New(valHTTP, rawSlack, cfgHolder.Load(), log)
 
 	// Log prod auto-deploy guard status at startup.
 	logProdAutoDeployGuard(initialCfg, auditLog, log)

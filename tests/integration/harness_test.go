@@ -126,7 +126,11 @@ func TestMain(m *testing.M) {
 		fatalf("init audit logger: %v", err)
 	}
 
-	val := validator.New(ghHTTP, rawSlack, cfg, log)
+	valHTTP, valErr := secrets.ValidatorHTTPClient()
+	if valErr != nil {
+		fatalf("validator github client: %v", valErr)
+	}
+	val := validator.New(valHTTP, rawSlack, cfg, log)
 	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m2, cfgHolder, log)
 
 	// Delete any leftover stream from a previous test run. This clears the

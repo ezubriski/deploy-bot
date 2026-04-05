@@ -99,11 +99,11 @@ func main() {
 	evtBuffer := buffer.New(cfg.Slack.BufferSize, rdb, queue.StreamKeyUser, log)
 	go evtBuffer.Run(ctx)
 
-	ghHTTP, err := secrets.GitHubHTTPClient()
+	approverHTTP, err := secrets.ApproverHTTPClient()
 	if err != nil {
-		log.Fatal("github client", zap.Error(err))
+		log.Fatal("approver github client", zap.Error(err))
 	}
-	approverCache := approvers.New(ghHTTP, slackClient, cfg.GitHub.Org, cfg.GitHub.ApproverTeam, log)
+	approverCache := approvers.New(approverHTTP, slackClient, cfg.GitHub.Org, cfg.GitHub.ApproverTeam, log)
 	if err := approverCache.Refresh(ctx); err != nil {
 		// Fail open: log the error but continue. The cache will retry on the
 		// next tick, and the worker still validates approvers authoritatively.
