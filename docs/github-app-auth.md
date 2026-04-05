@@ -77,50 +77,39 @@ You'll need:
 - **Installation ID** -- visible in the URL after installing (`https://github.com/settings/installations/<ID>`)
 - **Private key** -- the PEM file from step 3
 
-### 6. Token generation
-
-GitHub App authentication is a two-step process:
-
-1. Sign a JWT with the app's private key (valid for 10 minutes)
-2. Exchange the JWT for an installation token (valid for 1 hour)
-
-deploy-bot does not yet have built-in GitHub App token generation. You have two options for providing installation tokens:
-
-**Option A: External token broker (recommended)**
-
-Run a sidecar or CronJob that generates installation tokens and writes them to the secret. Tools like [github-app-token](https://github.com/tibdex/github-app-installation-token) or a simple script can handle this:
-
-```bash
-# Example: generate token and update Secrets Manager
-TOKEN=$(generate-installation-token --app-id 12345 --key /path/to/key.pem --installation-id 67890)
-
-aws secretsmanager put-secret-value \
-  --secret-id deploy-bot/bot-secrets \
-  --secret-string "$(jq -n \
-    --arg token "$TOKEN" \
-    --arg slack "xoxb-..." \
-    --arg redis "redis:6379" \
-    '{github_token: $token, slack_bot_token: $slack, redis_addr: $redis}')"
-```
-
-Run this on a schedule shorter than the 1-hour token expiry (e.g. every 30 minutes). The bot picks up the new token on the next GitHub API call.
-
-**Option B: GitHub Actions workflow token**
-
-If the bot only needs GitHub access during CI-triggered flows, you can use the `actions/create-github-app-token` action to generate tokens in workflows. This doesn't help with the always-running bot process, but can supplement PATs for specific operations.
-
 ## Secret configuration
 
-The secret fields are the same regardless of auth method. Replace the PAT values with installation tokens:
+Store the App ID, Installation ID, and private key in your secret. These replace `github_token`:
 
 ```json
 {
-  "github_token": "<installation-token>",
-  "github_scanner_token": "<installation-token>"
+  "slack_bot_token": "xoxb-...",
+  "slack_app_token": "xapp-...",
+  "github_app_id": 12345,
+  "github_app_installation_id": 67890,
+  "github_app_private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----",
+  "redis_addr": "redis:6379"
 }
 ```
 
-Both fields can use the same installation token if the app is installed with all required permissions. Using separate tokens (from separate app installations or with different repository scoping) provides further rate limit isolation.
+The bot handles token generation and refresh automatically -- no external token broker, sidecar, or CronJob is needed. Installation tokens are minted on demand, cached for up to 1 hour, and refreshed transparently before expiry.
+
+Both `github_token` (PAT) and the App fields can coexist during migration. When App credentials are present, they take precedence. The `github_scanner_token` PAT can still be set independently if you want the scanner to use a separate identity.
+
+## Per-component token scoping
+
+When using GitHub App auth, the bot automatically requests the minimum permissions each component needs. Installation tokens are scoped at mint time -- each component gets its own token with only the permissions it requires, even though the App itself is installed with broader permissions.
+
+| Component | Token permissions | Purpose |
+|---|---|---|
+| Worker (bot + sweeper) | contents:write, pull_requests:write, issues:write, members:read | PR creation, merge, close, labels, team membership checks |
+| Validator | members:read | Slack-to-GitHub identity resolution, team membership gating |
+| Approver cache | members:read | Periodic approver team membership refresh |
+| Scanner | contents:read, statuses:write | Config file reads, conflict commit statuses |
+
+This is enforced automatically -- no configuration needed. If a component is compromised or a token is leaked, it can only perform the operations listed above, not the full set of permissions the App was installed with.
+
+With PATs, this scoping is not possible -- PATs always carry their full scope. This is one of the key security benefits of GitHub App auth.
 
 ## Monitoring rate limits
 
