@@ -21,7 +21,9 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 - Slack app manifest for one-click app setup
 - GitHub Action and CLI for config validation
 
-⚙️ **Simple app configuration.** Define apps in `config.json` and the bot picks them up on the next hot-reload (30s poll or SIGHUP). ConfigMaps are mounted as directories so Kubernetes updates them in place — no pod restart needed. For self-service, optional [repo-sourced discovery](docs/repo-sourced-app-discovery.md) lets app teams drop a `.deploy-bot.json` in their repo -- the bot discovers it, validates it, and starts deploying with no operator intervention.
+⚙️ **Simple app configuration.** Define apps in `config.json` and the bot picks them up on the next hot-reload (30s poll or SIGHUP). ConfigMaps are mounted as directories so Kubernetes updates them in place — no pod restart needed. For self-service, optional [repo-sourced discovery](docs/repo-sourced-app-discovery.md) lets app teams drop a `.deploy-bot.json` in their repo — the bot discovers it, validates it, and starts deploying with no operator intervention.
+
+📐 **Convention over configuration.** With [enforced naming conventions](docs/naming-conventions.md), app names and kustomize paths are derived from repository names. Teams only specify their environment and ECR repo — everything else follows the org standard. Conflicts between teams are structurally impossible, and onboarding a new app takes two lines of JSON.
 
 🛡️ **Built for resilience.** The bot handles the rough edges of distributed systems:
 - Redis Streams consumer groups for exactly-once processing
@@ -388,12 +390,43 @@ See [docs/ecr-push-triggered-deploys.md](docs/ecr-push-triggered-deploys.md) for
 
 ### 10. (Optional) Enable repo-sourced app discovery
 
-1. Enable the repo scanner in config (`repo_scanner.enabled: true`, list target repos).
+1. Enable the repo scanner in config (`repo_discovery.enabled: true`).
 2. App teams create a `.deploy-bot.json` in their repo root.
 3. Use the `deploy-bot-config` CLI or GitHub Action to validate in CI.
 4. The bot discovers new apps on the next scan cycle.
 
 See [docs/repo-sourced-app-discovery.md](docs/repo-sourced-app-discovery.md) for the full guide.
+
+### 11. (Recommended) Enforce naming conventions
+
+When multiple teams manage their own apps, enable `enforce_repo_naming` to derive app names and kustomize paths from repository names. This prevents teams from accidentally targeting each other's directories or choosing conflicting names — the convention makes it structurally impossible.
+
+```json
+{
+  "repo_discovery": {
+    "enabled": true,
+    "enforce_repo_naming": true,
+    "kustomize_path_template": "{env}/{repo}/kustomization.yaml",
+    "default_tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+  }
+}
+```
+
+With this enabled, a team's `.deploy-bot.json` only needs to specify what's unique to their app — environment and ECR repo:
+
+```json
+{
+  "apiVersion": "deploy-bot/v2",
+  "apps": [
+    {"environment": "dev", "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/my-service"},
+    {"environment": "prod", "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/my-service"}
+  ]
+}
+```
+
+Everything else — app name, kustomize path, tag pattern — is derived from the repo name and operator defaults. Repos that need to deviate from the convention can be added to `exempt_repos`.
+
+See [docs/naming-conventions.md](docs/naming-conventions.md) for the full guide, including configurable path templates, default tag patterns, exemptions, and all conflict scenarios with resolution steps.
 
 ## Commands
 
