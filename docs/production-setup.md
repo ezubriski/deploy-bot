@@ -17,9 +17,17 @@ If you're evaluating the bot, start with the [quickstart](quickstart.md) and com
 2. **Socket Mode** → Generate Token → name it `socket`, add `connections:write` scope. Copy the `xapp-` token.
 3. **OAuth & Permissions** → Install to Workspace. Copy the `xoxb-` token.
 
-## 2. Create GitHub PATs
+## 2. GitHub authentication
 
-You need two tokens: one for the gitops repo (read/write) and one for repo discovery (read-only, broader scope). For organizations at scale (200+ repos or heavy scanner usage), consider using a [GitHub App](github-app-auth.md) instead of PATs for higher rate limits and automatic token rotation.
+### Option A: GitHub App (recommended)
+
+A GitHub App provides automatic token rotation, per-component least-privilege scoping, and no dependency on a personal account. See [GitHub App Authentication](github-app-auth.md) for the full setup.
+
+Once installed, you'll have an **App ID**, **Installation ID**, and **private key** (PEM file). These go into the secret in step 4.
+
+### Option B: Fine-grained PATs
+
+If a GitHub App is not practical for your organization, create two fine-grained PATs.
 
 **Primary token** — [create here](https://github.com/settings/personal-access-tokens/new), scoped to the gitops repo:
 
@@ -152,7 +160,7 @@ terraform init && terraform apply
 
 ## 4. Populate secrets
 
-### With ElastiCache IAM auth
+### GitHub App + ElastiCache IAM auth
 
 ```bash
 # Bot secret
@@ -160,7 +168,9 @@ aws secretsmanager put-secret-value \
   --secret-id deploy-bot/bot-secrets \
   --secret-string '{
     "slack_bot_token":              "xoxb-...",
-    "github_token":                 "github_pat_...",
+    "github_app_id":                12345,
+    "github_app_installation_id":   67890,
+    "github_app_private_key":       "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----",
     "redis_addr":                   "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
     "redis_iam_auth":               true,
     "redis_user_id":                "deploy-bot-iam",
@@ -173,8 +183,9 @@ aws secretsmanager put-secret-value \
   --secret-string '{
     "slack_bot_token":              "xoxb-...",
     "slack_app_token":              "xapp-...",
-    "github_token":                 "github_pat_...",
-    "github_scanner_token":         "github_pat_...",
+    "github_app_id":                12345,
+    "github_app_installation_id":   67890,
+    "github_app_private_key":       "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----",
     "redis_addr":                   "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
     "redis_iam_auth":               true,
     "redis_user_id":                "deploy-bot-iam",
@@ -184,7 +195,7 @@ aws secretsmanager put-secret-value \
 
 The `redis_user_id` must match the ElastiCache user configured with IAM authentication. The `redis_replication_group_id` is the replication group ID (not the endpoint) — it's used to generate SigV4 presigned auth tokens. TLS is enabled automatically when `redis_iam_auth` is true.
 
-### With password auth (non-ElastiCache Redis)
+### PATs + password auth (non-ElastiCache Redis)
 
 ```bash
 # Bot secret
@@ -209,6 +220,8 @@ aws secretsmanager put-secret-value \
     "redis_token":          "your-auth-token"
   }'
 ```
+
+See [configuration.md](configuration.md) for all secret fields and auth combinations.
 
 ## 5. Write your config
 
@@ -385,4 +398,4 @@ See [naming-conventions.md](naming-conventions.md) for path templates, exemption
 | No public network exposure | Socket Mode + SQS (no ingress) |
 | Minimal container (FROM scratch) | Default Dockerfile |
 | Non-root, read-only filesystem, caps dropped | Default manifests |
-| GitHub PATs are fine-grained, least-privilege | Validated with `validate-token.sh` |
+| GitHub App auth (no long-lived PATs, scoped tokens) | `github_app_id` set, or PATs validated with `validate-token.sh` |
