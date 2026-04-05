@@ -22,3 +22,10 @@ jobs:
 
       - name: Check
         run: make check
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: make build
