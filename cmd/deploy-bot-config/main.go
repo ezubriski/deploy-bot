@@ -45,10 +45,22 @@ func runValidate(args []string) int {
 	fs.StringVar(filePath, "f", "", "path to .deploy-bot.json (shorthand)")
 	configPath := fs.String("config", "", "path to config.json (main bot config)")
 	fs.StringVar(configPath, "c", "", "path to config.json (shorthand)")
+	repoNaming := fs.Bool("repo-naming", false, "simulate enforce_repo_naming (derives app and kustomize_path from --repo)")
+	repoName := fs.String("repo", "", "repository name for --repo-naming (e.g. my-service)")
 	format := fs.String("format", "text", "output format: text or json")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	if *repoNaming && *repoName == "" {
+		fmt.Fprintln(os.Stderr, "error: --repo-naming requires --repo <name>")
+		return 2
+	}
+
+	opts := repoconfig.ValidateOpts{
+		RepoNaming: *repoNaming,
+		RepoName:   *repoName,
 	}
 
 	// Determine mode: --config for main config, --file for repo config.
@@ -57,9 +69,9 @@ func runValidate(args []string) int {
 	case *configPath != "":
 		return validateMainConfig(*configPath, *format)
 	case *filePath != "":
-		return validateRepoConfig(*filePath, *format)
+		return validateRepoConfig(*filePath, *format, opts)
 	default:
-		return validateRepoConfig(".deploy-bot.json", *format)
+		return validateRepoConfig(".deploy-bot.json", *format, opts)
 	}
 }
 
@@ -220,7 +232,7 @@ type repoResult struct {
 	ParseError string                       `json:"parse_error,omitempty"`
 }
 
-func validateRepoConfig(path, format string) int {
+func validateRepoConfig(path, format string, opts repoconfig.ValidateOpts) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -237,7 +249,12 @@ func validateRepoConfig(path, format string) int {
 		return 2
 	}
 
-	verrs := repoconfig.Validate(cfg)
+	verrs := repoconfig.ValidateWithOpts(cfg, opts)
+
+	// Apply derived values so the output shows what the scanner will produce.
+	if opts.RepoNaming && cfg.APIVersion == repoconfig.VersionV2 {
+		repoconfig.ApplyRepoNaming(cfg, opts.RepoName)
+	}
 	validCount := len(cfg.Apps) - len(verrs)
 
 	switch format {

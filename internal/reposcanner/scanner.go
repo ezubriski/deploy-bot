@@ -122,7 +122,7 @@ func (s *Scanner) scan(ctx context.Context) {
 		if lastPush, ok := s.repoPushedAt[repoFullName]; ok && !pushedAt.After(lastPush) {
 			// Use cached content if available.
 			if cached, ok := s.lastContent[repoFullName]; ok {
-				apps, errs := parseRepoConfig(cached, repoFullName)
+				apps, errs := parseRepoConfig(cached, repoFullName, rd.EnforceRepoNaming)
 				for _, e := range errs {
 					s.log.Warn("reposcanner: validation error (cached)", zap.String("repo", repoFullName), zap.Error(e))
 				}
@@ -137,7 +137,7 @@ func (s *Scanner) scan(ctx context.Context) {
 			s.log.Debug("reposcanner: fetch config", zap.String("repo", repoFullName), zap.Error(err))
 			// If we have cached content and this is a transient error, keep using it.
 			if cached, ok := s.lastContent[repoFullName]; ok {
-				apps, _ := parseRepoConfig(cached, repoFullName)
+				apps, _ := parseRepoConfig(cached, repoFullName, rd.EnforceRepoNaming)
 				allDiscovered = append(allDiscovered, apps...)
 			}
 			continue
@@ -149,7 +149,7 @@ func (s *Scanner) scan(ctx context.Context) {
 		}
 
 		s.lastContent[repoFullName] = content
-		apps, errs := parseRepoConfig(content, repoFullName)
+		apps, errs := parseRepoConfig(content, repoFullName, rd.EnforceRepoNaming)
 		for _, e := range errs {
 			s.log.Warn("reposcanner: validation error", zap.String("repo", repoFullName), zap.Error(e))
 		}

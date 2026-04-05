@@ -29,6 +29,7 @@ type Config struct {
 // The feature is disabled when Enabled is false (the default).
 type RepoDiscoveryConfig struct {
 	Enabled            bool   `json:"enabled,omitempty"`
+	EnforceRepoNaming  bool   `json:"enforce_repo_naming,omitempty"`
 	PollInterval       string `json:"poll_interval,omitempty"`
 	ConfigFile         string `json:"config_file,omitempty"`
 	RepoPrefix         string `json:"repo_prefix,omitempty"`

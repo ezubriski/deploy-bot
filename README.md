@@ -590,6 +590,7 @@ GitHub Actions runs on pull requests and pushes to `main` and version tags (`v*`
 - [Configuration reference](docs/configuration.md)
 - [ECR push-triggered deploys](docs/ecr-push-triggered-deploys.md)
 - [Repo-sourced app discovery](docs/repo-sourced-app-discovery.md)
+- [Naming conventions and conflict resolution](docs/naming-conventions.md)
 - [No-op deploy handling](docs/no-op-deploy-handling.md)
 - [Merge conflict handling](docs/merge-conflict-handling.md)
 - [Redis resilience](docs/redis-resilience.md)

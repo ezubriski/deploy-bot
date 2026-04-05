@@ -11,14 +11,19 @@ import (
 )
 
 const (
-	// VersionV1 is the first (and current) API version.
+	// VersionV1 is the first API version. All fields are required.
 	VersionV1 = "deploy-bot/v1"
+
+	// VersionV2 allows omitting app and kustomize_path when
+	// enforce_repo_naming is enabled. The scanner derives them
+	// from the repository name.
+	VersionV2 = "deploy-bot/v2"
 
 	// VersionPrefix is the namespace prefix for all API versions.
 	VersionPrefix = "deploy-bot/"
 
 	// CurrentVersion is the latest supported API version.
-	CurrentVersion = VersionV1
+	CurrentVersion = VersionV2
 )
 
 // RepoConfigFile is the top-level envelope for a .deploy-bot.json file.
@@ -71,7 +76,7 @@ func Parse(data []byte) (*RepoConfigFile, error) {
 	}
 
 	switch cfg.APIVersion {
-	case VersionV1:
+	case VersionV1, VersionV2:
 		// ok
 	default:
 		return nil, fmt.Errorf("unsupported apiVersion %q (this tool supports up to %s)", cfg.APIVersion, CurrentVersion)
@@ -80,9 +85,36 @@ func Parse(data []byte) (*RepoConfigFile, error) {
 	return &cfg, nil
 }
 
+// ValidateOpts controls validation behavior.
+type ValidateOpts struct {
+	// RepoNaming indicates enforce_repo_naming is active. When true and the
+	// config is v2, app and kustomize_path may be omitted (derived from
+	// RepoName). If specified explicitly, they must match the derived values.
+	RepoNaming bool
+	// RepoName is the repository name used to derive app and kustomize_path
+	// when RepoNaming is true (e.g. "my-service" from "org/my-service").
+	RepoName string
+}
+
+// DerivedApp returns the app name derived from the repo name.
+func (o ValidateOpts) DerivedApp(repoName string) string {
+	return repoName
+}
+
+// DerivedKustomizePath returns the kustomize_path derived from the repo name
+// and environment: <env>/<repo-name>/kustomization.yaml.
+func (o ValidateOpts) DerivedKustomizePath(repoName, env string) string {
+	return env + "/" + repoName + "/kustomization.yaml"
+}
+
 // Validate checks all app entries and returns any validation errors.
 // Valid entries can be identified by absence from the error list.
 func Validate(cfg *RepoConfigFile) []ValidationError {
+	return ValidateWithOpts(cfg, ValidateOpts{})
+}
+
+// ValidateWithOpts checks all app entries with the given options.
+func ValidateWithOpts(cfg *RepoConfigFile, opts ValidateOpts) []ValidationError {
 	var errs []ValidationError
 	seen := make(map[string]int) // "app\x00env" -> first index
 
@@ -92,21 +124,57 @@ func Validate(cfg *RepoConfigFile) []ValidationError {
 	}
 	kpaths := make(map[string]kpathEntry) // kustomize_path -> first occurrence
 
+	allowDerived := opts.RepoNaming && cfg.APIVersion == VersionV2
+
 	for i, e := range cfg.Apps {
 		app := strings.TrimSpace(e.App)
-		if app == "" {
-			errs = append(errs, ValidationError{Index: i, Field: "app", Msg: "required"})
-			continue
-		}
+		kpath := strings.TrimSpace(e.KustomizePath)
 		env := strings.TrimSpace(e.Environment)
-		if env == "" {
-			errs = append(errs, ValidationError{Index: i, App: app, Field: "environment", Msg: "required"})
-			continue
+
+		// When repo naming is enforced and v2, derive or validate app and kustomize_path.
+		if allowDerived {
+			// Environment is needed to derive paths, check it first.
+			if env == "" {
+				errs = append(errs, ValidationError{Index: i, App: app, Field: "environment", Msg: "required"})
+				continue
+			}
+
+			derivedApp := opts.DerivedApp(opts.RepoName)
+			derivedPath := opts.DerivedKustomizePath(opts.RepoName, env)
+
+			if app == "" {
+				app = derivedApp
+			} else if app != derivedApp {
+				errs = append(errs, ValidationError{
+					Index: i, App: app, Field: "app",
+					Msg: fmt.Sprintf("must be %q when enforce_repo_naming is enabled (or omit to derive automatically)", derivedApp),
+				})
+				continue
+			}
+			if kpath == "" {
+				kpath = derivedPath
+			} else if kpath != derivedPath {
+				errs = append(errs, ValidationError{
+					Index: i, App: app, Field: "kustomize_path",
+					Msg: fmt.Sprintf("must be %q when enforce_repo_naming is enabled (or omit to derive automatically)", derivedPath),
+				})
+				continue
+			}
+		} else {
+			if app == "" {
+				errs = append(errs, ValidationError{Index: i, Field: "app", Msg: "required"})
+				continue
+			}
+			if env == "" {
+				errs = append(errs, ValidationError{Index: i, App: app, Field: "environment", Msg: "required"})
+				continue
+			}
+			if kpath == "" {
+				errs = append(errs, ValidationError{Index: i, App: app, Field: "kustomize_path", Msg: "required"})
+				continue
+			}
 		}
-		if strings.TrimSpace(e.KustomizePath) == "" {
-			errs = append(errs, ValidationError{Index: i, App: app, Field: "kustomize_path", Msg: "required"})
-			continue
-		}
+
 		if strings.TrimSpace(e.ECRRepo) == "" {
 			errs = append(errs, ValidationError{Index: i, App: app, Field: "ecr_repo", Msg: "required"})
 			continue
@@ -128,7 +196,6 @@ func Validate(cfg *RepoConfigFile) []ValidationError {
 		}
 		seen[key] = i
 
-		kpath := strings.TrimSpace(e.KustomizePath)
 		if first, ok := kpaths[kpath]; ok {
 			errs = append(errs, ValidationError{
 				Index: i, App: app, Field: "kustomize_path",
@@ -140,6 +207,23 @@ func Validate(cfg *RepoConfigFile) []ValidationError {
 	}
 
 	return errs
+}
+
+// ApplyRepoNaming fills in derived app and kustomize_path fields on entries
+// where they are empty. Call this after validation to populate the config
+// before converting to DiscoveredAppConfig.
+func ApplyRepoNaming(cfg *RepoConfigFile, repoName string) {
+	opts := ValidateOpts{RepoNaming: true, RepoName: repoName}
+	for i := range cfg.Apps {
+		e := &cfg.Apps[i]
+		env := strings.TrimSpace(e.Environment)
+		if strings.TrimSpace(e.App) == "" {
+			e.App = opts.DerivedApp(repoName)
+		}
+		if strings.TrimSpace(e.KustomizePath) == "" && env != "" {
+			e.KustomizePath = opts.DerivedKustomizePath(repoName, env)
+		}
+	}
 }
 
 // ValidEntries returns the indices of entries that passed validation.

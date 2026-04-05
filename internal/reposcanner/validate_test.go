@@ -23,7 +23,7 @@ func TestParseRepoConfig_Valid(t *testing.T) {
 		]
 	}`)
 
-	apps, errs := parseRepoConfig(data, "org/myapp")
+	apps, errs := parseRepoConfig(data, "org/myapp", false)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -51,7 +51,7 @@ func TestParseRepoConfig_MissingRequiredFields(t *testing.T) {
 		]
 	}`)
 
-	apps, errs := parseRepoConfig(data, "org/repo")
+	apps, errs := parseRepoConfig(data, "org/repo", false)
 	if len(errs) != 4 {
 		t.Fatalf("expected 4 errors, got %d: %v", len(errs), errs)
 	}
@@ -73,7 +73,7 @@ func TestParseRepoConfig_InvalidRegex(t *testing.T) {
 		]
 	}`)
 
-	apps, errs := parseRepoConfig(data, "org/repo")
+	apps, errs := parseRepoConfig(data, "org/repo", false)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
 	}
@@ -91,7 +91,7 @@ func TestParseRepoConfig_PartialValid(t *testing.T) {
 		]
 	}`)
 
-	apps, errs := parseRepoConfig(data, "org/repo")
+	apps, errs := parseRepoConfig(data, "org/repo", false)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d", len(errs))
 	}
@@ -102,7 +102,7 @@ func TestParseRepoConfig_PartialValid(t *testing.T) {
 
 func TestParseRepoConfig_InvalidJSON(t *testing.T) {
 	data := []byte(`not json`)
-	apps, errs := parseRepoConfig(data, "org/repo")
+	apps, errs := parseRepoConfig(data, "org/repo", false)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d", len(errs))
 	}
@@ -113,7 +113,7 @@ func TestParseRepoConfig_InvalidJSON(t *testing.T) {
 
 func TestParseRepoConfig_EmptyApps(t *testing.T) {
 	data := []byte(`{"apps": []}`)
-	apps, errs := parseRepoConfig(data, "org/repo")
+	apps, errs := parseRepoConfig(data, "org/repo", false)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -135,7 +135,7 @@ func TestParseRepoConfig_WithAPIVersion(t *testing.T) {
 		]
 	}`)
 
-	apps, errs := parseRepoConfig(data, "org/repo")
+	apps, errs := parseRepoConfig(data, "org/repo", false)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -157,7 +157,7 @@ func TestParseRepoConfig_UnknownAPIVersion(t *testing.T) {
 		]
 	}`)
 
-	apps, errs := parseRepoConfig(data, "org/repo")
+	apps, errs := parseRepoConfig(data, "org/repo", false)
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
 	}
@@ -180,7 +180,7 @@ func TestParseRepoConfig_AutoDeployFields(t *testing.T) {
 		]
 	}`)
 
-	apps, errs := parseRepoConfig(data, "org/repo")
+	apps, errs := parseRepoConfig(data, "org/repo", false)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
 	}
@@ -189,5 +189,101 @@ func TestParseRepoConfig_AutoDeployFields(t *testing.T) {
 	}
 	if apps[0].AutoDeployApproverGroup != "C01234567" {
 		t.Errorf("auto_deploy_approver_group = %q", apps[0].AutoDeployApproverGroup)
+	}
+}
+
+func TestParseRepoConfig_V2_RepoNaming_DeriveFields(t *testing.T) {
+	data := []byte(`{
+		"apiVersion": "deploy-bot/v2",
+		"apps": [
+			{
+				"environment": "dev",
+				"ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/my-service"
+			},
+			{
+				"environment": "prod",
+				"ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/my-service"
+			}
+		]
+	}`)
+
+	apps, errs := parseRepoConfig(data, "org/my-service", true)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	if len(apps) != 2 {
+		t.Fatalf("expected 2 apps, got %d", len(apps))
+	}
+	if apps[0].App != "my-service" {
+		t.Errorf("apps[0].App = %q, want my-service", apps[0].App)
+	}
+	if apps[0].KustomizePath != "dev/my-service/kustomization.yaml" {
+		t.Errorf("apps[0].KustomizePath = %q, want dev/my-service/kustomization.yaml", apps[0].KustomizePath)
+	}
+	if apps[1].KustomizePath != "prod/my-service/kustomization.yaml" {
+		t.Errorf("apps[1].KustomizePath = %q, want prod/my-service/kustomization.yaml", apps[1].KustomizePath)
+	}
+}
+
+func TestParseRepoConfig_V2_RepoNaming_RejectsConflictingName(t *testing.T) {
+	data := []byte(`{
+		"apiVersion": "deploy-bot/v2",
+		"apps": [
+			{
+				"app": "wrong-name",
+				"environment": "dev",
+				"ecr_repo": "repo"
+			}
+		]
+	}`)
+
+	apps, errs := parseRepoConfig(data, "org/my-service", true)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if len(apps) != 0 {
+		t.Fatalf("expected 0 apps, got %d", len(apps))
+	}
+}
+
+func TestParseRepoConfig_V2_RepoNaming_RejectsConflictingPath(t *testing.T) {
+	data := []byte(`{
+		"apiVersion": "deploy-bot/v2",
+		"apps": [
+			{
+				"environment": "dev",
+				"kustomize_path": "custom/path/kustomization.yaml",
+				"ecr_repo": "repo"
+			}
+		]
+	}`)
+
+	apps, errs := parseRepoConfig(data, "org/my-service", true)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if len(apps) != 0 {
+		t.Fatalf("expected 0 apps, got %d", len(apps))
+	}
+}
+
+func TestParseRepoConfig_V2_NoRepoNaming_RequiresFields(t *testing.T) {
+	// v2 without enforce_repo_naming still requires app and kustomize_path.
+	data := []byte(`{
+		"apiVersion": "deploy-bot/v2",
+		"apps": [
+			{
+				"environment": "dev",
+				"ecr_repo": "repo"
+			}
+		]
+	}`)
+
+	apps, errs := parseRepoConfig(data, "org/my-service", false)
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+	if len(apps) != 0 {
+		t.Fatalf("expected 0 apps, got %d", len(apps))
 	}
 }
