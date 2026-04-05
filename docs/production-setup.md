@@ -19,7 +19,7 @@ If you're evaluating the bot, start with the [quickstart](quickstart.md) and com
 
 ## 2. Create GitHub PATs
 
-You need two tokens: one for the gitops repo (read/write) and one for repo discovery (read-only, broader scope).
+You need two tokens: one for the gitops repo (read/write) and one for repo discovery (read-only, broader scope). For organizations at scale (200+ repos or heavy scanner usage), consider using a [GitHub App](github-app-auth.md) instead of PATs for higher rate limits and automatic token rotation.
 
 **Primary token** — [create here](https://github.com/settings/personal-access-tokens/new), scoped to the gitops repo:
 

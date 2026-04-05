@@ -53,6 +53,7 @@ nav:
       - Repo-Sourced App Discovery: repo-sourced-app-discovery.md
       - Naming Conventions: naming-conventions.md
   - Operations:
+      - GitHub App Authentication: github-app-auth.md
       - Redis Resilience: redis-resilience.md
       - Merge Conflict Handling: merge-conflict-handling.md
       - No-Op Deploy Handling: no-op-deploy-handling.md
