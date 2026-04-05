@@ -70,4 +70,7 @@ jobs:
 
           if [ "$SET_DEFAULT" = "true" ]; then
             mike set-default --push latest
+          else
+            # Set dev as default until the first release creates a "latest" alias
+            mike set-default --push dev 2>/dev/null || true
           fi
