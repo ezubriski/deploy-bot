@@ -10,11 +10,11 @@ import (
 // with a custom registry (useful in tests) or NewDefault to register against
 // prometheus.DefaultRegisterer.
 type Metrics struct {
-	DeploysTotal        *prometheus.CounterVec
-	ECRCacheHits        *prometheus.CounterVec
-	ECRCacheMisses      *prometheus.CounterVec
-	ECRRefreshDuration  *prometheus.HistogramVec
-	PendingDeploys      prometheus.Gauge
+	DeploysTotal       *prometheus.CounterVec
+	ECRCacheHits       *prometheus.CounterVec
+	ECRCacheMisses     *prometheus.CounterVec
+	ECRRefreshDuration *prometheus.HistogramVec
+	PendingDeploys     prometheus.Gauge
 }
 
 func New(reg prometheus.Registerer) *Metrics {

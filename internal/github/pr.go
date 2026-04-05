@@ -414,4 +414,3 @@ func updateNewTag(content, newTag string) (string, error) {
 	}
 	return newTagRegex.ReplaceAllString(content, "${1}"+newTag), nil
 }
-

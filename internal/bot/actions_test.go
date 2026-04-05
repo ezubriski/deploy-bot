@@ -95,8 +95,8 @@ func (stubValidator) SlackUserToGitHub(_ context.Context, _ string) (string, err
 type stubECR struct{}
 
 func (stubECR) ValidateTag(_ context.Context, _, _ string) (bool, error) { return true, nil }
-func (stubECR) RecentTags(_ string) []string                              { return nil }
-func (stubECR) Tags(_ string, _ int) []string                             { return nil }
+func (stubECR) RecentTags(_ string) []string                             { return nil }
+func (stubECR) Tags(_ string, _ int) []string                            { return nil }
 
 // captureSlack records channels that receive PostMessageContext calls.
 type captureSlack struct {
@@ -597,7 +597,7 @@ func TestHandleDeploySubmit_HappyPath(t *testing.T) {
 		slack: sl, store: st, gh: gh,
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
-		cfg:     config.NewHolder(&config.Config{
+		cfg: config.NewHolder(&config.Config{
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -650,7 +650,7 @@ func TestHandleApprove_HappyPath(t *testing.T) {
 		slack: sl, store: st, gh: gh,
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
-		cfg:     config.NewHolder(&config.Config{
+		cfg: config.NewHolder(&config.Config{
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -716,7 +716,7 @@ func TestHandleRejectSubmit_HappyPath(t *testing.T) {
 		slack: sl, store: st, gh: gh,
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
-		cfg:     config.NewHolder(&config.Config{
+		cfg: config.NewHolder(&config.Config{
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -796,7 +796,7 @@ func TestHandleCancel_HappyPath(t *testing.T) {
 		slack: sl, store: st, gh: gh,
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
-		cfg:     config.NewHolder(&config.Config{
+		cfg: config.NewHolder(&config.Config{
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},

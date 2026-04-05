@@ -22,14 +22,23 @@ make test-integ
 # Single integration test
 make test-integ-single RUN=TestDeployAndApprove
 
+# Format Go files
+make fmt            # write changes
+make fmt-check      # check only (CI-friendly)
+
 # Lint
 make lint
+
+# All checks (fmt-check + lint + unit tests)
+make check
 
 # Container image (Podman)
 make image          # build
 make push           # build + push to ECR
 make ecr-login      # authenticate Podman to ECR
 ```
+
+**Before pushing, always run `make check`.** This runs `gofmt` verification, `golangci-lint`, and unit tests. Do not push code that fails any of these.
 
 Unit tests use `miniredis` -- no real Redis needed.
 

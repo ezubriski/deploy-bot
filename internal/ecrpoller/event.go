@@ -9,7 +9,7 @@ type sqsBody struct {
 
 // eventBridgeEvent represents the EventBridge "ECR Image Action" event.
 type eventBridgeEvent struct {
-	Source     string         `json:"source"`
+	Source     string        `json:"source"`
 	DetailType string        `json:"detail-type"`
 	Detail     ecrPushDetail `json:"detail"`
 }

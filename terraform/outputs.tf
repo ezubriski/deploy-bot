@@ -38,6 +38,26 @@ output "receiver_policy_arn" {
   value       = aws_iam_policy.receiver.arn
 }
 
+output "bot_secret_arn" {
+  description = "Secrets Manager ARN for the bot secret (empty if create_secrets is false)"
+  value       = var.create_secrets ? aws_secretsmanager_secret.bot[0].arn : ""
+}
+
+output "receiver_secret_arn" {
+  description = "Secrets Manager ARN for the receiver secret (empty if create_secrets is false)"
+  value       = var.create_secrets ? aws_secretsmanager_secret.receiver[0].arn : ""
+}
+
+output "audit_bucket_name" {
+  description = "S3 audit bucket name (empty if no audit bucket is configured)"
+  value       = local.audit_bucket_enabled ? local.audit_bucket_name : ""
+}
+
+output "audit_bucket_arn" {
+  description = "S3 audit bucket ARN (empty if create_audit_bucket is false)"
+  value       = var.create_audit_bucket ? aws_s3_bucket.audit[0].arn : ""
+}
+
 output "sqs_queue_url" {
   description = "SQS queue URL for ecr_events.sqs_queue_url config (empty if ECR events disabled)"
   value       = var.ecr_events_enabled ? aws_sqs_queue.ecr_events[0].url : ""

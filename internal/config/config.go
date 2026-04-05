@@ -51,8 +51,8 @@ func (r *RepoDiscoveryConfig) KustomizePathForRepo(repoName, env string) string 
 	if tmpl == "" {
 		tmpl = "{env}/{repo}/kustomization.yaml"
 	}
-	result := strings.Replace(tmpl, "{env}", env, -1)
-	result = strings.Replace(result, "{repo}", repoName, -1)
+	result := strings.ReplaceAll(tmpl, "{env}", env)
+	result = strings.ReplaceAll(result, "{repo}", repoName)
 	return result
 }
 
@@ -127,19 +127,19 @@ func (e *ECREventsConfig) PollIntervalDuration() time.Duration {
 }
 
 type GitHubConfig struct {
-	Org          string            `json:"org"`
-	Repo         string            `json:"repo"`
-	DeployerTeam string            `json:"deployer_team"`
-	ApproverTeam string            `json:"approver_team"`
+	Org          string `json:"org"`
+	Repo         string `json:"repo"`
+	DeployerTeam string `json:"deployer_team"`
+	ApproverTeam string `json:"approver_team"`
 	// Users maps Slack user IDs to GitHub logins for users whose GitHub email
 	// is private. Takes precedence over the Slack email → GitHub search lookup.
-	Users               map[string]string `json:"users,omitempty"`
+	Users map[string]string `json:"users,omitempty"`
 	// RateLimitMaxRetries is the maximum number of retries on a GitHub secondary
 	// rate limit (abuse detection). Defaults to 3.
-	RateLimitMaxRetries int    `json:"rate_limit_max_retries,omitempty"`
+	RateLimitMaxRetries int `json:"rate_limit_max_retries,omitempty"`
 	// RateLimitRetryWait is the maximum duration to wait between retries.
 	// Accepts Go duration strings (e.g. "2m"). Defaults to "2m".
-	RateLimitRetryWait  string `json:"rate_limit_retry_wait,omitempty"`
+	RateLimitRetryWait string `json:"rate_limit_retry_wait,omitempty"`
 }
 
 // RateLimitConfig returns the parsed rate limit retry settings with defaults applied.
@@ -174,10 +174,10 @@ type SlackConfig struct {
 	ThreadThreshold *int `json:"thread_threshold,omitempty"`
 	// RateLimitMaxRetries is the maximum number of retries on a Slack 429
 	// rate-limit response. Defaults to 3.
-	RateLimitMaxRetries int    `json:"rate_limit_max_retries,omitempty"`
+	RateLimitMaxRetries int `json:"rate_limit_max_retries,omitempty"`
 	// RateLimitRetryWait is the maximum duration to wait between retries.
 	// Accepts Go duration strings (e.g. "30s"). Defaults to "30s".
-	RateLimitRetryWait  string `json:"rate_limit_retry_wait,omitempty"`
+	RateLimitRetryWait string `json:"rate_limit_retry_wait,omitempty"`
 }
 
 // EffectiveThreadThreshold returns the resolved thread threshold.
@@ -220,12 +220,12 @@ func (s *SlackConfig) IsChannelAllowed(channelID string) bool {
 }
 
 type DeploymentConfig struct {
-	StaleDuration        string `json:"stale_duration"`
-	MergeMethod          string `json:"merge_method"`
-	LockTTL              string `json:"lock_ttl"`
-	Label                string `json:"label,omitempty"`
-	ReconcileInterval    string `json:"reconcile_interval,omitempty"`
-	AllowProdAutoDeploy  bool   `json:"allow_prod_auto_deploy,omitempty"`
+	StaleDuration       string `json:"stale_duration"`
+	MergeMethod         string `json:"merge_method"`
+	LockTTL             string `json:"lock_ttl"`
+	Label               string `json:"label,omitempty"`
+	ReconcileInterval   string `json:"reconcile_interval,omitempty"`
+	AllowProdAutoDeploy bool   `json:"allow_prod_auto_deploy,omitempty"`
 }
 
 // DeployLabel returns the configured GitHub label name, defaulting to "deploy-bot".
@@ -243,11 +243,11 @@ func (c *Config) PendingLabel() string {
 }
 
 type AWSConfig struct {
-	ECRRoleARN    string `json:"ecr_role_arn"`
-	ECRRegion     string `json:"ecr_region"`
-	AuditRoleARN  string `json:"audit_role_arn"`
-	AuditBucket   string `json:"audit_bucket"`
-	AuditRegion   string `json:"audit_region"`
+	ECRRoleARN   string `json:"ecr_role_arn"`
+	ECRRegion    string `json:"ecr_region"`
+	AuditRoleARN string `json:"audit_role_arn"`
+	AuditBucket  string `json:"audit_bucket"`
+	AuditRegion  string `json:"audit_region"`
 }
 
 type AppConfig struct {
@@ -310,12 +310,15 @@ func (a *AppConfig) CompiledTagPattern() *regexp.Regexp {
 }
 
 type Secrets struct {
-	SlackBotToken      string `json:"slack_bot_token"`
-	SlackAppToken      string `json:"slack_app_token"`
-	GitHubToken        string `json:"github_token"`
-	GitHubScannerToken string `json:"github_scanner_token,omitempty"`
-	RedisAddr          string `json:"redis_addr"`
-	RedisToken         string `json:"redis_token,omitempty"`
+	SlackBotToken           string `json:"slack_bot_token"`
+	SlackAppToken           string `json:"slack_app_token"`
+	GitHubToken             string `json:"github_token"`
+	GitHubScannerToken      string `json:"github_scanner_token,omitempty"`
+	RedisAddr               string `json:"redis_addr"`
+	RedisToken              string `json:"redis_token,omitempty"`
+	RedisIAMAuth            bool   `json:"redis_iam_auth,omitempty"`
+	RedisUserID             string `json:"redis_user_id,omitempty"`
+	RedisReplicationGroupID string `json:"redis_replication_group_id,omitempty"`
 }
 
 // ScannerToken returns the token to use for repo scanning. If a dedicated
@@ -344,6 +347,17 @@ func (s *Secrets) Validate() error {
 	}
 	if s.RedisAddr == "" {
 		errs = append(errs, errors.New("redis_addr is empty"))
+	}
+	if s.RedisIAMAuth {
+		if s.RedisUserID == "" {
+			errs = append(errs, errors.New("redis_user_id is required when redis_iam_auth is true"))
+		}
+		if s.RedisReplicationGroupID == "" {
+			errs = append(errs, errors.New("redis_replication_group_id is required when redis_iam_auth is true"))
+		}
+		if s.RedisToken != "" {
+			errs = append(errs, errors.New("redis_token and redis_iam_auth are mutually exclusive"))
+		}
 	}
 	return errors.Join(errs...)
 }

@@ -13,10 +13,10 @@ import (
 )
 
 type Validator struct {
-	gh     *github.Client
-	slack  *slack.Client
-	cfg    *config.Config
-	log    *zap.Logger
+	gh    *github.Client
+	slack *slack.Client
+	cfg   *config.Config
+	log   *zap.Logger
 }
 
 func New(ghToken string, slackClient *slack.Client, cfg *config.Config, log *zap.Logger) *Validator {

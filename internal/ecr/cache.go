@@ -37,11 +37,11 @@ type appCache struct {
 // Cache holds per-app tag caches backed by a single shared ECR client
 // (all apps use the same assumed role).
 type Cache struct {
-	mu        sync.RWMutex // protects apps map for AddApps
-	apps      map[string]*appCache
-	client    *ecr.Client // shared across all apps
-	metrics   *metrics.Metrics
-	log       *zap.Logger
+	mu      sync.RWMutex // protects apps map for AddApps
+	apps    map[string]*appCache
+	client  *ecr.Client // shared across all apps
+	metrics *metrics.Metrics
+	log     *zap.Logger
 }
 
 func NewCache(ctx context.Context, cfg *config.Config, m *metrics.Metrics, log *zap.Logger) (*Cache, error) {

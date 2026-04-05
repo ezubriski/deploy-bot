@@ -80,10 +80,10 @@ func TestValidate(t *testing.T) {
 	t.Run("missing required fields", func(t *testing.T) {
 		cfg := &RepoConfigFile{
 			Apps: []AppEntry{
-				{},                                                              // missing app
-				{App: "a"},                                                      // missing environment
-				{App: "b", Environment: "dev"},                                  // missing kustomize_path
-				{App: "c", Environment: "dev", KustomizePath: "p"},              // missing ecr_repo
+				{},                             // missing app
+				{App: "a"},                     // missing environment
+				{App: "b", Environment: "dev"}, // missing kustomize_path
+				{App: "c", Environment: "dev", KustomizePath: "p"},               // missing ecr_repo
 				{App: "d", Environment: "dev", KustomizePath: "p", ECRRepo: "r"}, // valid
 			},
 		}

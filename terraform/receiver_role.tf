@@ -65,6 +65,15 @@ data "aws_iam_policy_document" "receiver" {
   }
 
   dynamic "statement" {
+    for_each = local.secrets_cmk ? [1] : []
+    content {
+      sid       = "DecryptReceiverSecret"
+      actions   = ["kms:Decrypt"]
+      resources = [var.secrets_kms_key_arn]
+    }
+  }
+
+  dynamic "statement" {
     for_each = var.ecr_events_enabled ? [1] : []
     content {
       sid = "ReceiveECREvents"
@@ -74,6 +83,27 @@ data "aws_iam_policy_document" "receiver" {
         "sqs:GetQueueAttributes",
       ]
       resources = [aws_sqs_queue.ecr_events[0].arn]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.ecr_events_enabled && local.sqs_use_cmk ? [1] : []
+    content {
+      sid       = "DecryptSQSMessages"
+      actions   = ["kms:Decrypt"]
+      resources = [var.sqs_kms_key_arn]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.elasticache_iam ? [1] : []
+    content {
+      sid     = "ElastiCacheIAMAuth"
+      actions = ["elasticache:Connect"]
+      resources = [
+        var.elasticache_replication_group_arn,
+        var.elasticache_user_arn,
+      ]
     }
   }
 }

@@ -44,6 +44,18 @@ variable "receiver_service_account_name" {
   default     = "deploy-bot-receiver"
 }
 
+variable "create_secrets" {
+  description = "Create Secrets Manager secrets for the bot and receiver components. Secrets are created empty — populate them after apply"
+  type        = bool
+  default     = true
+}
+
+variable "secrets_kms_key_arn" {
+  description = "ARN of a customer-managed KMS key for Secrets Manager encryption. When empty (default), the AWS managed key (aws/secretsmanager) is used. Only applies when create_secrets is true"
+  type        = string
+  default     = ""
+}
+
 variable "bot_secrets_manager_secret_name" {
   description = "Name of the Secrets Manager secret for the bot (worker) component"
   type        = string
@@ -57,7 +69,49 @@ variable "receiver_secrets_manager_secret_name" {
 }
 
 variable "audit_bucket" {
-  description = "S3 bucket for audit logs. Leave empty to disable S3 audit logging"
+  description = "Name of an existing S3 bucket for audit logs. Mutually exclusive with create_audit_bucket. Leave empty to disable S3 audit logging"
+  type        = string
+  default     = ""
+}
+
+variable "create_audit_bucket" {
+  description = "Create a managed S3 audit bucket with WORM compliance, encryption, and secure transport enforcement"
+  type        = bool
+  default     = false
+}
+
+variable "audit_bucket_retention_days" {
+  description = "Object Lock retention period in days (compliance mode). Only applies when create_audit_bucket is true"
+  type        = number
+  default     = 1095
+}
+
+variable "audit_bucket_kms_key_arn" {
+  description = "ARN of a customer-managed KMS key for audit bucket encryption. When empty (default), SSE-S3 is used. Only applies when create_audit_bucket is true"
+  type        = string
+  default     = ""
+}
+
+variable "create_audit_access_log_bucket" {
+  description = "Create a managed S3 bucket for audit bucket access logs. Mutually exclusive with audit_access_log_bucket. Only applies when create_audit_bucket is true"
+  type        = bool
+  default     = false
+}
+
+variable "audit_access_log_bucket" {
+  description = "Name of an existing S3 bucket for audit bucket access logs. Mutually exclusive with create_audit_access_log_bucket. Only applies when create_audit_bucket is true"
+  type        = string
+  default     = ""
+}
+
+variable "elasticache_replication_group_arn" {
+  description = "ARN of the ElastiCache replication group for IAM auth. Leave empty to skip ElastiCache IAM permissions"
+  type        = string
+  default     = ""
+}
+
+variable "elasticache_user_arn" {
+  description = "ARN of the ElastiCache user for IAM auth. Required when elasticache_replication_group_arn is set"
   type        = string
   default     = ""
 }
@@ -93,6 +147,12 @@ variable "enable_ec2_trust" {
 
 variable "permissions_boundary" {
   description = "ARN of an IAM permissions boundary to attach to the bot role. Leave empty for no boundary"
+  type        = string
+  default     = ""
+}
+
+variable "sqs_kms_key_arn" {
+  description = "ARN of a customer-managed KMS key for SQS encryption. When empty (default), SQS-managed SSE (SSE-SQS) is used"
   type        = string
   default     = ""
 }

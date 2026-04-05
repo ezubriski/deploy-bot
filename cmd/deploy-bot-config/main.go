@@ -71,8 +71,8 @@ func runValidate(args []string) int {
 	if *pathTemplate != "" {
 		tmpl := *pathTemplate
 		opts.KustomizePathFn = func(repo, env string) string {
-			result := strings.Replace(tmpl, "{env}", env, -1)
-			result = strings.Replace(result, "{repo}", repo, -1)
+			result := strings.ReplaceAll(tmpl, "{env}", env)
+			result = strings.ReplaceAll(result, "{repo}", repo)
 			return result
 		}
 	}

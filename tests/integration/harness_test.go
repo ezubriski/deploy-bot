@@ -57,10 +57,10 @@ type testEnv struct {
 }
 
 func TestMain(m *testing.M) {
-	requesterID       := requireEnv("INTEGRATION_REQUESTER_ID")
+	requesterID := requireEnv("INTEGRATION_REQUESTER_ID")
 	requesterUsername := requireEnv("INTEGRATION_REQUESTER_USERNAME")
-	approverID        := requireEnv("INTEGRATION_APPROVER_ID")
-	app               := requireEnv("INTEGRATION_APP")
+	approverID := requireEnv("INTEGRATION_APPROVER_ID")
+	app := requireEnv("INTEGRATION_APP")
 
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {

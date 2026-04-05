@@ -345,8 +345,8 @@ func TestHandleECRPush_AutoDeploy_FailureNotifiesApproverGroup(t *testing.T) {
 	sl := &captureSlack{}
 	apps := []config.AppConfig{{
 		App: "myapp", Environment: "dev",
-		KustomizePath:          "apps/myapp/kustomization.yaml",
-		AutoDeploy:             true,
+		KustomizePath:           "apps/myapp/kustomization.yaml",
+		AutoDeploy:              true,
 		AutoDeployApproverGroup: "C_APPROVERS",
 	}}
 
@@ -372,7 +372,7 @@ func TestHandleECRPush_ApproverGroupChannel(t *testing.T) {
 	sl := &captureSlack{}
 	apps := []config.AppConfig{{
 		App: "myapp", Environment: "dev",
-		KustomizePath:          "apps/myapp/kustomization.yaml",
+		KustomizePath:           "apps/myapp/kustomization.yaml",
 		AutoDeployApproverGroup: "C_APPROVERS",
 	}}
 

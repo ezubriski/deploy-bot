@@ -11,7 +11,7 @@ INTEG_RUN       ?=  # empty = run all; set to -run TestFoo to filter
 .DEFAULT_GOAL := build
 
 .PHONY: build bot receiver deploy-bot-config test test-unit test-pkg test-integ test-integ-single \
-        lint image push ecr-login clean help
+        fmt fmt-check lint check image push ecr-login clean help
 
 # --- build ---
 
@@ -44,10 +44,18 @@ test-integ-single: ## Run one integration test: make test-integ-single RUN=TestD
 	set -a && . ./$(ENV_FILE) && set +a && \
 	go test -tags=integration -v -count=1 -timeout=$(INTEG_TIMEOUT) -run $(RUN) ./tests/integration/...
 
-# --- lint ---
+# --- format & lint ---
+
+fmt: ## Run gofmt on all Go files (writes changes)
+	gofmt -w .
+
+fmt-check: ## Check gofmt (fails if any file needs formatting)
+	@test -z "$$(gofmt -l .)" || { echo "gofmt needed:"; gofmt -l .; exit 1; }
 
 lint: ## Run golangci-lint
 	golangci-lint run
+
+check: fmt-check lint test-unit ## Run fmt check, lint, and unit tests
 
 # --- image ---
 
