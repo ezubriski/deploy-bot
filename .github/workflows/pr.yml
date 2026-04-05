@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Check for code changes
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             code:
@@ -54,7 +54,7 @@ jobs:
     steps:
       - name: Check for docs changes
         id: filter
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             docs:
