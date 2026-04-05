@@ -269,19 +269,61 @@ func (s *Scanner) checkRateLimit(ctx context.Context, floor int) bool {
 // both operator config and discovered apps.
 func (s *Scanner) detectConflicts(c *config.Config, discovered []config.DiscoveredAppConfig) map[string]conflictInfo {
 	operatorApps := make(map[string]struct{}, len(c.Apps))
+	operatorPaths := make(map[string]string, len(c.Apps)) // kustomize_path -> "app (env)"
 	for _, a := range c.Apps {
 		operatorApps[a.App+"\x00"+a.Environment] = struct{}{}
+		if a.KustomizePath != "" {
+			operatorPaths[a.KustomizePath] = fmt.Sprintf("%s (%s)", a.App, a.Environment)
+		}
 	}
 
 	conflicts := make(map[string]conflictInfo)
+	// Track kustomize_paths claimed by non-conflicting discovered apps.
+	discoveredPaths := make(map[string]string) // kustomize_path -> "app (env) from repo"
+
 	for _, d := range discovered {
 		key := d.App + "\x00" + d.Environment
+		if _, ok := conflicts[key]; ok {
+			continue
+		}
+
+		// Check app+environment conflict with operator config.
 		if _, ok := operatorApps[key]; ok {
 			conflicts[key] = conflictInfo{
 				App:        d.App,
 				Env:        d.Environment,
 				SourceRepo: d.SourceRepo,
+				Reason:     "app+environment",
 			}
+			continue
+		}
+
+		// Check kustomize_path conflict with operator config.
+		if d.KustomizePath != "" {
+			if other, ok := operatorPaths[d.KustomizePath]; ok {
+				conflicts[key] = conflictInfo{
+					App:        d.App,
+					Env:        d.Environment,
+					SourceRepo: d.SourceRepo,
+					Reason:     "kustomize_path",
+					Detail:     fmt.Sprintf("operator app %s", other),
+				}
+				continue
+			}
+
+			// Check kustomize_path conflict with other discovered apps.
+			label := fmt.Sprintf("%s (%s) from %s", d.App, d.Environment, d.SourceRepo)
+			if other, ok := discoveredPaths[d.KustomizePath]; ok {
+				conflicts[key] = conflictInfo{
+					App:        d.App,
+					Env:        d.Environment,
+					SourceRepo: d.SourceRepo,
+					Reason:     "kustomize_path",
+					Detail:     other,
+				}
+				continue
+			}
+			discoveredPaths[d.KustomizePath] = label
 		}
 	}
 	return conflicts
@@ -338,9 +380,14 @@ func (s *Scanner) setCommitStatuses(ctx context.Context, discovered []config.Dis
 			state = "failure"
 			var descs []string
 			for _, c := range cList {
-				descs = append(descs, fmt.Sprintf("%s (%s)", c.App, c.Env))
+				switch c.Reason {
+				case "kustomize_path":
+					descs = append(descs, fmt.Sprintf("%s (%s): path conflict with %s", c.App, c.Env, c.Detail))
+				default:
+					descs = append(descs, fmt.Sprintf("%s (%s): defined in operator config", c.App, c.Env))
+				}
 			}
-			description = fmt.Sprintf("Conflict: %s defined in operator config", strings.Join(descs, ", "))
+			description = fmt.Sprintf("Conflict: %s", strings.Join(descs, "; "))
 			if len(description) > 140 {
 				description = description[:137] + "..."
 			}

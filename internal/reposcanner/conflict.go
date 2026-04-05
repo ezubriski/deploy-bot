@@ -15,12 +15,14 @@ import (
 
 const defaultWarnCooldown = 20 * time.Minute
 
-// conflictInfo describes a single (app, environment) collision between
-// operator config and a repo-sourced entry.
+// conflictInfo describes a collision between operator config and a
+// repo-sourced entry, or between two repo-sourced entries.
 type conflictInfo struct {
 	App        string
 	Env        string
 	SourceRepo string
+	Reason     string // "app+environment" or "kustomize_path"
+	Detail     string // e.g. the conflicting path or the other app name
 }
 
 // conflictTracker batches and rate-limits Slack warnings. Conflicts are posted
@@ -82,11 +84,15 @@ func (ct *conflictTracker) emitWarnings(ctx context.Context, slack slackclient.P
 	// Build a single batched message.
 	var lines []string
 	for _, info := range newConflicts {
-		lines = append(lines, fmt.Sprintf("- `%s` (`%s`) from repo `%s`", info.App, info.Env, info.SourceRepo))
+		switch info.Reason {
+		case "kustomize_path":
+			lines = append(lines, fmt.Sprintf("- `%s` (`%s`) from repo `%s` — kustomize_path conflicts with %s", info.App, info.Env, info.SourceRepo, info.Detail))
+		default:
+			lines = append(lines, fmt.Sprintf("- `%s` (`%s`) from repo `%s` — already defined in operator config", info.App, info.Env, info.SourceRepo))
+		}
 	}
 	msg := fmt.Sprintf(
-		"*Config conflicts detected* — the following apps are defined in both operator config and a repository. "+
-			"Remove them from operator config for the repo-sourced definitions to take effect:\n%s",
+		"*Config conflicts detected* — the following repo-sourced apps have been excluded:\n%s",
 		strings.Join(lines, "\n"),
 	)
 	_, _, _ = slack.PostMessageContext(ctx, channel, slackPkg.MsgOptionText(msg, false))
