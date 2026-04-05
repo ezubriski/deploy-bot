@@ -91,9 +91,13 @@ jobs:
           echo "Bumping ${LATEST} -> ${VERSION} (${{ inputs.bump }})"
 
       - name: Create and push tag
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
         run: |
-          git tag ${{ steps.version.outputs.version }}
-          git push origin ${{ steps.version.outputs.version }}
+          VERSION=${{ steps.version.outputs.version }}
+          git tag ${VERSION}
+          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git
+          git push origin ${VERSION}
 
   release:
     runs-on: self-hosted
