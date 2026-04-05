@@ -361,7 +361,7 @@ With `repo_discovery` and `enforce_repo_naming` enabled, app teams add a two-lin
 }
 ```
 
-App name and kustomize path are derived from the repo name. The bot discovers it on the next scan cycle. Add the [GitHub Action](../README.md#github-action) to their CI to validate configs in PRs.
+App name and kustomize path are derived from the repo name. The bot discovers it on the next scan cycle. Add the [GitHub Action](https://github.com/ezubriski/deploy-bot#github-action) to their CI to validate configs in PRs.
 
 See [naming-conventions.md](naming-conventions.md) for path templates, exemptions, and conflict resolution.
 

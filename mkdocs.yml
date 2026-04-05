@@ -1,0 +1,60 @@
+site_name: deploy-bot
+site_description: Approval-gated Kubernetes deployments from Slack
+repo_url: https://github.com/ezubriski/deploy-bot
+repo_name: ezubriski/deploy-bot
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  custom_dir: docs/overrides
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+extra:
+  version:
+    provider: mike
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quickstart: quickstart.md
+      - Production Setup: production-setup.md
+      - Configuration: configuration.md
+  - Features:
+      - ECR Push-Triggered Deploys: ecr-push-triggered-deploys.md
+      - Repo-Sourced App Discovery: repo-sourced-app-discovery.md
+      - Naming Conventions: naming-conventions.md
+  - Operations:
+      - Redis Resilience: redis-resilience.md
+      - Merge Conflict Handling: merge-conflict-handling.md
+      - No-Op Deploy Handling: no-op-deploy-handling.md
+  - Development:
+      - Integration Test Setup: integration-test-setup.md

@@ -132,7 +132,7 @@ aws secretsmanager create-secret \
 
 The `redis_user_id` must match the ElastiCache user ID configured with IAM authentication type. The `redis_replication_group_id` is the ElastiCache replication group ID (not the endpoint address) — it is used as the Host in the SigV4 presigned request. The IAM role or user running the bot/receiver must have `elasticache:Connect` permission on both the replication group and user ARNs (the Terraform module handles this when `elasticache_replication_group_arn` and `elasticache_user_arn` are set).
 
-See [`terraform/examples/elasticache/`](../terraform/examples/elasticache/) for a reference ElastiCache setup with IAM auth, encryption, and automatic failover.
+See [`terraform/examples/elasticache/`](https://github.com/ezubriski/deploy-bot/tree/main/terraform/examples/elasticache) for a reference ElastiCache setup with IAM auth, encryption, and automatic failover.
 
 ## Config file (`config.json`)
 

@@ -29,3 +29,34 @@ jobs:
           GOOS: linux
           GOARCH: amd64
         run: make build
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for docs changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docs:
+              - "docs/**/*.md"
+              - "mkdocs.yml"
+              - "requirements-docs.txt"
+
+      - name: Checkout
+        if: steps.filter.outputs.docs == 'true'
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        if: steps.filter.outputs.docs == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        if: steps.filter.outputs.docs == 'true'
+        run: pip install -r requirements-docs.txt
+
+      - name: Build docs
+        if: steps.filter.outputs.docs == 'true'
+        run: mkdocs build --strict

@@ -5,3 +5,5 @@ bin/
 tests/integration/testdata/config.json
 tests/integration/cpu.prof
 .env.integration
+.venv/
+site/
