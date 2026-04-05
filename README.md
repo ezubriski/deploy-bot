@@ -190,37 +190,114 @@ All checks passed.
 
 ### 3. Set up AWS resources
 
-Use the Terraform module in `terraform/`:
+Set these shell variables — they're used in the Terraform and AWS CLI commands below:
+
+```bash
+export AWS_REGION=us-east-1
+export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+export DEPLOY_BOT_SECRET_NAME=deploy-bot/secrets
+export AUDIT_BUCKET=my-audit-logs           # S3 bucket for audit logs (optional)
+```
+
+**Option A: Terraform (recommended)**
 
 ```hcl
 module "deploy_bot" {
   source = "github.com/ezubriski/deploy-bot//terraform"
 
-  region                = "us-east-1"
-  account_id            = "123456789012"
+  region     = "us-east-1"
+  account_id = "123456789012"
+
+  # IRSA (EKS) — omit both to skip role creation
   eks_oidc_provider_arn = "arn:aws:iam::123456789012:oidc-provider/oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"
   eks_oidc_provider_url = "oidc.eks.us-east-1.amazonaws.com/id/EXAMPLE"
-  audit_bucket          = "my-audit-logs"
-  ecr_events_enabled    = true
+
+  # IAM users instead of roles (non-EKS clusters)
+  # identity_type = "user"
+
+  # EC2 trust (self-managed k8s on EC2)
+  # enable_ec2_trust = true
+
+  audit_bucket       = "my-audit-logs"  # omit to disable S3 audit logging
+  ecr_events_enabled = true             # set false to skip SQS/EventBridge
 }
 ```
 
-The IRSA variables are optional. If omitted, the module creates only the IAM policies (no roles), which you can attach to IAM users directly. See [terraform/README.md](terraform/README.md) for the full variable reference.
+The module creates:
+- Separate IAM policies for bot (worker) and receiver (least-privilege)
+- IAM roles (IRSA or EC2 trust) or IAM users depending on `identity_type`
+- SQS queue + EventBridge rule for ECR push events (when `ecr_events_enabled = true`)
+
+See [terraform/README.md](terraform/README.md) for the full variable and output reference.
+
+**Option B: AWS CLI (manual)**
+
+Create the Secrets Manager secret, S3 audit bucket, and (optionally) the ECR events pipeline:
+
+```bash
+# Secrets Manager secret
+aws secretsmanager create-secret \
+  --name "${DEPLOY_BOT_SECRET_NAME}" \
+  --region "${AWS_REGION}" \
+  --secret-string '{}'
+
+# S3 audit bucket (optional)
+aws s3 mb "s3://${AUDIT_BUCKET}" --region "${AWS_REGION}"
+
+# SQS queue for ECR push events (optional)
+aws sqs create-queue \
+  --queue-name deploy-bot-ecr-events \
+  --region "${AWS_REGION}" \
+  --attributes VisibilityTimeout=300,MessageRetentionPeriod=86400
+
+# EventBridge rule to capture ECR pushes (optional)
+aws events put-rule \
+  --name deploy-bot-ecr-push \
+  --region "${AWS_REGION}" \
+  --event-pattern '{
+    "source": ["aws.ecr"],
+    "detail-type": ["ECR Image Action"],
+    "detail": {"action-type": ["PUSH"], "result": ["SUCCESS"]}
+  }'
+
+# Wire EventBridge -> SQS (replace <SQS_ARN> with your queue ARN)
+aws events put-targets \
+  --rule deploy-bot-ecr-push \
+  --region "${AWS_REGION}" \
+  --targets "Id=deploy-bot-sqs,Arn=<SQS_ARN>"
+```
 
 ### 4. Store secrets
 
-Create an AWS Secrets Manager secret (or a Kubernetes Secret) with these keys:
+Populate the Secrets Manager secret with your tokens. The bot and receiver share a single secret:
 
-```json
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id "${DEPLOY_BOT_SECRET_NAME}" \
+  --region "${AWS_REGION}" \
+  --secret-string "$(cat <<SECRETS
 {
-  "slack_bot_token": "xoxb-...",
-  "slack_app_token": "xapp-...",
-  "github_token": "github_pat_...",
-  "redis_addr": "your-redis:6379"
+  "slack_bot_token": "${SLACK_BOT_TOKEN}",
+  "slack_app_token": "${SLACK_APP_TOKEN}",
+  "github_token": "${DEPLOY_BOT_TOKEN}",
+  "github_scanner_token": "${DEPLOY_BOT_SCANNER_TOKEN:-}",
+  "redis_addr": "${REDIS_ADDR}"
 }
+SECRETS
+)"
 ```
 
-Set the `AWS_SECRET_NAME` and `AWS_REGION` environment variables on both deployments to point to it.
+Set the required shell variables before running:
+
+```bash
+export SLACK_BOT_TOKEN=xoxb-...     # from step 1
+export SLACK_APP_TOKEN=xapp-...     # from step 1
+export DEPLOY_BOT_TOKEN=github_pat_...          # from step 2
+export DEPLOY_BOT_SCANNER_TOKEN=github_pat_...  # from step 2 (optional)
+export REDIS_ADDR=your-redis:6379               # your Redis endpoint
+```
+
+Set the `AWS_SECRET_NAME` and `AWS_REGION` environment variables on both Kubernetes deployments to point to the secret.
 
 ### 5. Customize config.json
 
