@@ -29,8 +29,8 @@ import (
 )
 
 const (
-	metricsAddr    = ":9090"
-	sweepLockTTL   = 6 * time.Minute // slightly longer than sweepInterval
+	metricsAddr  = ":9090"
+	sweepLockTTL = 6 * time.Minute // slightly longer than sweepInterval
 )
 
 func main() {
@@ -97,8 +97,11 @@ func main() {
 		}
 	}()
 
-	redisStore := store.New(secrets.RedisAddr, secrets.RedisToken)
-	log.Info("waiting for redis", zap.String("addr", secrets.RedisAddr))
+	redisStore, err := store.NewFromSecrets(ctx, secrets)
+	if err != nil {
+		log.Fatal("init redis store", zap.Error(err))
+	}
+	log.Info("waiting for redis", zap.String("addr", secrets.RedisAddr), zap.Bool("iam_auth", secrets.RedisIAMAuth))
 	if err := redisStore.WaitForRedis(ctx, time.Minute); err != nil {
 		log.Fatal("redis not available", zap.Error(err))
 	}

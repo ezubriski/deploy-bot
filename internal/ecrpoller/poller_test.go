@@ -166,9 +166,9 @@ func TestPoller_UnknownRepo(t *testing.T) {
 		},
 	}
 	apps := []config.AppConfig{{
-		App:     "myapp",
+		App:         "myapp",
 		Environment: "dev",
-		ECRRepo: "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp",
+		ECRRepo:     "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp",
 	}}
 
 	p, rdb, _ := newTestPoller(t, sqsMock, apps)
@@ -239,9 +239,9 @@ func TestPoller_NonPushEvent(t *testing.T) {
 		}},
 	}
 	apps := []config.AppConfig{{
-		App:     "myapp",
+		App:         "myapp",
 		Environment: "dev",
-		ECRRepo: "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp",
+		ECRRepo:     "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp",
 	}}
 
 	p, rdb, _ := newTestPoller(t, sqsMock, apps)

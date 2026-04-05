@@ -21,7 +21,10 @@ Set exactly one per component. If both are set, `SECRETS_PATH` takes precedence.
 | `slack_bot_token` | Yes | Bot User OAuth Token (`xoxb-`) |
 | `github_token` | Yes | Fine-grained PAT scoped to the gitops repo — Contents and Pull requests (read/write), org Members (read) |
 | `redis_addr` | Yes | Redis endpoint with port (e.g. `redis:6379`) |
-| `redis_token` | No | Redis auth token |
+| `redis_token` | No | Redis auth token. Mutually exclusive with `redis_iam_auth` |
+| `redis_iam_auth` | No | Enable ElastiCache IAM authentication. Requires `redis_user_id` and `redis_replication_group_id`. When true, TLS is enabled automatically |
+| `redis_user_id` | When IAM auth | ElastiCache user ID for IAM authentication |
+| `redis_replication_group_id` | When IAM auth | ElastiCache replication group ID (used to generate presigned auth tokens) |
 
 The bot does not need `slack_app_token` (Socket Mode is receiver-only) or `github_scanner_token` (repo scanning is receiver-only).
 
@@ -34,7 +37,10 @@ The bot does not need `slack_app_token` (Socket Mode is receiver-only) or `githu
 | `github_token` | Yes | Fine-grained PAT — org Members (read) for approver cache |
 | `github_scanner_token` | No | Fine-grained PAT scoped to all repos (or discoverable repos) with Contents (read) and Commit statuses (read/write). Used by the repo scanner. Falls back to `github_token` if not set |
 | `redis_addr` | Yes | Redis endpoint with port |
-| `redis_token` | No | Redis auth token |
+| `redis_token` | No | Redis auth token. Mutually exclusive with `redis_iam_auth` |
+| `redis_iam_auth` | No | Enable ElastiCache IAM authentication. Requires `redis_user_id` and `redis_replication_group_id`. When true, TLS is enabled automatically |
+| `redis_user_id` | When IAM auth | ElastiCache user ID for IAM authentication |
+| `redis_replication_group_id` | When IAM auth | ElastiCache replication group ID (used to generate presigned auth tokens) |
 
 ### Option A: Kubernetes Secrets (file mount)
 
@@ -67,7 +73,7 @@ Set `SECRETS_PATH=/etc/deploy-bot/secrets/secrets.json` in each deployment and m
 Create separate secrets for each component:
 
 ```bash
-# Bot secret
+# Bot secret (password auth)
 aws secretsmanager create-secret \
   --name deploy-bot/bot-secrets \
   --secret-string '{
@@ -77,7 +83,7 @@ aws secretsmanager create-secret \
     "redis_token":     "your-elasticache-auth-token"
   }'
 
-# Receiver secret
+# Receiver secret (password auth)
 aws secretsmanager create-secret \
   --name deploy-bot/receiver-secrets \
   --secret-string '{
@@ -91,6 +97,42 @@ aws secretsmanager create-secret \
 ```
 
 The Terraform module scopes each role's Secrets Manager read permission to its own secret (`bot_secrets_manager_secret_name` and `receiver_secrets_manager_secret_name`), preventing cross-access.
+
+### Option C: AWS Secrets Manager with ElastiCache IAM auth
+
+When using ElastiCache with IAM authentication, replace `redis_token` with the IAM auth fields. TLS is enabled automatically and the bot generates short-lived SigV4 presigned tokens on each connection.
+
+```bash
+# Bot secret (IAM auth)
+aws secretsmanager create-secret \
+  --name deploy-bot/bot-secrets \
+  --secret-string '{
+    "slack_bot_token":              "xoxb-...",
+    "github_token":                 "github_pat_...",
+    "redis_addr":                   "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
+    "redis_iam_auth":               true,
+    "redis_user_id":                "deploy-bot-iam",
+    "redis_replication_group_id":   "deploy-bot"
+  }'
+
+# Receiver secret (IAM auth)
+aws secretsmanager create-secret \
+  --name deploy-bot/receiver-secrets \
+  --secret-string '{
+    "slack_bot_token":              "xoxb-...",
+    "slack_app_token":              "xapp-...",
+    "github_token":                 "github_pat_...",
+    "github_scanner_token":         "github_pat_...",
+    "redis_addr":                   "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
+    "redis_iam_auth":               true,
+    "redis_user_id":                "deploy-bot-iam",
+    "redis_replication_group_id":   "deploy-bot"
+  }'
+```
+
+The `redis_user_id` must match the ElastiCache user ID configured with IAM authentication type. The `redis_replication_group_id` is the ElastiCache replication group ID (not the endpoint address) — it is used as the Host in the SigV4 presigned request. The IAM role or user running the bot/receiver must have `elasticache:Connect` permission on both the replication group and user ARNs (the Terraform module handles this when `elasticache_replication_group_arn` and `elasticache_user_arn` are set).
+
+See [`terraform/examples/elasticache/`](../terraform/examples/elasticache/) for a reference ElastiCache setup with IAM auth, encryption, and automatic failover.
 
 ## Config file (`config.json`)
 

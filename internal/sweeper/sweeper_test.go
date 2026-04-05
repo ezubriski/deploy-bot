@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-"go.uber.org/zap"
+	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"

@@ -7,11 +7,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/audit"
-	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/ecr"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
+	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
 	"github.com/ezubriski/deploy-bot/internal/validator"

@@ -187,4 +187,3 @@ func TestValidateTag_CacheHit(t *testing.T) {
 		t.Error("expected true for tag present in cache")
 	}
 }
-

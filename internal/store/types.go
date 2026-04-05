@@ -26,7 +26,7 @@ type PendingDeploy struct {
 // HistoryEntry is an immutable record of a completed deployment event,
 // stored in a Redis list for /deploy history queries.
 type HistoryEntry struct {
-	EventType   string    `json:"event_type"`   // approved, rejected, expired, cancelled
+	EventType   string    `json:"event_type"` // approved, rejected, expired, cancelled
 	App         string    `json:"app"`
 	Environment string    `json:"environment"`
 	Tag         string    `json:"tag"`

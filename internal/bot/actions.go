@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -396,10 +396,10 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	}
 
 	var (
-		baseBranch   string
-		branchErr    error
-		requesterGH  string
-		prepWg       sync.WaitGroup
+		baseBranch  string
+		branchErr   error
+		requesterGH string
+		prepWg      sync.WaitGroup
 	)
 	prepWg.Add(2)
 	go func() {
@@ -662,4 +662,3 @@ func (b *Bot) replyEphemeral(ctx context.Context, channelID, userID, text string
 		b.log.Error("post ephemeral", zap.Error(err))
 	}
 }
-

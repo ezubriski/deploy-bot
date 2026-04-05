@@ -64,6 +64,15 @@ data "aws_iam_policy_document" "bot" {
     ]
   }
 
+  dynamic "statement" {
+    for_each = local.secrets_cmk ? [1] : []
+    content {
+      sid       = "DecryptBotSecret"
+      actions   = ["kms:Decrypt"]
+      resources = [var.secrets_kms_key_arn]
+    }
+  }
+
   statement {
     sid = "ReadECR"
     actions = [
@@ -76,11 +85,35 @@ data "aws_iam_policy_document" "bot" {
   }
 
   dynamic "statement" {
-    for_each = var.audit_bucket != "" ? [1] : []
+    for_each = local.audit_bucket_enabled ? [1] : []
     content {
       sid       = "WriteAuditLog"
       actions   = ["s3:PutObject"]
-      resources = ["arn:aws:s3:::${var.audit_bucket}/${var.name}/*"]
+      resources = ["arn:aws:s3:::${local.audit_bucket_name}/${var.name}/*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.create_audit_bucket && local.audit_bucket_cmk ? [1] : []
+    content {
+      sid = "EncryptAuditLog"
+      actions = [
+        "kms:GenerateDataKey",
+        "kms:Decrypt",
+      ]
+      resources = [var.audit_bucket_kms_key_arn]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.elasticache_iam ? [1] : []
+    content {
+      sid     = "ElastiCacheIAMAuth"
+      actions = ["elasticache:Connect"]
+      resources = [
+        var.elasticache_replication_group_arn,
+        var.elasticache_user_arn,
+      ]
     }
   }
 }

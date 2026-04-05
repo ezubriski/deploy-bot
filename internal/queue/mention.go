@@ -7,10 +7,10 @@ const EventTypeAppMention socketmode.EventType = "app_mention"
 
 // AppMentionEvent is the payload for an app mention event.
 type AppMentionEvent struct {
-	UserID    string `json:"user_id"`
-	Channel   string `json:"channel"`
-	Text      string `json:"text"`       // command text with mention prefix stripped
-	ThreadTS  string `json:"thread_ts"`  // reply in thread if set
+	UserID   string `json:"user_id"`
+	Channel  string `json:"channel"`
+	Text     string `json:"text"`      // command text with mention prefix stripped
+	ThreadTS string `json:"thread_ts"` // reply in thread if set
 }
 
 // NewAppMentionEvent wraps an AppMentionEvent in a socketmode.Event.

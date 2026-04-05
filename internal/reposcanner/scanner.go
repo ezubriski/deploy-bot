@@ -17,12 +17,12 @@ import (
 // Scanner periodically scans GitHub repos for deploy-bot config files and
 // updates the discovered apps list.
 type Scanner struct {
-	gh           *gh.Client
-	org          string
-	cfg          *config.Holder
-	slack        slackclient.Poster
-	cmWriter     ConfigMapWriter
-	log          *zap.Logger
+	gh       *gh.Client
+	org      string
+	cfg      *config.Holder
+	slack    slackclient.Poster
+	cmWriter ConfigMapWriter
+	log      *zap.Logger
 
 	// etags caches the ETag for each repo's config file to avoid re-fetching
 	// unchanged files. Keyed by "owner/repo".

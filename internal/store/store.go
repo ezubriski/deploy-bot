@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,11 +12,11 @@ import (
 )
 
 const (
-	keyPrefix      = "pending:"
-	lockPrefix     = "lock:"
-	sysLockPrefix  = "syslock:"
-	threadPrefix   = "thread:"
-	historyKey     = "history"
+	keyPrefix     = "pending:"
+	lockPrefix    = "lock:"
+	sysLockPrefix = "syslock:"
+	threadPrefix  = "thread:"
+	historyKey    = "history"
 	// HistoryMaxLen is the maximum number of entries kept in the history list.
 	HistoryMaxLen = 100
 )
@@ -24,12 +25,37 @@ type Store struct {
 	rdb *redis.Client
 }
 
+// Options configures the Redis connection.
+type Options struct {
+	Addr     string
+	Password string
+
+	// IAMAuth enables ElastiCache IAM authentication. When true, TLS is
+	// required and CredentialsProvider must be set. Password is ignored.
+	IAMAuth             bool
+	CredentialsProvider func() (username string, password string)
+}
+
 func New(addr, password string) *Store {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-	})
-	return &Store{rdb: rdb}
+	return NewWithOptions(Options{Addr: addr, Password: password})
+}
+
+// NewWithOptions creates a Store with full control over the Redis connection.
+func NewWithOptions(opts Options) *Store {
+	redisOpts := &redis.Options{
+		Addr: opts.Addr,
+	}
+
+	if opts.IAMAuth {
+		redisOpts.CredentialsProvider = opts.CredentialsProvider
+		redisOpts.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	} else {
+		redisOpts.Password = opts.Password
+	}
+
+	return &Store{rdb: redis.NewClient(redisOpts)}
 }
 
 func (s *Store) Ping(ctx context.Context) error {

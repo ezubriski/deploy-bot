@@ -27,15 +27,15 @@ func TestValidateConfig_MissingRequiredFields(t *testing.T) {
 	errs := ValidateConfig(cfg)
 
 	required := map[string]bool{
-		"github.org":             false,
-		"github.repo":            false,
-		"github.deployer_team":   false,
-		"github.approver_team":   false,
-		"slack.deploy_channel":   false,
+		"github.org":                false,
+		"github.repo":               false,
+		"github.deployer_team":      false,
+		"github.approver_team":      false,
+		"slack.deploy_channel":      false,
 		"deployment.stale_duration": false,
-		"deployment.lock_ttl":    false,
-		"aws.ecr_region":         false,
-		"apps.":                  false,
+		"deployment.lock_ttl":       false,
+		"aws.ecr_region":            false,
+		"apps.":                     false,
 	}
 
 	for _, e := range errs {
