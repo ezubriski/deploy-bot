@@ -171,7 +171,7 @@ func (s *Scanner) scan(ctx context.Context) {
 	if warnChannel == "" {
 		warnChannel = c.Slack.DeployChannel
 	}
-	s.conflict.emitWarnings(ctx, s.slack, warnChannel, conflicts)
+	s.conflict.emitWarnings(ctx, s.slack, warnChannel, configFile, conflicts)
 	s.setCommitStatuses(ctx, allDiscovered, conflicts)
 
 	// Filter out conflicting entries.

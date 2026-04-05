@@ -48,7 +48,7 @@ func newConflictTracker() *conflictTracker {
 // emitWarnings posts a single batched Slack message for conflicts, rate-limited
 // to at most once per cooldown period. Resolved conflicts reset their tracked
 // state so they trigger a new warning if reintroduced.
-func (ct *conflictTracker) emitWarnings(ctx context.Context, slack slackclient.Poster, channel string, conflicts map[string]conflictInfo) {
+func (ct *conflictTracker) emitWarnings(ctx context.Context, slack slackclient.Poster, channel, configFile string, conflicts map[string]conflictInfo) {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
@@ -82,13 +82,17 @@ func (ct *conflictTracker) emitWarnings(ctx context.Context, slack slackclient.P
 	}
 
 	// Build a single batched message.
+	repoLink := func(repo string) string {
+		return fmt.Sprintf("<https://github.com/%s/blob/main/%s|%s>", repo, configFile, repo)
+	}
+
 	var lines []string
 	for _, info := range newConflicts {
 		switch info.Reason {
 		case "kustomize_path":
-			lines = append(lines, fmt.Sprintf("- `%s` (`%s`) from repo `%s` — kustomize_path conflicts with %s", info.App, info.Env, info.SourceRepo, info.Detail))
+			lines = append(lines, fmt.Sprintf("- `%s` (`%s`) from %s — kustomize_path conflicts with %s", info.App, info.Env, repoLink(info.SourceRepo), info.Detail))
 		default:
-			lines = append(lines, fmt.Sprintf("- `%s` (`%s`) from repo `%s` — already defined in operator config", info.App, info.Env, info.SourceRepo))
+			lines = append(lines, fmt.Sprintf("- `%s` (`%s`) from %s — already defined in operator config", info.App, info.Env, repoLink(info.SourceRepo)))
 		}
 	}
 	msg := fmt.Sprintf(
