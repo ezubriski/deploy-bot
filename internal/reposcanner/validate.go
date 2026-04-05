@@ -10,10 +10,7 @@ import (
 // parseRepoConfig parses and validates a repo config file, returning the valid
 // app entries and any validation errors. Invalid entries are skipped — one bad
 // entry does not invalidate the entire file.
-//
-// When enforceRepoNaming is true, app and kustomize_path are derived from
-// sourceRepo for v2 configs and validated against the convention.
-func parseRepoConfig(data []byte, sourceRepo string, enforceRepoNaming bool) ([]config.DiscoveredAppConfig, []error) {
+func parseRepoConfig(data []byte, sourceRepo string, rdCfg config.RepoDiscoveryConfig) ([]config.DiscoveredAppConfig, []error) {
 	cfg, err := repoconfig.Parse(data)
 	if err != nil {
 		return nil, []error{err}
@@ -26,14 +23,27 @@ func parseRepoConfig(data []byte, sourceRepo string, enforceRepoNaming bool) ([]
 	}
 
 	opts := repoconfig.ValidateOpts{
-		RepoNaming: enforceRepoNaming,
-		RepoName:   repoName,
+		RepoNaming:        rdCfg.EnforceRepoNaming,
+		RepoName:          repoName,
+		Exempt:            rdCfg.IsExemptRepo(sourceRepo),
+		DefaultTagPattern: rdCfg.DefaultTagPattern,
 	}
+	if rdCfg.EnforceRepoNaming {
+		opts.KustomizePathFn = func(repo, env string) string {
+			return rdCfg.KustomizePathForRepo(repo, env)
+		}
+	}
+
 	verrs := repoconfig.ValidateWithOpts(cfg, opts)
 
-	// Apply derived values to valid entries before converting.
-	if enforceRepoNaming && cfg.APIVersion == repoconfig.VersionV2 {
-		repoconfig.ApplyRepoNaming(cfg, repoName)
+	// Apply derived/default values to valid entries before converting.
+	if rdCfg.EnforceRepoNaming && !opts.Exempt && cfg.APIVersion == repoconfig.VersionV2 {
+		repoconfig.ApplyDefaults(cfg, opts)
+	} else if rdCfg.DefaultTagPattern != "" {
+		// Even non-enforced configs get the default tag pattern.
+		repoconfig.ApplyDefaults(cfg, repoconfig.ValidateOpts{
+			DefaultTagPattern: rdCfg.DefaultTagPattern,
+		})
 	}
 
 	validIndices := repoconfig.ValidEntries(cfg, verrs)

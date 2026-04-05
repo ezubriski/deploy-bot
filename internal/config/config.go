@@ -28,16 +28,43 @@ type Config struct {
 // RepoDiscoveryConfig holds settings for repo-sourced app discovery.
 // The feature is disabled when Enabled is false (the default).
 type RepoDiscoveryConfig struct {
-	Enabled            bool   `json:"enabled,omitempty"`
-	EnforceRepoNaming  bool   `json:"enforce_repo_naming,omitempty"`
-	PollInterval       string `json:"poll_interval,omitempty"`
-	ConfigFile         string `json:"config_file,omitempty"`
-	RepoPrefix         string `json:"repo_prefix,omitempty"`
-	DiscoveredPath     string `json:"discovered_path,omitempty"`
-	ConfigMapName      string `json:"configmap_name,omitempty"`
-	ConfigMapNamespace string `json:"configmap_namespace,omitempty"`
-	RateLimitFloor     int    `json:"rate_limit_floor,omitempty"`
-	WarnChannel        string `json:"warn_channel,omitempty"`
+	Enabled               bool     `json:"enabled,omitempty"`
+	EnforceRepoNaming     bool     `json:"enforce_repo_naming,omitempty"`
+	KustomizePathTemplate string   `json:"kustomize_path_template,omitempty"`
+	DefaultTagPattern     string   `json:"default_tag_pattern,omitempty"`
+	ExemptRepos           []string `json:"exempt_repos,omitempty"`
+	PollInterval          string   `json:"poll_interval,omitempty"`
+	ConfigFile            string   `json:"config_file,omitempty"`
+	RepoPrefix            string   `json:"repo_prefix,omitempty"`
+	DiscoveredPath        string   `json:"discovered_path,omitempty"`
+	ConfigMapName         string   `json:"configmap_name,omitempty"`
+	ConfigMapNamespace    string   `json:"configmap_namespace,omitempty"`
+	RateLimitFloor        int      `json:"rate_limit_floor,omitempty"`
+	WarnChannel           string   `json:"warn_channel,omitempty"`
+}
+
+// KustomizePathForRepo returns the kustomize_path for a given repo and
+// environment, using the configured template. Defaults to
+// "{env}/{repo}/kustomization.yaml" if no template is set.
+func (r *RepoDiscoveryConfig) KustomizePathForRepo(repoName, env string) string {
+	tmpl := r.KustomizePathTemplate
+	if tmpl == "" {
+		tmpl = "{env}/{repo}/kustomization.yaml"
+	}
+	result := strings.Replace(tmpl, "{env}", env, -1)
+	result = strings.Replace(result, "{repo}", repoName, -1)
+	return result
+}
+
+// IsExemptRepo returns true if the given repo (in "org/name" format) is
+// exempt from enforce_repo_naming.
+func (r *RepoDiscoveryConfig) IsExemptRepo(repo string) bool {
+	for _, exempt := range r.ExemptRepos {
+		if exempt == repo {
+			return true
+		}
+	}
+	return false
 }
 
 // PollIntervalDuration returns the parsed poll interval, defaulting to 5m.

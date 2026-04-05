@@ -94,6 +94,14 @@ type ValidateOpts struct {
 	// RepoName is the repository name used to derive app and kustomize_path
 	// when RepoNaming is true (e.g. "my-service" from "org/my-service").
 	RepoName string
+	// Exempt indicates this repo is exempt from enforce_repo_naming.
+	// v1 configs are accepted and no derivation is applied.
+	Exempt bool
+	// KustomizePathFn derives the kustomize_path from repo name and
+	// environment. If nil, defaults to "<env>/<repo>/kustomization.yaml".
+	KustomizePathFn func(repoName, env string) string
+	// DefaultTagPattern is applied when an app entry omits tag_pattern.
+	DefaultTagPattern string
 }
 
 // DerivedApp returns the app name derived from the repo name.
@@ -102,8 +110,11 @@ func (o ValidateOpts) DerivedApp(repoName string) string {
 }
 
 // DerivedKustomizePath returns the kustomize_path derived from the repo name
-// and environment: <env>/<repo-name>/kustomization.yaml.
+// and environment using KustomizePathFn, or the default convention.
 func (o ValidateOpts) DerivedKustomizePath(repoName, env string) string {
+	if o.KustomizePathFn != nil {
+		return o.KustomizePathFn(repoName, env)
+	}
 	return env + "/" + repoName + "/kustomization.yaml"
 }
 
@@ -115,6 +126,15 @@ func Validate(cfg *RepoConfigFile) []ValidationError {
 
 // ValidateWithOpts checks all app entries with the given options.
 func ValidateWithOpts(cfg *RepoConfigFile, opts ValidateOpts) []ValidationError {
+	// When enforcement is on and the repo is not exempt, v1 is rejected.
+	if opts.RepoNaming && !opts.Exempt && cfg.APIVersion == VersionV1 {
+		return []ValidationError{{
+			Index: -1, Field: "apiVersion",
+			Msg: "enforce_repo_naming requires apiVersion deploy-bot/v2. " +
+				"Update your config or contact the operator to add this repo to exempt_repos.",
+		}}
+	}
+
 	var errs []ValidationError
 	seen := make(map[string]int) // "app\x00env" -> first index
 
@@ -124,7 +144,8 @@ func ValidateWithOpts(cfg *RepoConfigFile, opts ValidateOpts) []ValidationError 
 	}
 	kpaths := make(map[string]kpathEntry) // kustomize_path -> first occurrence
 
-	allowDerived := opts.RepoNaming && cfg.APIVersion == VersionV2
+	// Derive fields when enforcement is on, the config is v2, and the repo is not exempt.
+	allowDerived := opts.RepoNaming && !opts.Exempt && cfg.APIVersion == VersionV2
 
 	for i, e := range cfg.Apps {
 		app := strings.TrimSpace(e.App)
@@ -179,8 +200,14 @@ func ValidateWithOpts(cfg *RepoConfigFile, opts ValidateOpts) []ValidationError 
 			errs = append(errs, ValidationError{Index: i, App: app, Field: "ecr_repo", Msg: "required"})
 			continue
 		}
-		if e.TagPattern != "" {
-			if _, err := regexp.Compile(e.TagPattern); err != nil {
+
+		// Apply default tag pattern if omitted.
+		tagPattern := e.TagPattern
+		if tagPattern == "" && opts.DefaultTagPattern != "" {
+			tagPattern = opts.DefaultTagPattern
+		}
+		if tagPattern != "" {
+			if _, err := regexp.Compile(tagPattern); err != nil {
 				errs = append(errs, ValidationError{Index: i, App: app, Field: "tag_pattern", Msg: fmt.Sprintf("invalid regex: %v", err)})
 				continue
 			}
@@ -209,27 +236,33 @@ func ValidateWithOpts(cfg *RepoConfigFile, opts ValidateOpts) []ValidationError 
 	return errs
 }
 
-// ApplyRepoNaming fills in derived app and kustomize_path fields on entries
-// where they are empty. Call this after validation to populate the config
-// before converting to DiscoveredAppConfig.
-func ApplyRepoNaming(cfg *RepoConfigFile, repoName string) {
-	opts := ValidateOpts{RepoNaming: true, RepoName: repoName}
+// ApplyDefaults fills in derived app, kustomize_path, and tag_pattern fields
+// on entries where they are empty. Call this after validation to populate the
+// config before converting to DiscoveredAppConfig.
+func ApplyDefaults(cfg *RepoConfigFile, opts ValidateOpts) {
 	for i := range cfg.Apps {
 		e := &cfg.Apps[i]
 		env := strings.TrimSpace(e.Environment)
 		if strings.TrimSpace(e.App) == "" {
-			e.App = opts.DerivedApp(repoName)
+			e.App = opts.DerivedApp(opts.RepoName)
 		}
 		if strings.TrimSpace(e.KustomizePath) == "" && env != "" {
-			e.KustomizePath = opts.DerivedKustomizePath(repoName, env)
+			e.KustomizePath = opts.DerivedKustomizePath(opts.RepoName, env)
+		}
+		if e.TagPattern == "" && opts.DefaultTagPattern != "" {
+			e.TagPattern = opts.DefaultTagPattern
 		}
 	}
 }
 
 // ValidEntries returns the indices of entries that passed validation.
+// If any error has Index < 0 (file-level error), no entries are valid.
 func ValidEntries(cfg *RepoConfigFile, errs []ValidationError) []int {
 	invalid := make(map[int]struct{}, len(errs))
 	for _, e := range errs {
+		if e.Index < 0 {
+			return nil // file-level error invalidates all entries
+		}
 		invalid[e.Index] = struct{}{}
 	}
 	var valid []int
