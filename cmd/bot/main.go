@@ -108,8 +108,12 @@ func main() {
 	hh.SetHealthy()
 	log.Info("redis connected")
 
+	ghHTTP, err := secrets.GitHubHTTPClient()
+	if err != nil {
+		log.Fatal("github client", zap.Error(err))
+	}
 	maxRetries, retryWait := cfgHolder.Load().GitHub.RateLimitConfig()
-	ghClient := githubPkg.NewClient(secrets.GitHubToken, cfgHolder.Load().GitHub.Org, cfgHolder.Load().GitHub.Repo, log, githubPkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
+	ghClient := githubPkg.NewClient(ghHTTP, cfgHolder.Load().GitHub.Org, cfgHolder.Load().GitHub.Repo, log, githubPkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
 
 	for _, label := range []string{cfgHolder.Load().DeployLabel(), cfgHolder.Load().PendingLabel()} {
 		if err := ghClient.EnsureLabel(ctx, label, githubPkg.LabelColor); err != nil {
@@ -135,7 +139,7 @@ func main() {
 		log.Fatal("init audit logger", zap.Error(err))
 	}
 
-	val := validator.New(secrets.GitHubToken, rawSlack, cfgHolder.Load(), log)
+	val := validator.New(ghHTTP, rawSlack, cfgHolder.Load(), log)
 
 	// Log prod auto-deploy guard status at startup.
 	logProdAutoDeployGuard(initialCfg, auditLog, log)

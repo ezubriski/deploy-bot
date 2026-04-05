@@ -111,14 +111,14 @@ func TestSecretsValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("empty github_token", func(t *testing.T) {
+	t.Run("empty github_token without app credentials", func(t *testing.T) {
 		s := valid
 		s.GitHubToken = ""
 		err := s.Validate()
 		if err == nil {
 			t.Fatal("expected error for empty github_token")
 		}
-		if !strings.Contains(err.Error(), "github_token is empty") {
+		if !strings.Contains(err.Error(), "github_token or github app credentials") {
 			t.Errorf("unexpected error message: %v", err)
 		}
 	})
@@ -141,10 +141,70 @@ func TestSecretsValidate(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected errors for all-empty secrets")
 		}
-		for _, want := range []string{"slack_bot_token", "github_token", "redis_addr"} {
+		for _, want := range []string{"slack_bot_token", "github_token or github app credentials", "redis_addr"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("expected error to mention %q, got: %v", want, err)
 			}
+		}
+	})
+
+	t.Run("github app credentials valid without github_token", func(t *testing.T) {
+		s := valid
+		s.GitHubToken = ""
+		s.GitHubAppID = 12345
+		s.GitHubAppInstallationID = 67890
+		s.GitHubAppPrivateKey = "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"
+		if err := s.Validate(); err != nil {
+			t.Errorf("expected no error with app credentials, got: %v", err)
+		}
+	})
+
+	t.Run("github app partial credentials", func(t *testing.T) {
+		s := valid
+		s.GitHubAppID = 12345
+		// missing installation ID and private key
+		err := s.Validate()
+		if err == nil {
+			t.Fatal("expected error for partial app credentials")
+		}
+		if !strings.Contains(err.Error(), "must all be set together") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("github app invalid private key", func(t *testing.T) {
+		s := valid
+		s.GitHubToken = ""
+		s.GitHubAppID = 12345
+		s.GitHubAppInstallationID = 67890
+		s.GitHubAppPrivateKey = "not-a-pem-key"
+		err := s.Validate()
+		if err == nil {
+			t.Fatal("expected error for invalid PEM key")
+		}
+		if !strings.Contains(err.Error(), "PEM-encoded") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("both github_token and app credentials valid", func(t *testing.T) {
+		s := valid
+		s.GitHubAppID = 12345
+		s.GitHubAppInstallationID = 67890
+		s.GitHubAppPrivateKey = "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----"
+		if err := s.Validate(); err != nil {
+			t.Errorf("expected no error with both auth methods, got: %v", err)
+		}
+	})
+
+	t.Run("UseGitHubApp", func(t *testing.T) {
+		s := valid
+		if s.UseGitHubApp() {
+			t.Error("expected UseGitHubApp false with PAT only")
+		}
+		s.GitHubAppID = 12345
+		if !s.UseGitHubApp() {
+			t.Error("expected UseGitHubApp true with app ID set")
 		}
 	})
 }

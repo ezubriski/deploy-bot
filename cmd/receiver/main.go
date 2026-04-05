@@ -99,7 +99,11 @@ func main() {
 	evtBuffer := buffer.New(cfg.Slack.BufferSize, rdb, queue.StreamKeyUser, log)
 	go evtBuffer.Run(ctx)
 
-	approverCache := approvers.New(secrets.GitHubToken, slackClient, cfg.GitHub.Org, cfg.GitHub.ApproverTeam, log)
+	ghHTTP, err := secrets.GitHubHTTPClient()
+	if err != nil {
+		log.Fatal("github client", zap.Error(err))
+	}
+	approverCache := approvers.New(ghHTTP, slackClient, cfg.GitHub.Org, cfg.GitHub.ApproverTeam, log)
 	if err := approverCache.Refresh(ctx); err != nil {
 		// Fail open: log the error but continue. The cache will retry on the
 		// next tick, and the worker still validates approvers authoritatively.
@@ -134,7 +138,11 @@ func main() {
 			log.Warn("reposcanner: not running in Kubernetes, ConfigMap writes disabled")
 		}
 		cfgHolder := config.NewHolder(cfg, configPath)
-		scanner := reposcanner.NewScanner(secrets.ScannerToken(), cfg.GitHub.Org, scannerSlack, cmWriter, cfgHolder, log)
+		scannerHTTP, scannerErr := secrets.ScannerHTTPClient()
+		if scannerErr != nil {
+			log.Fatal("scanner github client", zap.Error(scannerErr))
+		}
+		scanner := reposcanner.NewScanner(scannerHTTP, cfg.GitHub.Org, scannerSlack, cmWriter, cfgHolder, log)
 		go scanner.Run(ctx)
 	}
 
