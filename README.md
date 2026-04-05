@@ -104,6 +104,18 @@ If deployed on AWS with VPC endpoints for SQS, ECR, S3, and Secrets Manager, the
 
 ## Getting started
 
+Setup involves collecting credentials from multiple services. Copy the env template to track your progress:
+
+```bash
+cp setup.env.example setup.env
+```
+
+Fill in each variable as you complete the steps below. Source the file before running any commands:
+
+```bash
+source setup.env
+```
+
 ### 1. Create the Slack app
 
 Use the `slack-manifest.json` file at the root of this repository:
@@ -438,54 +450,63 @@ See [terraform/README.md](terraform/README.md) for the full variable and output 
 
 ## deploy-bot-config CLI
 
-A standalone binary for validating `.deploy-bot.json` files. App teams use it locally or in CI to catch config errors before the bot scrapes their repo.
+A standalone binary for validating deploy-bot configuration files. Validates the main `config.json` (required fields, duration parsing, regex compilation, duplicate detection) and repo-sourced `.deploy-bot.json` files.
 
 **Usage:**
 
-```
-deploy-bot-config [--file PATH] [--format text|json]
+```bash
+# Validate the main config.json
+deploy-bot-config validate --config config.json
+
+# Validate a repo-sourced .deploy-bot.json
+deploy-bot-config validate --file .deploy-bot.json
+
+# JSON output (for CI)
+deploy-bot-config validate --config config.json --format json
 ```
 
 **Exit codes:**
 
 | Code | Meaning |
 |---|---|
-| 0 | All apps valid |
+| 0 | Config is valid |
 | 1 | Validation errors found |
 | 2 | File not found or JSON parse error |
 
-**Text output:**
+**Main config validation** checks required fields, duration formats (`stale_duration`, `lock_ttl`), merge method, tag pattern regex, duplicate app+environment pairs, and ECR region:
 
 ```
-$ deploy-bot-config --file .deploy-bot.json
+$ deploy-bot-config validate --config config.json
+config.json
+
+  ✓ github.org
+  ✓ github.repo
+  ✓ github.deployer_team
+  ✓ github.approver_team
+  ✓ slack.deploy_channel
+  ✓ deployment.stale_duration
+  ✓ deployment.lock_ttl
+  ✓ deployment.merge_method
+  ✓ aws.ecr_region
+
+  ✓ apps[0] myapp (dev)
+  ✓ apps[1] myapp (prod)
+
+2/2 apps valid.
+
+Config is valid.
+```
+
+**Repo config validation** checks `.deploy-bot.json` files that app teams create for repo-sourced discovery:
+
+```
+$ deploy-bot-config validate --file .deploy-bot.json
 .deploy-bot.json (deploy-bot/v1)
 
   ✓ apps[0] (myapp-dev): ok
-  ✓ apps[1] (myapp-prod): ok
-  ✗ apps[2] (broken): kustomize_path: required
+  ✗ apps[1] (broken): kustomize_path: required
 
-2/3 apps valid. 1 error found.
-```
-
-**JSON output:**
-
-```json
-$ deploy-bot-config --file .deploy-bot.json --format json
-{
-  "valid": false,
-  "api_version": "deploy-bot/v1",
-  "file": ".deploy-bot.json",
-  "apps_total": 3,
-  "apps_valid": 2,
-  "errors": [
-    {
-      "index": 2,
-      "app": "broken",
-      "field": "kustomize_path",
-      "message": "required"
-    }
-  ]
-}
+1/2 apps valid. 1 error found.
 ```
 
 ### GitHub Action
