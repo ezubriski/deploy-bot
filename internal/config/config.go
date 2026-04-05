@@ -312,13 +312,21 @@ func (a *AppConfig) CompiledTagPattern() *regexp.Regexp {
 type Secrets struct {
 	SlackBotToken           string `json:"slack_bot_token"`
 	SlackAppToken           string `json:"slack_app_token"`
-	GitHubToken             string `json:"github_token"`
+	GitHubToken             string `json:"github_token,omitempty"`
 	GitHubScannerToken      string `json:"github_scanner_token,omitempty"`
+	GitHubAppID             int64  `json:"github_app_id,omitempty"`
+	GitHubAppInstallationID int64  `json:"github_app_installation_id,omitempty"`
+	GitHubAppPrivateKey     string `json:"github_app_private_key,omitempty"`
 	RedisAddr               string `json:"redis_addr"`
 	RedisToken              string `json:"redis_token,omitempty"`
 	RedisIAMAuth            bool   `json:"redis_iam_auth,omitempty"`
 	RedisUserID             string `json:"redis_user_id,omitempty"`
 	RedisReplicationGroupID string `json:"redis_replication_group_id,omitempty"`
+}
+
+// UseGitHubApp returns true if GitHub App credentials are configured.
+func (s *Secrets) UseGitHubApp() bool {
+	return s.GitHubAppID != 0
 }
 
 // ScannerToken returns the token to use for repo scanning. If a dedicated
@@ -342,8 +350,26 @@ func (s *Secrets) Validate() error {
 	if s.SlackAppToken != "" && !strings.HasPrefix(s.SlackAppToken, "xapp-") {
 		errs = append(errs, fmt.Errorf("slack_app_token has unexpected prefix (want xapp-, got %q)", tokenPrefix(s.SlackAppToken)))
 	}
-	if s.GitHubToken == "" {
-		errs = append(errs, errors.New("github_token is empty"))
+	appFields := 0
+	if s.GitHubAppID != 0 {
+		appFields++
+	}
+	if s.GitHubAppInstallationID != 0 {
+		appFields++
+	}
+	if s.GitHubAppPrivateKey != "" {
+		appFields++
+	}
+	if appFields > 0 && appFields < 3 {
+		errs = append(errs, errors.New("github_app_id, github_app_installation_id, and github_app_private_key must all be set together"))
+	}
+	if appFields == 3 {
+		if !strings.Contains(s.GitHubAppPrivateKey, "BEGIN") {
+			errs = append(errs, errors.New("github_app_private_key does not appear to be a PEM-encoded key"))
+		}
+	}
+	if s.GitHubToken == "" && appFields == 0 {
+		errs = append(errs, errors.New("github_token or github app credentials (github_app_id, github_app_installation_id, github_app_private_key) required"))
 	}
 	if s.RedisAddr == "" {
 		errs = append(errs, errors.New("redis_addr is empty"))

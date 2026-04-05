@@ -90,8 +90,12 @@ func TestMain(m *testing.M) {
 		fatalf("redis ping: %v", err)
 	}
 
+	ghHTTP, err := secrets.GitHubHTTPClient(cfg.GitHub.Repo)
+	if err != nil {
+		fatalf("github client: %v", err)
+	}
 	maxRetries, retryWait := cfg.GitHub.RateLimitConfig()
-	ghClient := githubpkg.NewClient(secrets.GitHubToken, cfg.GitHub.Org, cfg.GitHub.Repo, log, githubpkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
+	ghClient := githubpkg.NewClient(ghHTTP, cfg.GitHub.Org, cfg.GitHub.Repo, log, githubpkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
 
 	defaultBranch, err := ghClient.GetDefaultBranch(ctx)
 	if err != nil {
@@ -122,7 +126,11 @@ func TestMain(m *testing.M) {
 		fatalf("init audit logger: %v", err)
 	}
 
-	val := validator.New(secrets.GitHubToken, rawSlack, cfg, log)
+	valHTTP, valErr := secrets.ValidatorHTTPClient()
+	if valErr != nil {
+		fatalf("validator github client: %v", valErr)
+	}
+	val := validator.New(valHTTP, rawSlack, cfg, log)
 	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m2, cfgHolder, log)
 
 	// Delete any leftover stream from a previous test run. This clears the

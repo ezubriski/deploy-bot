@@ -3,13 +3,13 @@ package approvers
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/google/go-github/v60/github"
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
-	"golang.org/x/oauth2"
 )
 
 // Cache maintains a set of Slack user IDs who are members of the GitHub
@@ -30,9 +30,7 @@ type Cache struct {
 	log      *zap.Logger
 }
 
-func New(ghToken string, slackClient *slack.Client, org, teamSlug string, log *zap.Logger) *Cache {
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken})
-	httpClient := oauth2.NewClient(context.Background(), ts)
+func New(httpClient *http.Client, slackClient *slack.Client, org, teamSlug string, log *zap.Logger) *Cache {
 	return &Cache{
 		approverIDs: make(map[string]struct{}),
 		gh:          github.NewClient(httpClient),

@@ -3,12 +3,12 @@ package reposcanner
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	gh "github.com/google/go-github/v60/github"
 	"go.uber.org/zap"
-	"golang.org/x/oauth2"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
@@ -44,9 +44,7 @@ type ConfigMapWriter interface {
 
 // NewScanner creates a Scanner. The cmWriter may be nil if ConfigMap writing
 // is not needed (e.g. in tests).
-func NewScanner(token, org string, slack slackclient.Poster, cmWriter ConfigMapWriter, cfg *config.Holder, log *zap.Logger) *Scanner {
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	httpClient := oauth2.NewClient(context.Background(), ts)
+func NewScanner(httpClient *http.Client, org string, slack slackclient.Poster, cmWriter ConfigMapWriter, cfg *config.Holder, log *zap.Logger) *Scanner {
 	return &Scanner{
 		gh:           gh.NewClient(httpClient),
 		org:          org,

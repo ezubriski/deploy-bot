@@ -26,7 +26,7 @@ Set exactly one per component. If both are set, `SECRETS_PATH` takes precedence.
 | `redis_user_id` | When IAM auth | ElastiCache user ID for IAM authentication |
 | `redis_replication_group_id` | When IAM auth | ElastiCache replication group ID (used to generate presigned auth tokens) |
 
-The bot does not need `slack_app_token` (Socket Mode is receiver-only) or `github_scanner_token` (repo scanning is receiver-only).
+The bot does not need `slack_app_token` (Socket Mode is receiver-only) or `github_scanner_token` (repo scanning is receiver-only). Both `github_token` and `github_scanner_token` accept GitHub App installation tokens as a drop-in replacement for PATs -- see [GitHub App Authentication](github-app-auth.md).
 
 ### Receiver secret
 

@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 
 	gh "github.com/google/go-github/v60/github"
 	"go.uber.org/zap"
-	"golang.org/x/oauth2"
 
 	"github.com/ezubriski/deploy-bot/internal/sanitize"
 )
@@ -48,15 +48,13 @@ type Client struct {
 	retry RetryConfig
 }
 
-func NewClient(token, org, repo string, log *zap.Logger, retry RetryConfig) *Client {
+func NewClient(httpClient *http.Client, org, repo string, log *zap.Logger, retry RetryConfig) *Client {
 	if log == nil {
 		log = zap.NewNop()
 	}
 	if retry.MaxRetries == 0 {
 		retry = defaultRetryConfig()
 	}
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	httpClient := oauth2.NewClient(context.Background(), ts)
 	return &Client{
 		gh:    gh.NewClient(httpClient),
 		org:   org,

@@ -3,11 +3,11 @@ package validator
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/google/go-github/v60/github"
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
-	"golang.org/x/oauth2"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
 )
@@ -19,12 +19,9 @@ type Validator struct {
 	log   *zap.Logger
 }
 
-func New(ghToken string, slackClient *slack.Client, cfg *config.Config, log *zap.Logger) *Validator {
-	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: ghToken})
-	httpClient := oauth2.NewClient(context.Background(), ts)
-	ghClient := github.NewClient(httpClient)
+func New(httpClient *http.Client, slackClient *slack.Client, cfg *config.Config, log *zap.Logger) *Validator {
 	return &Validator{
-		gh:    ghClient,
+		gh:    github.NewClient(httpClient),
 		slack: slackClient,
 		cfg:   cfg,
 		log:   log,
