@@ -381,7 +381,7 @@ See [naming-conventions.md](naming-conventions.md) for path templates, exemption
 | Audit bucket encryption | `audit_bucket_kms_key_arn` set |
 | Audit bucket secure transport | Automatic (bucket policy) |
 | Audit bucket access logging | `create_audit_access_log_bucket = true` |
-| Audit retention meets compliance (3 years) | `audit_bucket_retention_days = 1095` |
+| Audit retention (3 years, configurable) | `audit_bucket_retention_days = 1095` |
 | No public network exposure | Socket Mode + SQS (no ingress) |
 | Minimal container (FROM scratch) | Default Dockerfile |
 | Non-root, read-only filesystem, caps dropped | Default manifests |
