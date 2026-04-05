@@ -6,12 +6,13 @@ REGION   ?= us-west-2
 # Integration test settings
 ENV_FILE        ?= .env.integration
 INTEG_TIMEOUT   ?= 10m
+BUMP            ?= patch
 INTEG_RUN       ?=  # empty = run all; set to -run TestFoo to filter
 
 .DEFAULT_GOAL := build
 
 .PHONY: build bot receiver deploy-bot-config test test-unit test-pkg test-integ test-integ-single \
-        fmt fmt-check lint check image push ecr-login clean help
+        fmt fmt-check lint check image push ecr-login release clean help
 
 # --- build ---
 
@@ -69,6 +70,12 @@ push: image ## Build and push image to ECR
 ecr-login: ## Authenticate Podman to ECR
 	aws ecr get-login-password --region $(REGION) | \
 		podman login --username AWS --password-stdin $(REGISTRY)
+
+# --- release ---
+
+release: ## Trigger release workflow: make release BUMP=minor
+	gh workflow run release.yml -f bump=$(BUMP)
+	@echo "Release workflow triggered with bump=$(BUMP)"
 
 # --- misc ---
 
