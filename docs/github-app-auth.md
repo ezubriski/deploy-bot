@@ -92,13 +92,13 @@ Store the App ID, Installation ID, and private key in your secret. These replace
 }
 ```
 
-The bot handles token generation and refresh automatically -- no external token broker, sidecar, or CronJob is needed. Installation tokens are minted on demand, cached for up to 1 hour, and refreshed transparently before expiry.
+Installation tokens are minted on demand, cached for up to 1 hour, and refreshed before expiry.
 
 Both `github_token` (PAT) and the App fields can coexist during migration. When App credentials are present, they take precedence. The `github_scanner_token` PAT can still be set independently if you want the scanner to use a separate identity.
 
 ## Per-component token scoping
 
-When using GitHub App auth, the bot automatically requests the minimum permissions each component needs. Installation tokens are scoped at mint time -- each component gets its own token with only the permissions it requires, even though the App itself is installed with broader permissions.
+Each component requests only the permissions it needs when minting its installation token, regardless of the broader permissions the App was installed with.
 
 | Component | Token permissions | Purpose |
 |---|---|---|
@@ -107,9 +107,7 @@ When using GitHub App auth, the bot automatically requests the minimum permissio
 | Approver cache | members:read | Periodic approver team membership refresh |
 | Scanner | contents:read, statuses:write | Config file reads, conflict commit statuses |
 
-This is enforced automatically -- no configuration needed. If a component is compromised or a token is leaked, it can only perform the operations listed above, not the full set of permissions the App was installed with.
-
-With PATs, this scoping is not possible -- PATs always carry their full scope. This is one of the key security benefits of GitHub App auth.
+This scoping is not possible with PATs, which always carry their full scope.
 
 ## Monitoring rate limits
 
