@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/repoconfig"
@@ -47,6 +48,9 @@ func runValidate(args []string) int {
 	fs.StringVar(configPath, "c", "", "path to config.json (shorthand)")
 	repoNaming := fs.Bool("repo-naming", false, "simulate enforce_repo_naming (derives app and kustomize_path from --repo)")
 	repoName := fs.String("repo", "", "repository name for --repo-naming (e.g. my-service)")
+	pathTemplate := fs.String("path-template", "", "kustomize_path template (e.g. \"{env}/{repo}/kustomization.yaml\")")
+	defaultTagPattern := fs.String("default-tag-pattern", "", "default tag_pattern applied when omitted")
+	exempt := fs.Bool("exempt", false, "treat this repo as exempt from enforce_repo_naming")
 	format := fs.String("format", "text", "output format: text or json")
 
 	if err := fs.Parse(args); err != nil {
@@ -59,8 +63,18 @@ func runValidate(args []string) int {
 	}
 
 	opts := repoconfig.ValidateOpts{
-		RepoNaming: *repoNaming,
-		RepoName:   *repoName,
+		RepoNaming:        *repoNaming,
+		RepoName:          *repoName,
+		Exempt:            *exempt,
+		DefaultTagPattern: *defaultTagPattern,
+	}
+	if *pathTemplate != "" {
+		tmpl := *pathTemplate
+		opts.KustomizePathFn = func(repo, env string) string {
+			result := strings.Replace(tmpl, "{env}", env, -1)
+			result = strings.Replace(result, "{repo}", repo, -1)
+			return result
+		}
 	}
 
 	// Determine mode: --config for main config, --file for repo config.
@@ -252,8 +266,10 @@ func validateRepoConfig(path, format string, opts repoconfig.ValidateOpts) int {
 	verrs := repoconfig.ValidateWithOpts(cfg, opts)
 
 	// Apply derived values so the output shows what the scanner will produce.
-	if opts.RepoNaming && cfg.APIVersion == repoconfig.VersionV2 {
-		repoconfig.ApplyRepoNaming(cfg, opts.RepoName)
+	if opts.RepoNaming && !opts.Exempt && cfg.APIVersion == repoconfig.VersionV2 {
+		repoconfig.ApplyDefaults(cfg, opts)
+	} else if opts.DefaultTagPattern != "" {
+		repoconfig.ApplyDefaults(cfg, repoconfig.ValidateOpts{DefaultTagPattern: opts.DefaultTagPattern})
 	}
 	validCount := len(cfg.Apps) - len(verrs)
 
@@ -290,9 +306,18 @@ func printRepoJSON(r repoResult) {
 func printRepoText(file string, cfg *repoconfig.RepoConfigFile, errs []repoconfig.ValidationError, validCount int) {
 	fmt.Printf("%s (%s)\n\n", file, cfg.APIVersion)
 
+	// Print file-level errors first.
+	for _, e := range errs {
+		if e.Index < 0 {
+			fmt.Printf("  \u2717 %s: %s\n\n", e.Field, e.Msg)
+		}
+	}
+
 	invalid := make(map[int]*repoconfig.ValidationError, len(errs))
 	for i := range errs {
-		invalid[errs[i].Index] = &errs[i]
+		if errs[i].Index >= 0 {
+			invalid[errs[i].Index] = &errs[i]
+		}
 	}
 
 	for i, app := range cfg.Apps {
