@@ -12,7 +12,8 @@ INTEG_RUN       ?=  # empty = run all; set to -run TestFoo to filter
 .DEFAULT_GOAL := build
 
 .PHONY: build bot receiver deploy-bot-config test test-unit test-pkg test-integ test-integ-single \
-        fmt fmt-check lint check image push ecr-login release clean help
+        fmt fmt-check lint check image push ecr-login release \
+        docs-setup docs-serve docs-build docs-deploy clean help
 
 # --- build ---
 
@@ -77,10 +78,32 @@ release: ## Trigger release workflow: make release BUMP=minor
 	gh workflow run release.yml -f bump=$(BUMP)
 	@echo "Release workflow triggered with bump=$(BUMP)"
 
+# --- docs ---
+
+VENV := .venv
+MKDOCS := $(VENV)/bin/mkdocs
+MIKE := $(VENV)/bin/mike
+
+docs-setup: ## Create venv and install doc dependencies
+	python3 -m venv $(VENV)
+	$(VENV)/bin/pip install -r requirements-docs.txt
+
+docs-serve: $(MKDOCS) ## Serve docs locally at http://127.0.0.1:8000
+	$(MKDOCS) serve
+
+docs-build: $(MKDOCS) ## Build static docs site to ./site
+	$(MKDOCS) build --strict
+
+docs-deploy: $(MIKE) ## Deploy docs to gh-pages (local): make docs-deploy VERSION=dev
+	$(MIKE) deploy --update-aliases $(VERSION) latest
+
+$(MKDOCS) $(MIKE):
+	$(MAKE) docs-setup
+
 # --- misc ---
 
 clean: ## Remove build artifacts
-	rm -rf bin/
+	rm -rf bin/ site/
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
