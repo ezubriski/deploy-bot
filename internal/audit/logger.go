@@ -17,28 +17,41 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/config"
 )
 
+// Event types.
 const (
-	EventRequested = "requested"
-	EventApproved  = "approved"
-	EventRejected  = "rejected"
-	EventExpired   = "expired"
-	EventCancelled = "cancelled"
-	EventNoop      = "noop"
+	EventRequested      = "requested"
+	EventApproved       = "approved"
+	EventRejected       = "rejected"
+	EventExpired        = "expired"
+	EventCancelled      = "cancelled"
+	EventNoop           = "noop"
+	EventConflictFailed = "conflict_failed"
+	EventStartup        = "startup"
+)
+
+// Trigger sources.
+const (
+	TriggerSlashCommand = "slash_command"
+	TriggerMention      = "mention"
+	TriggerECRPush      = "ecr_push"
+	TriggerSweeper      = "sweeper"
+	TriggerStartup      = "startup"
 )
 
 type AuditEvent struct {
 	EventType   string    `json:"event_type"`
+	Trigger     string    `json:"trigger"`
 	Timestamp   time.Time `json:"timestamp"`
-	App         string    `json:"app"`
-	Environment string    `json:"environment"`
-	Tag         string    `json:"tag"`
-	PRNumber    int       `json:"pr_number"`
-	PRURL       string    `json:"pr_url"`
-	Requester   string    `json:"requester"`
-	Approver    string    `json:"approver"`
-	Reason      string    `json:"reason"`
-	Rejection   string    `json:"rejection"`
-	SlackTeam   string    `json:"slack_team"`
+	App         string    `json:"app,omitempty"`
+	Environment string    `json:"environment,omitempty"`
+	Tag         string    `json:"tag,omitempty"`
+	PRNumber    int       `json:"pr_number,omitempty"`
+	PRURL       string    `json:"pr_url,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	Rejection   string    `json:"rejection,omitempty"`
+	ActorEmail  string    `json:"actor_email,omitempty"`
+	ActorName   string    `json:"actor_name,omitempty"`
+	AutoDeploy  bool      `json:"auto_deploy,omitempty"`
 }
 
 // Logger is the interface satisfied by both the S3-backed logger and the
@@ -125,15 +138,17 @@ func (l *zapLogger) Log(_ context.Context, event AuditEvent) error {
 	event.Timestamp = time.Now().UTC()
 	l.log.Info("audit event",
 		zap.String("event_type", event.EventType),
+		zap.String("trigger", event.Trigger),
 		zap.String("app", event.App),
 		zap.String("environment", event.Environment),
 		zap.String("tag", event.Tag),
 		zap.Int("pr_number", event.PRNumber),
 		zap.String("pr_url", event.PRURL),
-		zap.String("requester", event.Requester),
-		zap.String("approver", event.Approver),
 		zap.String("reason", event.Reason),
 		zap.String("rejection", event.Rejection),
+		zap.String("actor_email", event.ActorEmail),
+		zap.String("actor_name", event.ActorName),
+		zap.Bool("auto_deploy", event.AutoDeploy),
 		zap.Time("timestamp", event.Timestamp),
 	)
 	return nil

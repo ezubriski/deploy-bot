@@ -38,8 +38,9 @@ type githubClient interface {
 
 // deployValidator is the subset of *validator.Validator methods used by the bot.
 type deployValidator interface {
-	IsApprover(ctx context.Context, slackID string) (bool, string, error)
-	IsDeployer(ctx context.Context, slackID string) (bool, string, error)
+	IsApprover(ctx context.Context, slackID string) (bool, validator.Identity, error)
+	IsDeployer(ctx context.Context, slackID string) (bool, validator.Identity, error)
+	ResolveIdentity(ctx context.Context, slackID string) (validator.Identity, error)
 	SlackUserToGitHub(ctx context.Context, slackID string) (string, error)
 }
 

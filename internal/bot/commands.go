@@ -222,9 +222,13 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 		return
 	}
 
-	requesterGH, err := b.validator.SlackUserToGitHub(ctx, cmd.UserID)
-	if err != nil {
+	cancellerIdent, err := b.validator.ResolveIdentity(ctx, cmd.UserID)
+	requesterGH := cancellerIdent.GitHubLogin
+	if err != nil || requesterGH == "" {
 		requesterGH = cmd.UserName
+		if requesterGH == "" {
+			requesterGH = "slack:" + cmd.UserID
+		}
 	}
 
 	cfg := b.cfg.Load()
@@ -240,12 +244,14 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventCancelled,
+			Trigger:     audit.TriggerSlashCommand,
 			App:         d.App,
 			Environment: d.Environment,
 			Tag:         d.Tag,
 			PRNumber:    prNumber,
 			PRURL:       d.PRURL,
-			Requester:   requesterGH,
+			ActorEmail:  cancellerIdent.Email,
+			ActorName:   cancellerIdent.Name,
 		})
 	}()
 	go func() {
@@ -273,7 +279,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cmd.UserName))
+	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.String()))
 }
 
 func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg string) {

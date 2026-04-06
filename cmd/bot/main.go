@@ -129,7 +129,7 @@ func main() {
 	slackMaxRetries, slackRetryWait := cfgHolder.Load().Slack.RateLimitConfig()
 	slackClient := slackclient.New(rawSlack, slackMaxRetries, slackRetryWait, log)
 
-	ecrCache, err := ecr.NewCache(ctx, cfgHolder.Load(), m, log)
+	ecrCache, err := ecr.NewCache(ctx, cfgHolder.Load(), redisStore.Redis(), m, log)
 	if err != nil {
 		log.Fatal("init ecr cache", zap.Error(err))
 	}
@@ -143,7 +143,7 @@ func main() {
 	if err != nil {
 		log.Fatal("validator github client", zap.Error(err))
 	}
-	val := validator.New(valHTTP, rawSlack, cfgHolder.Load(), log)
+	val := validator.New(valHTTP, rawSlack, redisStore.Redis(), cfgHolder.Load(), log)
 
 	// Log prod auto-deploy guard status at startup.
 	logProdAutoDeployGuard(initialCfg, auditLog, log)
@@ -255,7 +255,8 @@ func logProdAutoDeployGuard(cfg *config.Config, auditLog audit.Logger, log *zap.
 			zap.Strings("apps", prodAutoDeployApps),
 		)
 		_ = auditLog.Log(context.Background(), audit.AuditEvent{
-			EventType: "startup",
+			EventType: audit.EventStartup,
+			Trigger:   audit.TriggerStartup,
 			Reason:    fmt.Sprintf("prod auto-deploy apps: %v", prodAutoDeployApps),
 		})
 	}

@@ -299,9 +299,10 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 		return
 	}
 
-	requesterGH, err := b.validator.SlackUserToGitHub(ctx, evt.UserID)
-	if err != nil {
-		requesterGH = evt.UserID
+	cancellerIdent, err := b.validator.ResolveIdentity(ctx, evt.UserID)
+	requesterGH := cancellerIdent.GitHubLogin
+	if err != nil || requesterGH == "" {
+		requesterGH = "slack:" + evt.UserID
 	}
 
 	var wg sync.WaitGroup
@@ -315,12 +316,14 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventCancelled,
+			Trigger:     audit.TriggerMention,
 			App:         d.App,
 			Environment: d.Environment,
 			Tag:         d.Tag,
 			PRNumber:    prNumber,
 			PRURL:       d.PRURL,
-			Requester:   requesterGH,
+			ActorEmail:  cancellerIdent.Email,
+			ActorName:   cancellerIdent.Name,
 		})
 	}()
 	go func() {
@@ -346,7 +349,7 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled via mention", zap.Int("pr", prNumber), zap.String("user", evt.UserID))
+	b.log.Info("deployment cancelled via mention", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.String()))
 }
 
 func (b *Bot) handleMentionNudge(ctx context.Context, evt queue.AppMentionEvent, prArg string) {
@@ -364,8 +367,8 @@ func (b *Bot) handleMentionNudge(ctx context.Context, evt queue.AppMentionEvent,
 
 	remaining := time.Until(d.ExpiresAt).Round(time.Minute)
 	b.replyMention(ctx, evt, fmt.Sprintf(
-		"<@%s> — reminder: deployment of *%s* (%s) `%s` by <@%s> is waiting for your approval. Expires in *%s*. <%s|PR #%d>",
-		d.ApproverID, d.App, d.Environment, d.Tag, d.RequesterID, remaining, d.PRURL, d.PRNumber,
+		"%s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for your approval. Expires in *%s*. <%s|PR #%d>",
+		slackMention(d.ApproverID), d.App, d.Environment, d.Tag, slackMention(d.RequesterID), remaining, d.PRURL, d.PRNumber,
 	))
 }
 
@@ -461,9 +464,10 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		return
 	}
 
-	requesterGH, err := b.validator.SlackUserToGitHub(ctx, evt.UserID)
-	if err != nil {
-		requesterGH = evt.UserID
+	requesterIdent, err := b.validator.ResolveIdentity(ctx, evt.UserID)
+	requesterGH := requesterIdent.GitHubLogin
+	if err != nil || requesterGH == "" {
+		requesterGH = "slack:" + evt.UserID
 	}
 
 	prNumber, prURL, err := b.gh.CreateDeployPR(ctx, githubPkg.CreatePRParams{
@@ -526,13 +530,15 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
 		EventType:   audit.EventRequested,
+		Trigger:     audit.TriggerMention,
 		App:         appName,
 		Environment: env,
 		Tag:         tag,
 		PRNumber:    prNumber,
 		PRURL:       prURL,
-		Requester:   requesterGH,
 		Reason:      reason,
+		ActorEmail:  requesterIdent.Email,
+		ActorName:   requesterIdent.Name,
 	})
 
 	b.metrics.RecordDeploy(appName, audit.EventRequested)
@@ -542,7 +548,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		"Deployment of *%s* (%s) `%s` requested — <%s|PR #%d> created. Awaiting approval in <#%s>.\n_Tip: the slash command (`/deploy`) provides a guided experience with tag selection and approver assignment._",
 		appName, env, tag, prURL, prNumber, deployChannel,
 	))
-	b.log.Info("deployment requested via mention", zap.String("app", appName), zap.String("tag", tag), zap.Int("pr", prNumber))
+	b.log.Info("deployment requested via mention", zap.String("app", appName), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterIdent.String()))
 }
 
 func (b *Bot) handleMentionRollback(ctx context.Context, evt queue.AppMentionEvent, appName string) {

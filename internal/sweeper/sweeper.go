@@ -279,12 +279,13 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 			defer wg.Done()
 			_ = s.audit.Log(ctx, audit.AuditEvent{
 				EventType:   audit.EventExpired,
+				Trigger:     audit.TriggerSweeper,
 				App:         d.App,
 				Environment: d.Environment,
 				Tag:         d.Tag,
 				PRNumber:    d.PRNumber,
 				PRURL:       d.PRURL,
-				Requester:   d.Requester,
+				Reason:      "stale duration exceeded",
 			})
 		}()
 		s.metrics.RecordDeploy(d.App, audit.EventExpired)
