@@ -315,16 +315,15 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 	go func() {
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:    audit.EventCancelled,
-			Trigger:      audit.TriggerMention,
-			App:          d.App,
-			Environment:  d.Environment,
-			Tag:          d.Tag,
-			PRNumber:     prNumber,
-			PRURL:        d.PRURL,
-			ActorEmail:   cancellerIdent.Email,
-			ActorSlackID: evt.UserID,
-			ActorName:    cancellerIdent.Name,
+			EventType:   audit.EventCancelled,
+			Trigger:     audit.TriggerMention,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			ActorEmail:  cancellerIdent.Email,
+			ActorName:   cancellerIdent.Name,
 		})
 	}()
 	go func() {
@@ -530,17 +529,16 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 	)
 
 	_ = b.auditLog.Log(ctx, audit.AuditEvent{
-		EventType:    audit.EventRequested,
-		Trigger:      audit.TriggerMention,
-		App:          appName,
-		Environment:  env,
-		Tag:          tag,
-		PRNumber:     prNumber,
-		PRURL:        prURL,
-		Reason:       reason,
-		ActorEmail:   requesterIdent.Email,
-		ActorSlackID: evt.UserID,
-		ActorName:    requesterIdent.Name,
+		EventType:   audit.EventRequested,
+		Trigger:     audit.TriggerMention,
+		App:         appName,
+		Environment: env,
+		Tag:         tag,
+		PRNumber:    prNumber,
+		PRURL:       prURL,
+		Reason:      reason,
+		ActorEmail:  requesterIdent.Email,
+		ActorName:   requesterIdent.Name,
 	})
 
 	b.metrics.RecordDeploy(appName, audit.EventRequested)

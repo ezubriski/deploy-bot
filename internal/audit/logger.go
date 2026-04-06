@@ -39,21 +39,20 @@ const (
 )
 
 type AuditEvent struct {
-	EventType    string    `json:"event_type"`
-	Trigger      string    `json:"trigger"`
-	Timestamp    time.Time `json:"timestamp"`
-	App          string    `json:"app,omitempty"`
-	Environment  string    `json:"environment,omitempty"`
-	Tag          string    `json:"tag,omitempty"`
-	PRNumber     int       `json:"pr_number,omitempty"`
-	PRURL        string    `json:"pr_url,omitempty"`
-	Reason       string    `json:"reason,omitempty"`
-	Rejection    string    `json:"rejection,omitempty"`
-	ActorEmail   string    `json:"actor_email,omitempty"`
-	ActorName    string    `json:"actor_name,omitempty"`
-	ActorSlackID string    `json:"actor_slack_id,omitempty"`
-	AutoDeploy   bool      `json:"auto_deploy,omitempty"`
-	MergeMethod  string    `json:"merge_method,omitempty"`
+	EventType   string    `json:"event_type"`
+	Trigger     string    `json:"trigger"`
+	Timestamp   time.Time `json:"timestamp"`
+	App         string    `json:"app,omitempty"`
+	Environment string    `json:"environment,omitempty"`
+	Tag         string    `json:"tag,omitempty"`
+	PRNumber    int       `json:"pr_number,omitempty"`
+	PRURL       string    `json:"pr_url,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	Rejection   string    `json:"rejection,omitempty"`
+	ActorEmail  string    `json:"actor_email,omitempty"`
+	ActorName   string    `json:"actor_name,omitempty"`
+	AutoDeploy  bool      `json:"auto_deploy,omitempty"`
+	MergeMethod string    `json:"merge_method,omitempty"`
 }
 
 // Logger is the interface satisfied by both the S3-backed logger and the
@@ -150,7 +149,6 @@ func (l *zapLogger) Log(_ context.Context, event AuditEvent) error {
 		zap.String("rejection", event.Rejection),
 		zap.String("actor_email", event.ActorEmail),
 		zap.String("actor_name", event.ActorName),
-		zap.String("actor_slack_id", event.ActorSlackID),
 		zap.Bool("auto_deploy", event.AutoDeploy),
 		zap.String("merge_method", event.MergeMethod),
 		zap.Time("timestamp", event.Timestamp),

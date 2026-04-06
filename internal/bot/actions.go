@@ -220,17 +220,16 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	go func() {
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:    audit.EventApproved,
-			Trigger:      audit.TriggerSlashCommand,
-			App:          d.App,
-			Environment:  d.Environment,
-			Tag:          d.Tag,
-			PRNumber:     prNumber,
-			PRURL:        d.PRURL,
-			ActorEmail:   approverIdent.Email,
-			ActorSlackID: approverID,
-			ActorName:    approverIdent.Name,
-			MergeMethod:  cfg.Deployment.MergeMethod,
+			EventType:   audit.EventApproved,
+			Trigger:     audit.TriggerSlashCommand,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			ActorEmail:  approverIdent.Email,
+			ActorName:   approverIdent.Name,
+			MergeMethod: cfg.Deployment.MergeMethod,
 		})
 	}()
 	go func() {
@@ -449,14 +448,13 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 			noopMsg := fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy. No PR created.", appVal, env, tag)
 			b.postNoOpNotice(ctx, appVal, noopMsg)
 			_ = b.auditLog.Log(ctx, audit.AuditEvent{
-				EventType:    audit.EventNoop,
-				Trigger:      audit.TriggerSlashCommand,
-				App:          appVal,
-				Environment:  env,
-				Tag:          tag,
-				ActorEmail:   requesterIdent.Email,
-				ActorSlackID: requesterID,
-				ActorName:    requesterIdent.Name,
+				EventType:   audit.EventNoop,
+				Trigger:     audit.TriggerSlashCommand,
+				App:         appVal,
+				Environment: env,
+				Tag:         tag,
+				ActorEmail:  requesterIdent.Email,
+				ActorName:   requesterIdent.Name,
 			})
 			b.log.Info("deploy no-op: tag already current", zap.String("app", appVal), zap.String("tag", tag))
 			return
@@ -518,17 +516,16 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	go func() {
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:    audit.EventRequested,
-			Trigger:      audit.TriggerSlashCommand,
-			App:          appVal,
-			Environment:  env,
-			Tag:          tag,
-			PRNumber:     prNumber,
-			PRURL:        prURL,
-			Reason:       reason,
-			ActorEmail:   requesterIdent.Email,
-			ActorSlackID: requesterID,
-			ActorName:    requesterIdent.Name,
+			EventType:   audit.EventRequested,
+			Trigger:     audit.TriggerSlashCommand,
+			App:         appVal,
+			Environment: env,
+			Tag:         tag,
+			PRNumber:    prNumber,
+			PRURL:       prURL,
+			Reason:      reason,
+			ActorEmail:  requesterIdent.Email,
+			ActorName:   requesterIdent.Name,
 		})
 	}()
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
@@ -612,17 +609,16 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	go func() {
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:    audit.EventRejected,
-			Trigger:      audit.TriggerSlashCommand,
-			App:          d.App,
-			Environment:  d.Environment,
-			Tag:          d.Tag,
-			PRNumber:     prNumber,
-			PRURL:        d.PRURL,
-			Rejection:    rejReason,
-			ActorEmail:   rejecterIdent.Email,
-			ActorSlackID: approverID,
-			ActorName:    rejecterIdent.Name,
+			EventType:   audit.EventRejected,
+			Trigger:     audit.TriggerSlashCommand,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			Rejection:   rejReason,
+			ActorEmail:  rejecterIdent.Email,
+			ActorName:   rejecterIdent.Name,
 		})
 	}()
 	go func() {

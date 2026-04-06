@@ -243,16 +243,15 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	go func() {
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:    audit.EventCancelled,
-			Trigger:      audit.TriggerSlashCommand,
-			App:          d.App,
-			Environment:  d.Environment,
-			Tag:          d.Tag,
-			PRNumber:     prNumber,
-			PRURL:        d.PRURL,
-			ActorEmail:   cancellerIdent.Email,
-			ActorSlackID: cmd.UserID,
-			ActorName:    cancellerIdent.Name,
+			EventType:   audit.EventCancelled,
+			Trigger:     audit.TriggerSlashCommand,
+			App:         d.App,
+			Environment: d.Environment,
+			Tag:         d.Tag,
+			PRNumber:    prNumber,
+			PRURL:       d.PRURL,
+			ActorEmail:  cancellerIdent.Email,
+			ActorName:   cancellerIdent.Name,
 		})
 	}()
 	go func() {
