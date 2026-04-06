@@ -1,0 +1,1960 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Approval-gated Kubernetes deployments from Slack">
+      
+      
+      
+      
+        <link rel="prev" href="../production-setup/">
+      
+      
+        <link rel="next" href="../ecr-push-triggered-deploys/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Configuration - deploy-bot</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="deploy-bot" class="md-header__button md-logo" aria-label="deploy-bot" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            deploy-bot
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ezubriski/deploy-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ezubriski/deploy-bot
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="deploy-bot" class="md-nav__button md-logo" aria-label="deploy-bot" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    deploy-bot
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ezubriski/deploy-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ezubriski/deploy-bot
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Secrets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bot-worker-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bot (worker) secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#receiver-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Receiver secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-a-kubernetes-secrets-file-mount" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option A: Kubernetes Secrets (file mount)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-b-aws-secrets-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option B: AWS Secrets Manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-c-aws-secrets-manager-with-elasticache-iam-auth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option C: AWS Secrets Manager with ElastiCache IAM auth
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-file-configjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config file (config.json)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Config file (config.json)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#github" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slack
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#aws" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AWS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ecr-events-ecr-push-triggered-deploys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ECR Events (ECR push-triggered deploys)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#repo-discovery-repo-sourced-app-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo Discovery (repo-sourced app configuration)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#apps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Apps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repo-sourced-app-config-deploy-botjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo-sourced app config (.deploy-bot.json)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#full-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full example
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ecr-push-triggered-deploys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ECR Push-Triggered Deploys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repo-sourced-app-discovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repo-Sourced App Discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../naming-conventions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Naming Conventions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../github-app-auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub App Authentication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../redis-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Redis Resilience
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../merge-conflict-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Merge Conflict Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../no-op-deploy-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    No-Op Deploy Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integration-test-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Test Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Secrets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bot-worker-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bot (worker) secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#receiver-secret" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Receiver secret
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-a-kubernetes-secrets-file-mount" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option A: Kubernetes Secrets (file mount)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-b-aws-secrets-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option B: AWS Secrets Manager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#option-c-aws-secrets-manager-with-elasticache-iam-auth" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Option C: AWS Secrets Manager with ElastiCache IAM auth
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#config-file-configjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config file (config.json)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Config file (config.json)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#github" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GitHub
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slack
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Deployment
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#aws" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AWS
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ecr-events-ecr-push-triggered-deploys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ECR Events (ECR push-triggered deploys)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#repo-discovery-repo-sourced-app-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo Discovery (repo-sourced app configuration)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#apps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Apps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#repo-sourced-app-config-deploy-botjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Repo-sourced app config (.deploy-bot.json)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#full-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full example
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="configuration-reference">Configuration Reference<a class="headerlink" href="#configuration-reference" title="Permanent link">&para;</a></h1>
+<p>The bot uses two configuration sources:</p>
+<ul>
+<li><strong><code>config.json</code></strong> — mounted as a ConfigMap, hot-reloaded on file change (30s poll) or SIGHUP. The base Kustomize manifests mount ConfigMaps as directories (not <code>subPath</code>) so Kubernetes updates files in place without requiring a pod restart. Avoid <code>subPath</code> in overlays or hot-reload will not work.</li>
+<li><strong><code>discovered.json</code></strong> — written by the repo scanner (optional), merged at load time</li>
+</ul>
+<h2 id="secrets">Secrets<a class="headerlink" href="#secrets" title="Permanent link">&para;</a></h2>
+<p>The bot and receiver use <strong>separate secrets</strong> so that each component only has access to the credentials it needs. Secrets are loaded from one of two sources, checked in order:</p>
+<ol>
+<li><strong>File</strong> (<code>SECRETS_PATH</code> env var) — a JSON file, typically mounted from a Kubernetes Secret</li>
+<li><strong>AWS Secrets Manager</strong> (<code>AWS_SECRET_NAME</code> env var) — fetched at startup via the AWS SDK</li>
+</ol>
+<p>Set exactly one per component. If both are set, <code>SECRETS_PATH</code> takes precedence.</p>
+<h3 id="bot-worker-secret">Bot (worker) secret<a class="headerlink" href="#bot-worker-secret" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>slack_bot_token</code></td>
+<td>Yes</td>
+<td>Bot User OAuth Token (<code>xoxb-</code>)</td>
+</tr>
+<tr>
+<td><code>github_token</code></td>
+<td>Yes</td>
+<td>Fine-grained PAT scoped to the gitops repo — Contents and Pull requests (read/write), org Members (read)</td>
+</tr>
+<tr>
+<td><code>redis_addr</code></td>
+<td>Yes</td>
+<td>Redis endpoint with port (e.g. <code>redis:6379</code>)</td>
+</tr>
+<tr>
+<td><code>redis_token</code></td>
+<td>No</td>
+<td>Redis auth token. Mutually exclusive with <code>redis_iam_auth</code></td>
+</tr>
+<tr>
+<td><code>redis_iam_auth</code></td>
+<td>No</td>
+<td>Enable ElastiCache IAM authentication. Requires <code>redis_user_id</code> and <code>redis_replication_group_id</code>. When true, TLS is enabled automatically</td>
+</tr>
+<tr>
+<td><code>redis_user_id</code></td>
+<td>When IAM auth</td>
+<td>ElastiCache user ID for IAM authentication</td>
+</tr>
+<tr>
+<td><code>redis_replication_group_id</code></td>
+<td>When IAM auth</td>
+<td>ElastiCache replication group ID (used to generate presigned auth tokens)</td>
+</tr>
+</tbody>
+</table>
+<p>The bot does not need <code>slack_app_token</code> (Socket Mode is receiver-only) or <code>github_scanner_token</code> (repo scanning is receiver-only). Both <code>github_token</code> and <code>github_scanner_token</code> accept GitHub App installation tokens as a drop-in replacement for PATs -- see <a href="../github-app-auth/">GitHub App Authentication</a>.</p>
+<h3 id="receiver-secret">Receiver secret<a class="headerlink" href="#receiver-secret" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>slack_bot_token</code></td>
+<td>Yes</td>
+<td>Bot User OAuth Token (<code>xoxb-</code>)</td>
+</tr>
+<tr>
+<td><code>slack_app_token</code></td>
+<td>Yes</td>
+<td>App-Level Token (<code>xapp-</code>) with <code>connections:write</code> scope — required for Socket Mode</td>
+</tr>
+<tr>
+<td><code>github_token</code></td>
+<td>Yes</td>
+<td>Fine-grained PAT — org Members (read) for approver cache</td>
+</tr>
+<tr>
+<td><code>github_scanner_token</code></td>
+<td>No</td>
+<td>Fine-grained PAT scoped to all repos (or discoverable repos) with Contents (read) and Commit statuses (read/write). Used by the repo scanner. Falls back to <code>github_token</code> if not set</td>
+</tr>
+<tr>
+<td><code>redis_addr</code></td>
+<td>Yes</td>
+<td>Redis endpoint with port</td>
+</tr>
+<tr>
+<td><code>redis_token</code></td>
+<td>No</td>
+<td>Redis auth token. Mutually exclusive with <code>redis_iam_auth</code></td>
+</tr>
+<tr>
+<td><code>redis_iam_auth</code></td>
+<td>No</td>
+<td>Enable ElastiCache IAM authentication. Requires <code>redis_user_id</code> and <code>redis_replication_group_id</code>. When true, TLS is enabled automatically</td>
+</tr>
+<tr>
+<td><code>redis_user_id</code></td>
+<td>When IAM auth</td>
+<td>ElastiCache user ID for IAM authentication</td>
+</tr>
+<tr>
+<td><code>redis_replication_group_id</code></td>
+<td>When IAM auth</td>
+<td>ElastiCache replication group ID (used to generate presigned auth tokens)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="option-a-kubernetes-secrets-file-mount">Option A: Kubernetes Secrets (file mount)<a class="headerlink" href="#option-a-kubernetes-secrets-file-mount" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Bot secret</span>
+kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>deploy-bot-worker-secrets<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--namespace<span class="o">=</span>deploy-bot<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span>secrets.json<span class="o">=</span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;slack_bot_token&quot;: &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:    &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:      &quot;redis:6379&quot;</span>
+<span class="s1">  }&#39;</span>
+
+<span class="c1"># Receiver secret</span>
+kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>deploy-bot-receiver-secrets<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--namespace<span class="o">=</span>deploy-bot<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--from-literal<span class="o">=</span>secrets.json<span class="o">=</span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;slack_bot_token&quot;:      &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;slack_app_token&quot;:      &quot;xapp-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:         &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;github_scanner_token&quot;: &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:           &quot;redis:6379&quot;</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+<p>Set <code>SECRETS_PATH=/etc/deploy-bot/secrets/secrets.json</code> in each deployment and mount the respective secret as a volume.</p>
+<h3 id="option-b-aws-secrets-manager">Option B: AWS Secrets Manager<a class="headerlink" href="#option-b-aws-secrets-manager" title="Permanent link">&para;</a></h3>
+<p>Create separate secrets for each component:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Bot secret (password auth)</span>
+aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>deploy-bot/bot-secrets<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--secret-string<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;slack_bot_token&quot;: &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:    &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:      &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
+<span class="s1">    &quot;redis_token&quot;:     &quot;your-elasticache-auth-token&quot;</span>
+<span class="s1">  }&#39;</span>
+
+<span class="c1"># Receiver secret (password auth)</span>
+aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>deploy-bot/receiver-secrets<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--secret-string<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;slack_bot_token&quot;:      &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;slack_app_token&quot;:      &quot;xapp-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:         &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;github_scanner_token&quot;: &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:           &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
+<span class="s1">    &quot;redis_token&quot;:          &quot;your-elasticache-auth-token&quot;</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+<p>The Terraform module scopes each role's Secrets Manager read permission to its own secret (<code>bot_secrets_manager_secret_name</code> and <code>receiver_secrets_manager_secret_name</code>), preventing cross-access.</p>
+<h3 id="option-c-aws-secrets-manager-with-elasticache-iam-auth">Option C: AWS Secrets Manager with ElastiCache IAM auth<a class="headerlink" href="#option-c-aws-secrets-manager-with-elasticache-iam-auth" title="Permanent link">&para;</a></h3>
+<p>When using ElastiCache with IAM authentication, replace <code>redis_token</code> with the IAM auth fields. TLS is enabled automatically and the bot generates short-lived SigV4 presigned tokens on each connection.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Bot secret (IAM auth)</span>
+aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>deploy-bot/bot-secrets<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--secret-string<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;slack_bot_token&quot;:              &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:                 &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:                   &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
+<span class="s1">    &quot;redis_iam_auth&quot;:               true,</span>
+<span class="s1">    &quot;redis_user_id&quot;:                &quot;deploy-bot-iam&quot;,</span>
+<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;</span>
+<span class="s1">  }&#39;</span>
+
+<span class="c1"># Receiver secret (IAM auth)</span>
+aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>deploy-bot/receiver-secrets<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--secret-string<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;slack_bot_token&quot;:              &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;slack_app_token&quot;:              &quot;xapp-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:                 &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;github_scanner_token&quot;:         &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:                   &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
+<span class="s1">    &quot;redis_iam_auth&quot;:               true,</span>
+<span class="s1">    &quot;redis_user_id&quot;:                &quot;deploy-bot-iam&quot;,</span>
+<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+<p>The <code>redis_user_id</code> must match the ElastiCache user ID configured with IAM authentication type. The <code>redis_replication_group_id</code> is the ElastiCache replication group ID (not the endpoint address) — it is used as the Host in the SigV4 presigned request. The IAM role or user running the bot/receiver must have <code>elasticache:Connect</code> permission on both the replication group and user ARNs (the Terraform module handles this when <code>elasticache_replication_group_arn</code> and <code>elasticache_user_arn</code> are set).</p>
+<p>See <a href="https://github.com/ezubriski/deploy-bot/tree/main/terraform/examples/elasticache"><code>terraform/examples/elasticache/</code></a> for a reference ElastiCache setup with IAM auth, encryption, and automatic failover.</p>
+<h2 id="config-file-configjson">Config file (<code>config.json</code>)<a class="headerlink" href="#config-file-configjson" title="Permanent link">&para;</a></h2>
+<h3 id="github">GitHub<a class="headerlink" href="#github" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>github.org</code></td>
+<td></td>
+<td>GitHub organisation</td>
+</tr>
+<tr>
+<td><code>github.repo</code></td>
+<td></td>
+<td>GitOps repository name</td>
+</tr>
+<tr>
+<td><code>github.deployer_team</code></td>
+<td></td>
+<td>GitHub team slug -- members can request deploys</td>
+</tr>
+<tr>
+<td><code>github.approver_team</code></td>
+<td></td>
+<td>GitHub team slug -- members can approve/reject</td>
+</tr>
+<tr>
+<td><code>github.users</code></td>
+<td><code>{}</code></td>
+<td>Optional map of Slack user ID to GitHub login for users with private GitHub emails (e.g. <code>{"U12345": "ghlogin"}</code>)</td>
+</tr>
+<tr>
+<td><code>github.rate_limit_max_retries</code></td>
+<td><code>3</code></td>
+<td>Max retries on GitHub secondary rate limit</td>
+</tr>
+<tr>
+<td><code>github.rate_limit_retry_wait</code></td>
+<td><code>"2m"</code></td>
+<td>Max wait between rate-limit retries</td>
+</tr>
+</tbody>
+</table>
+<h3 id="slack">Slack<a class="headerlink" href="#slack" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>slack.deploy_channel</code></td>
+<td></td>
+<td>Channel where deployment notifications are posted</td>
+</tr>
+<tr>
+<td><code>slack.allowed_channels</code></td>
+<td><code>[]</code> (all)</td>
+<td>Channel IDs where <code>/deploy</code> is accepted. Omit to allow all. Use IDs (<code>C01234567</code>), not names</td>
+</tr>
+<tr>
+<td><code>slack.buffer_size</code></td>
+<td><code>500</code></td>
+<td>Events buffered in memory when Redis is unavailable. Buffered events are retried with backoff; Slack retries in parallel since they are never ACKed from the buffer</td>
+</tr>
+<tr>
+<td><code>slack.thread_threshold</code></td>
+<td><code>4</code></td>
+<td>Controls when the bot threads deploy notifications under a parent message per environment. <code>0</code> or omitted: default threshold of 4 (thread when 4+ deploys are pending in the same environment). <code>-1</code>: never thread. <code>1</code>: always thread</td>
+</tr>
+<tr>
+<td><code>slack.rate_limit_max_retries</code></td>
+<td><code>3</code></td>
+<td>Max retries on Slack 429 responses</td>
+</tr>
+<tr>
+<td><code>slack.rate_limit_retry_wait</code></td>
+<td><code>"30s"</code></td>
+<td>Max wait between Slack rate-limit retries</td>
+</tr>
+</tbody>
+</table>
+<h3 id="deployment">Deployment<a class="headerlink" href="#deployment" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deployment.stale_duration</code></td>
+<td><code>"2h"</code></td>
+<td>How long a pending deploy waits before the sweeper expires it</td>
+</tr>
+<tr>
+<td><code>deployment.merge_method</code></td>
+<td><code>"squash"</code></td>
+<td><code>squash</code>, <code>merge</code>, or <code>rebase</code></td>
+</tr>
+<tr>
+<td><code>deployment.lock_ttl</code></td>
+<td><code>"5m"</code></td>
+<td>Per-app deploy lock duration</td>
+</tr>
+<tr>
+<td><code>deployment.label</code></td>
+<td><code>"deploy-bot"</code></td>
+<td>GitHub label applied to every deploy PR. Used to rediscover open PRs after a Redis flush</td>
+</tr>
+<tr>
+<td><code>deployment.reconcile_interval</code></td>
+<td>disabled</td>
+<td>If set (e.g. <code>"1h"</code>), periodically reconcile open labeled PRs against Redis state. Startup reconciliation always runs regardless</td>
+</tr>
+<tr>
+<td><code>deployment.allow_prod_auto_deploy</code></td>
+<td><code>false</code></td>
+<td>If false, <code>auto_deploy: true</code> is ignored for apps whose environment is <code>prod</code> or <code>production</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="aws">AWS<a class="headerlink" href="#aws" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>aws.ecr_role_arn</code></td>
+<td></td>
+<td>Optional role to assume for ECR reads. Omit to use pod identity directly</td>
+</tr>
+<tr>
+<td><code>aws.ecr_region</code></td>
+<td></td>
+<td>Region of app ECR repositories</td>
+</tr>
+<tr>
+<td><code>aws.audit_role_arn</code></td>
+<td></td>
+<td>Optional role to assume for S3 audit writes. Omit to use pod identity directly</td>
+</tr>
+<tr>
+<td><code>aws.audit_region</code></td>
+<td></td>
+<td>Region of the audit S3 bucket</td>
+</tr>
+<tr>
+<td><code>aws.audit_bucket</code></td>
+<td></td>
+<td>S3 bucket for audit logs. If empty, audit events are written to the application log via zap instead of S3</td>
+</tr>
+</tbody>
+</table>
+<h3 id="ecr-events-ecr-push-triggered-deploys">ECR Events (ECR push-triggered deploys)<a class="headerlink" href="#ecr-events-ecr-push-triggered-deploys" title="Permanent link">&para;</a></h3>
+<p>Disabled by default. When <code>sqs_queue_url</code> is set, the receiver polls an SQS queue for ECR push events from EventBridge and enqueues matching deploys.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ecr_events.sqs_queue_url</code></td>
+<td><code>""</code> (disabled)</td>
+<td>SQS queue URL to poll for ECR push events</td>
+</tr>
+<tr>
+<td><code>ecr_events.poll_interval</code></td>
+<td><code>"30s"</code></td>
+<td>How often to long-poll the SQS queue</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../ecr-push-triggered-deploys/">ecr-push-triggered-deploys.md</a> for the full design.</p>
+<h3 id="repo-discovery-repo-sourced-app-configuration">Repo Discovery (repo-sourced app configuration)<a class="headerlink" href="#repo-discovery-repo-sourced-app-configuration" title="Permanent link">&para;</a></h3>
+<p>Disabled by default. When enabled, the receiver scans GitHub repos for <code>.deploy-bot.json</code> files and merges discovered apps into the config. Operator-managed entries always take precedence.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>repo_discovery.enabled</code></td>
+<td><code>false</code></td>
+<td>Enable repo-sourced app discovery</td>
+</tr>
+<tr>
+<td><code>repo_discovery.poll_interval</code></td>
+<td><code>"5m"</code></td>
+<td>How often to scan repos</td>
+</tr>
+<tr>
+<td><code>repo_discovery.config_file</code></td>
+<td><code>".deploy-bot.json"</code></td>
+<td>File to look for in each repo. Configurable because the bot may be installed under a different name</td>
+</tr>
+<tr>
+<td><code>repo_discovery.repo_prefix</code></td>
+<td><code>""</code> (all)</td>
+<td>Only scan repos whose name starts with this prefix</td>
+</tr>
+<tr>
+<td><code>repo_discovery.discovered_path</code></td>
+<td><code>"/etc/deploy-bot/discovered.json"</code></td>
+<td>Where the bot reads merged discovered apps</td>
+</tr>
+<tr>
+<td><code>repo_discovery.configmap_name</code></td>
+<td><code>"deploy-bot-discovered"</code></td>
+<td>ConfigMap to write discovered apps to</td>
+</tr>
+<tr>
+<td><code>repo_discovery.configmap_namespace</code></td>
+<td>inferred from pod</td>
+<td>Namespace of the ConfigMap</td>
+</tr>
+<tr>
+<td><code>repo_discovery.rate_limit_floor</code></td>
+<td><code>500</code></td>
+<td>Pause scanning when GitHub rate limit remaining drops below this</td>
+</tr>
+<tr>
+<td><code>repo_discovery.warn_channel</code></td>
+<td>deploy channel</td>
+<td>Slack channel for conflict warnings</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../repo-sourced-app-discovery/">repo-sourced-app-discovery.md</a> for the full design.</p>
+<h3 id="apps">Apps<a class="headerlink" href="#apps" title="Permanent link">&para;</a></h3>
+<p>Each entry in the <code>apps[]</code> array defines one deployable application. App names include the environment (e.g. <code>myapp-dev</code>, <code>myapp-prod</code>) and must be unique.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app</code></td>
+<td></td>
+<td>App name (including environment, e.g. <code>myapp-prod</code>). Must be unique across all entries</td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td></td>
+<td><strong>Required.</strong> Environment name (e.g. <code>dev</code>, <code>prod</code>). Included in lock keys, branch names, PR titles, and all Slack messages</td>
+</tr>
+<tr>
+<td><code>kustomize_path</code></td>
+<td></td>
+<td>Path to the kustomization.yaml in the gitops repo</td>
+</tr>
+<tr>
+<td><code>ecr_repo</code></td>
+<td></td>
+<td>Full ECR repository URI (e.g. <code>123456789.dkr.ecr.us-east-1.amazonaws.com/myapp</code>)</td>
+</tr>
+<tr>
+<td><code>tag_pattern</code></td>
+<td></td>
+<td>Regex pattern for valid tags. Tags not matching are rejected by the modal and filtered by the ECR poller</td>
+</tr>
+<tr>
+<td><code>auto_deploy</code></td>
+<td><code>false</code></td>
+<td>When true, ECR push events for this app deploy automatically without human approval. Subject to <code>allow_prod_auto_deploy</code></td>
+</tr>
+<tr>
+<td><code>auto_deploy_approver_group</code></td>
+<td></td>
+<td>Slack ID to notify for ECR-triggered deploys. Channel ID (<code>C...</code>) posts there directly; user group ID (<code>S...</code>) mentions the group in deploy channel</td>
+</tr>
+</tbody>
+</table>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-prod&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/prod/kustomization.yaml&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;tag_pattern&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^v[0-9]+\\.[0-9]+\\.[0-9]+$&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="repo-sourced-app-config-deploy-botjson">Repo-sourced app config (<code>.deploy-bot.json</code>)<a class="headerlink" href="#repo-sourced-app-config-deploy-botjson" title="Permanent link">&para;</a></h2>
+<p>Repositories can declare their own app entries by placing a JSON file (default <code>.deploy-bot.json</code>) in the repo root on the default branch. The <code>apiVersion</code> field is required.</p>
+<p><strong>Recommended (v2)</strong> -- with <code>enforce_repo_naming</code> enabled, app name and kustomize path are derived from the repo name. Teams only specify what's unique to their app:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;apiVersion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot/v2&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dev&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Flexible (v1)</strong> -- all fields specified explicitly. Use without <code>enforce_repo_naming</code>, or for repos listed in <code>exempt_repos</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;apiVersion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot/v1&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-dev&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dev&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/dev/kustomization.yaml&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;tag_pattern&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^v\\d+\\.\\d+\\.\\d+$&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-prod&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/prod/kustomization.yaml&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;tag_pattern&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^v\\d+\\.\\d+\\.\\d+$&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>See <a href="../repo-sourced-app-discovery/">repo-sourced-app-discovery.md</a> for the full design including API version differences, naming conventions, and conflict handling.</p>
+<p>The file name is configurable via <code>repo_discovery.config_file</code> to support installations where the bot has a different name.</p>
+<p>Operator-managed apps always take precedence. If an <code>(app, environment)</code> pair exists in both operator config and a repo, the repo entry is discarded and a conflict warning is posted to Slack. Use <code>/deploy conflicts</code> or <code>@bot conflicts</code> to see current conflicts.</p>
+<h2 id="full-example">Full example<a class="headerlink" href="#full-example" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;github&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;org&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myorg&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gitops-repo&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;deployer_team&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deployers&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;approver_team&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;senior-engineers&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;slack&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;deploy_channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;C01234567&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;deployment&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;stale_duration&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2h&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;merge_method&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;squash&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;lock_ttl&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;5m&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;allow_prod_auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;aws&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;ecr_region&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;us-east-1&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;audit_bucket&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-audit-logs&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;audit_region&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;us-east-1&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;ecr_events&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;sqs_queue_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://sqs.us-east-1.amazonaws.com/123456789012/deploy-bot-ecr-events&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;poll_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;30s&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;repo_discovery&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;poll_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;5m&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;config_file&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;.deploy-bot.json&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;repo_prefix&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-prod&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/prod/kustomization.yaml&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;tag_pattern&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^v[0-9]+\\.[0-9]+\\.[0-9]+$&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
