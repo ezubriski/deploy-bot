@@ -19,6 +19,7 @@ import (
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/validator"
 )
 
 // --- test doubles ---
@@ -81,14 +82,17 @@ func (s *stubGH) RemoveLabel(_ context.Context, _ int, _ string) error          
 // stubValidator always approves/deploys and maps slack IDs to "gh-user".
 type stubValidator struct{}
 
-func (stubValidator) IsApprover(_ context.Context, _ string) (bool, string, string, error) {
-	return true, "gh-approver", "approver@example.com", nil
+func (stubValidator) IsApprover(_ context.Context, _ string) (bool, validator.Identity, error) {
+	return true, validator.Identity{GitHubLogin: "gh-approver", Email: "approver@example.com", Name: "Test Approver"}, nil
 }
-func (stubValidator) IsDeployer(_ context.Context, _ string) (bool, string, string, error) {
-	return true, "gh-deployer", "deployer@example.com", nil
+func (stubValidator) IsDeployer(_ context.Context, _ string) (bool, validator.Identity, error) {
+	return true, validator.Identity{GitHubLogin: "gh-deployer", Email: "deployer@example.com", Name: "Test Deployer"}, nil
 }
-func (stubValidator) SlackUserToGitHub(_ context.Context, _ string) (string, string, error) {
-	return "gh-user", "user@example.com", nil
+func (stubValidator) ResolveIdentity(_ context.Context, _ string) (validator.Identity, error) {
+	return validator.Identity{GitHubLogin: "gh-user", Email: "user@example.com", Name: "Test User"}, nil
+}
+func (stubValidator) SlackUserToGitHub(_ context.Context, _ string) (string, error) {
+	return "gh-user", nil
 }
 
 // stubECR considers all tags valid.

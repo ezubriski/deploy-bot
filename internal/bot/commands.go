@@ -70,7 +70,7 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 
 func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSelectedApp, preSelectedTag string) {
 	// Validate deployer
-	isMember, _, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
+	isMember, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to validate permissions: %v", err))
 		return
@@ -222,8 +222,9 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 		return
 	}
 
-	requesterGH, requesterEmail, err := b.validator.SlackUserToGitHub(ctx, cmd.UserID)
-	if err != nil {
+	cancellerIdent, err := b.validator.ResolveIdentity(ctx, cmd.UserID)
+	requesterGH := cancellerIdent.GitHubLogin
+	if err != nil || requesterGH == "" {
 		requesterGH = cmd.UserName
 		if requesterGH == "" {
 			requesterGH = "slack:" + cmd.UserID
@@ -250,8 +251,9 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 			PRNumber:     prNumber,
 			PRURL:        d.PRURL,
 			Requester:    requesterGH,
-			ActorEmail:   requesterEmail,
+			ActorEmail:   cancellerIdent.Email,
 			ActorSlackID: cmd.UserID,
+			ActorName:    cancellerIdent.Name,
 		})
 	}()
 	go func() {
@@ -279,7 +281,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", requesterGH), zap.String("slack_id", cmd.UserID))
+	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.Email), zap.String("user_name", cancellerIdent.Name), zap.String("slack_id", cmd.UserID))
 }
 
 func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg string) {
@@ -408,7 +410,7 @@ func eventIcon(eventType string) string {
 }
 
 func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appName string) {
-	isMember, _, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
+	isMember, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to validate permissions: %v", err))
 		return

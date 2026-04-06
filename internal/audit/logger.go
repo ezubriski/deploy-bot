@@ -52,6 +52,7 @@ type AuditEvent struct {
 	Reason       string    `json:"reason,omitempty"`
 	Rejection    string    `json:"rejection,omitempty"`
 	ActorEmail   string    `json:"actor_email,omitempty"`
+	ActorName    string    `json:"actor_name,omitempty"`
 	ActorSlackID string    `json:"actor_slack_id,omitempty"`
 	AutoDeploy   bool      `json:"auto_deploy,omitempty"`
 	MergeMethod  string    `json:"merge_method,omitempty"`
@@ -152,6 +153,7 @@ func (l *zapLogger) Log(_ context.Context, event AuditEvent) error {
 		zap.String("reason", event.Reason),
 		zap.String("rejection", event.Rejection),
 		zap.String("actor_email", event.ActorEmail),
+		zap.String("actor_name", event.ActorName),
 		zap.String("actor_slack_id", event.ActorSlackID),
 		zap.Bool("auto_deploy", event.AutoDeploy),
 		zap.String("merge_method", event.MergeMethod),

@@ -17,6 +17,7 @@ import (
 	githubPkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/sanitize"
 	"github.com/ezubriski/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/validator"
 )
 
 func (b *Bot) handleInteraction(ctx context.Context, evt socketmode.Event) {
@@ -52,7 +53,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	}
 
 	approverID := callback.User.ID
-	isMember, ghLogin, approverEmail, err := b.validator.IsApprover(ctx, approverID)
+	isMember, approverIdent, err := b.validator.IsApprover(ctx, approverID)
 	if err != nil {
 		b.log.Error("validate approver", zap.Error(err))
 		b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, "Failed to validate your permissions.")
@@ -201,7 +202,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 
 	var wg sync.WaitGroup
 	wg.Add(7)
-	go func() { defer wg.Done(); _ = b.gh.CommentApproved(ctx, prNumber, ghLogin) }()
+	go func() { defer wg.Done(); _ = b.gh.CommentApproved(ctx, prNumber, approverIdent.GitHubLogin) }()
 	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
 	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
 	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
@@ -227,9 +228,10 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			PRNumber:     prNumber,
 			PRURL:        d.PRURL,
 			Requester:    d.Requester,
-			Approver:     ghLogin,
-			ActorEmail:   approverEmail,
+			Approver:     approverIdent.GitHubLogin,
+			ActorEmail:   approverIdent.Email,
 			ActorSlackID: approverID,
+			ActorName:    approverIdent.Name,
 			MergeMethod:  cfg.Deployment.MergeMethod,
 		})
 	}()
@@ -249,7 +251,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	b.metrics.RecordDeploy(d.App, audit.EventApproved)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
+	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", approverIdent.Email), zap.String("approver_name", approverIdent.Name))
 }
 
 // notifyConflictFailed posts to the deploy channel that the merge failed due
@@ -343,7 +345,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	validationWg.Add(2)
 	go func() {
 		defer validationWg.Done()
-		isMember, _, _, approverErr = b.validator.IsApprover(ctx, approverID)
+		isMember, _, approverErr = b.validator.IsApprover(ctx, approverID)
 	}()
 	go func() {
 		defer validationWg.Done()
@@ -403,7 +405,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		baseBranch     string
 		branchErr      error
 		requesterGH    string
-		requesterEmail string
+		requesterIdent validator.Identity
 		prepWg         sync.WaitGroup
 	)
 	prepWg.Add(2)
@@ -414,11 +416,12 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	go func() {
 		defer prepWg.Done()
 		var ghErr error
-		requesterGH, requesterEmail, ghErr = b.validator.SlackUserToGitHub(ctx, requesterID)
-		if ghErr != nil {
+		requesterIdent, ghErr = b.validator.ResolveIdentity(ctx, requesterID)
+		requesterGH = requesterIdent.GitHubLogin
+		if ghErr != nil || requesterGH == "" {
 			requesterGH = callback.User.Name
 			if requesterGH == "" {
-				requesterGH = requesterID // Slack user ID as last resort
+				requesterGH = requesterID
 			}
 		}
 	}()
@@ -454,8 +457,9 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 				Environment:  env,
 				Tag:          tag,
 				Requester:    requesterGH,
-				ActorEmail:   requesterEmail,
+				ActorEmail:   requesterIdent.Email,
 				ActorSlackID: requesterID,
+				ActorName:    requesterIdent.Name,
 			})
 			b.log.Info("deploy no-op: tag already current", zap.String("app", appVal), zap.String("tag", tag))
 			return
@@ -526,14 +530,15 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 			PRURL:        prURL,
 			Requester:    requesterGH,
 			Reason:       reason,
-			ActorEmail:   requesterEmail,
+			ActorEmail:   requesterIdent.Email,
 			ActorSlackID: requesterID,
+			ActorName:    requesterIdent.Name,
 		})
 	}()
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterGH))
+	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterIdent.Email), zap.String("requester_name", requesterIdent.Name))
 }
 
 // postNoOpNotice posts a no-op notification to the appropriate Slack target.
@@ -577,7 +582,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 		return
 	}
 
-	isMember, ghLogin, approverEmail, err := b.validator.IsApprover(ctx, approverID)
+	isMember, rejecterIdent, err := b.validator.IsApprover(ctx, approverID)
 	if err != nil || !isMember {
 		_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
 			slack.MsgOptionText(fmt.Sprintf(
@@ -592,7 +597,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 
 	var wg sync.WaitGroup
 	wg.Add(8)
-	go func() { defer wg.Done(); _ = b.gh.CommentRejected(ctx, prNumber, ghLogin, rejReason) }()
+	go func() { defer wg.Done(); _ = b.gh.CommentRejected(ctx, prNumber, rejecterIdent.GitHubLogin, rejReason) }()
 	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
 	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
 	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
@@ -619,10 +624,11 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 			PRNumber:     prNumber,
 			PRURL:        d.PRURL,
 			Requester:    d.Requester,
-			Approver:     ghLogin,
+			Approver:     rejecterIdent.GitHubLogin,
 			Rejection:    rejReason,
-			ActorEmail:   approverEmail,
+			ActorEmail:   rejecterIdent.Email,
 			ActorSlackID: approverID,
+			ActorName:    rejecterIdent.Name,
 		})
 	}()
 	go func() {
@@ -641,7 +647,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	b.metrics.RecordDeploy(d.App, audit.EventRejected)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment rejected", zap.Int("pr", prNumber), zap.String("approver", ghLogin))
+	b.log.Info("deployment rejected", zap.Int("pr", prNumber), zap.String("approver", rejecterIdent.Email), zap.String("approver_name", rejecterIdent.Name))
 }
 
 func (b *Bot) replaceButtons(ctx context.Context, callback slack.InteractionCallback, statusText string) {

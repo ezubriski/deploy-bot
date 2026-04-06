@@ -299,8 +299,9 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 		return
 	}
 
-	requesterGH, requesterEmail, err := b.validator.SlackUserToGitHub(ctx, evt.UserID)
-	if err != nil {
+	cancellerIdent, err := b.validator.ResolveIdentity(ctx, evt.UserID)
+	requesterGH := cancellerIdent.GitHubLogin
+	if err != nil || requesterGH == "" {
 		requesterGH = "slack:" + evt.UserID
 	}
 
@@ -322,8 +323,9 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 			PRNumber:     prNumber,
 			PRURL:        d.PRURL,
 			Requester:    requesterGH,
-			ActorEmail:   requesterEmail,
+			ActorEmail:   cancellerIdent.Email,
 			ActorSlackID: evt.UserID,
+			ActorName:    cancellerIdent.Name,
 		})
 	}()
 	go func() {
@@ -349,7 +351,7 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled via mention", zap.Int("pr", prNumber), zap.String("user", requesterGH), zap.String("slack_id", evt.UserID))
+	b.log.Info("deployment cancelled via mention", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.Email), zap.String("user_name", cancellerIdent.Name), zap.String("slack_id", evt.UserID))
 }
 
 func (b *Bot) handleMentionNudge(ctx context.Context, evt queue.AppMentionEvent, prArg string) {
@@ -404,7 +406,7 @@ func extractUserID(token string) string {
 func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent, appName, tag, approverID, reason string) {
 	const usage = "Usage: `deploy <app-env> <tag> [@approver] [reason...]`"
 
-	isMember, _, _, err := b.validator.IsDeployer(ctx, evt.UserID)
+	isMember, _, err := b.validator.IsDeployer(ctx, evt.UserID)
 	if err != nil {
 		b.replyMentionError(ctx, evt, fmt.Sprintf("Failed to validate permissions: %v", err), usage)
 		return
@@ -424,7 +426,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 
 	// Validate approver if specified.
 	if approverID != "" {
-		isApprover, _, _, err := b.validator.IsApprover(ctx, approverID)
+		isApprover, _, err := b.validator.IsApprover(ctx, approverID)
 		if err != nil {
 			b.replyMentionError(ctx, evt, fmt.Sprintf("Could not validate approver: %v", err), usage)
 			return
@@ -464,8 +466,9 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		return
 	}
 
-	requesterGH, requesterEmail, err := b.validator.SlackUserToGitHub(ctx, evt.UserID)
-	if err != nil {
+	requesterIdent, err := b.validator.ResolveIdentity(ctx, evt.UserID)
+	requesterGH := requesterIdent.GitHubLogin
+	if err != nil || requesterGH == "" {
 		requesterGH = "slack:" + evt.UserID
 	}
 
@@ -537,8 +540,9 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		PRURL:        prURL,
 		Requester:    requesterGH,
 		Reason:       reason,
-		ActorEmail:   requesterEmail,
+		ActorEmail:   requesterIdent.Email,
 		ActorSlackID: evt.UserID,
+		ActorName:    requesterIdent.Name,
 	})
 
 	b.metrics.RecordDeploy(appName, audit.EventRequested)
@@ -548,11 +552,11 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		"Deployment of *%s* (%s) `%s` requested — <%s|PR #%d> created. Awaiting approval in <#%s>.\n_Tip: the slash command (`/deploy`) provides a guided experience with tag selection and approver assignment._",
 		appName, env, tag, prURL, prNumber, deployChannel,
 	))
-	b.log.Info("deployment requested via mention", zap.String("app", appName), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterGH), zap.String("slack_id", evt.UserID))
+	b.log.Info("deployment requested via mention", zap.String("app", appName), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterIdent.Email), zap.String("requester_name", requesterIdent.Name), zap.String("slack_id", evt.UserID))
 }
 
 func (b *Bot) handleMentionRollback(ctx context.Context, evt queue.AppMentionEvent, appName string) {
-	isMember, _, _, err := b.validator.IsDeployer(ctx, evt.UserID)
+	isMember, _, err := b.validator.IsDeployer(ctx, evt.UserID)
 	if err != nil {
 		b.replyMentionError(ctx, evt, fmt.Sprintf("Failed to validate permissions: %v", err), "Usage: `rollback <app-env>`")
 		return
