@@ -250,7 +250,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 			Tag:          d.Tag,
 			PRNumber:     prNumber,
 			PRURL:        d.PRURL,
-			Requester:    requesterGH,
+			Requester:    cancellerIdent.String(),
 			ActorEmail:   cancellerIdent.Email,
 			ActorSlackID: cmd.UserID,
 			ActorName:    cancellerIdent.Name,
@@ -281,7 +281,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.Email), zap.String("user_name", cancellerIdent.Name), zap.String("slack_id", cmd.UserID))
+	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.String()))
 }
 
 func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg string) {

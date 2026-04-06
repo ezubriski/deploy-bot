@@ -23,6 +23,20 @@ type Identity struct {
 	Name        string `json:"name"` // Slack profile display name (real name)
 }
 
+// String returns the identity in "Name (email)" format for logs and audit.
+func (id Identity) String() string {
+	if id.Name != "" && id.Email != "" {
+		return id.Name + " (" + id.Email + ")"
+	}
+	if id.Email != "" {
+		return id.Email
+	}
+	if id.Name != "" {
+		return id.Name
+	}
+	return ""
+}
+
 type cachedIdentity = Identity
 
 type Validator struct {

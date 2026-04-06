@@ -228,7 +228,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			PRNumber:     prNumber,
 			PRURL:        d.PRURL,
 			Requester:    d.Requester,
-			Approver:     approverIdent.GitHubLogin,
+			Approver:     approverIdent.String(),
 			ActorEmail:   approverIdent.Email,
 			ActorSlackID: approverID,
 			ActorName:    approverIdent.Name,
@@ -251,7 +251,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	b.metrics.RecordDeploy(d.App, audit.EventApproved)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", approverIdent.Email), zap.String("approver_name", approverIdent.Name))
+	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", approverIdent.String()))
 }
 
 // notifyConflictFailed posts to the deploy channel that the merge failed due
@@ -456,7 +456,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 				App:          appVal,
 				Environment:  env,
 				Tag:          tag,
-				Requester:    requesterGH,
+				Requester:    requesterIdent.String(),
 				ActorEmail:   requesterIdent.Email,
 				ActorSlackID: requesterID,
 				ActorName:    requesterIdent.Name,
@@ -528,7 +528,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 			Tag:          tag,
 			PRNumber:     prNumber,
 			PRURL:        prURL,
-			Requester:    requesterGH,
+			Requester:    requesterIdent.String(),
 			Reason:       reason,
 			ActorEmail:   requesterIdent.Email,
 			ActorSlackID: requesterID,
@@ -538,7 +538,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterIdent.Email), zap.String("requester_name", requesterIdent.Name))
+	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterIdent.String()))
 }
 
 // postNoOpNotice posts a no-op notification to the appropriate Slack target.
@@ -624,7 +624,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 			PRNumber:     prNumber,
 			PRURL:        d.PRURL,
 			Requester:    d.Requester,
-			Approver:     rejecterIdent.GitHubLogin,
+			Approver:     rejecterIdent.String(),
 			Rejection:    rejReason,
 			ActorEmail:   rejecterIdent.Email,
 			ActorSlackID: approverID,
@@ -647,7 +647,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	b.metrics.RecordDeploy(d.App, audit.EventRejected)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment rejected", zap.Int("pr", prNumber), zap.String("approver", rejecterIdent.Email), zap.String("approver_name", rejecterIdent.Name))
+	b.log.Info("deployment rejected", zap.Int("pr", prNumber), zap.String("approver", rejecterIdent.String()))
 }
 
 func (b *Bot) replaceButtons(ctx context.Context, callback slack.InteractionCallback, statusText string) {

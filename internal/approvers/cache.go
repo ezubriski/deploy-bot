@@ -61,10 +61,10 @@ func (c *Cache) Refresh(ctx context.Context) error {
 
 	ids := make([]string, 0, len(members))
 	for _, login := range members {
-		slackID, err := c.resolveSlackID(ctx, login)
+		slackID, email, err := c.resolveSlackID(ctx, login)
 		if err != nil {
-			c.log.Warn("approver cache: could not resolve Slack ID",
-				zap.String("github_login", login), zap.Error(err))
+			c.log.Warn("approver cache: could not resolve team member",
+				zap.String("email", email), zap.Error(err))
 			continue
 		}
 		ids = append(ids, slackID)
@@ -133,19 +133,20 @@ func (c *Cache) fetchTeamMembers(ctx context.Context) ([]string, error) {
 }
 
 // resolveSlackID maps a GitHub login to a Slack user ID via GitHub profile
-// email → Slack user lookup by email.
-func (c *Cache) resolveSlackID(ctx context.Context, githubLogin string) (string, error) {
+// email → Slack user lookup by email. Returns the email alongside the Slack
+// ID for logging purposes.
+func (c *Cache) resolveSlackID(ctx context.Context, githubLogin string) (slackID, email string, err error) {
 	ghUser, _, err := c.gh.Users.Get(ctx, githubLogin)
 	if err != nil {
-		return "", fmt.Errorf("get github user %s: %w", githubLogin, err)
+		return "", "", fmt.Errorf("could not find github user for email: %w", err)
 	}
-	email := ghUser.GetEmail()
+	email = ghUser.GetEmail()
 	if email == "" {
-		return "", fmt.Errorf("github user %s has no public email", githubLogin)
+		return "", "", fmt.Errorf("github user has no public email")
 	}
 	slackUser, err := c.slack.GetUserByEmailContext(ctx, email)
 	if err != nil {
-		return "", fmt.Errorf("lookup slack user for %s: %w", email, err)
+		return "", email, fmt.Errorf("could not find slack user for email: %w", err)
 	}
-	return slackUser.ID, nil
+	return slackUser.ID, email, nil
 }

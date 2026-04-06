@@ -322,7 +322,7 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 			Tag:          d.Tag,
 			PRNumber:     prNumber,
 			PRURL:        d.PRURL,
-			Requester:    requesterGH,
+			Requester:    cancellerIdent.String(),
 			ActorEmail:   cancellerIdent.Email,
 			ActorSlackID: evt.UserID,
 			ActorName:    cancellerIdent.Name,
@@ -351,7 +351,7 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled via mention", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.Email), zap.String("user_name", cancellerIdent.Name), zap.String("slack_id", evt.UserID))
+	b.log.Info("deployment cancelled via mention", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.String()))
 }
 
 func (b *Bot) handleMentionNudge(ctx context.Context, evt queue.AppMentionEvent, prArg string) {
@@ -538,7 +538,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		Tag:          tag,
 		PRNumber:     prNumber,
 		PRURL:        prURL,
-		Requester:    requesterGH,
+		Requester:    requesterIdent.String(),
 		Reason:       reason,
 		ActorEmail:   requesterIdent.Email,
 		ActorSlackID: evt.UserID,
@@ -552,7 +552,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		"Deployment of *%s* (%s) `%s` requested — <%s|PR #%d> created. Awaiting approval in <#%s>.\n_Tip: the slash command (`/deploy`) provides a guided experience with tag selection and approver assignment._",
 		appName, env, tag, prURL, prNumber, deployChannel,
 	))
-	b.log.Info("deployment requested via mention", zap.String("app", appName), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterIdent.Email), zap.String("requester_name", requesterIdent.Name), zap.String("slack_id", evt.UserID))
+	b.log.Info("deployment requested via mention", zap.String("app", appName), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterIdent.String()))
 }
 
 func (b *Bot) handleMentionRollback(ctx context.Context, evt queue.AppMentionEvent, appName string) {
