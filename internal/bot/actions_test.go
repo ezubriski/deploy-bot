@@ -81,14 +81,14 @@ func (s *stubGH) RemoveLabel(_ context.Context, _ int, _ string) error          
 // stubValidator always approves/deploys and maps slack IDs to "gh-user".
 type stubValidator struct{}
 
-func (stubValidator) IsApprover(_ context.Context, _ string) (bool, string, error) {
-	return true, "gh-approver", nil
+func (stubValidator) IsApprover(_ context.Context, _ string) (bool, string, string, error) {
+	return true, "gh-approver", "approver@example.com", nil
 }
-func (stubValidator) IsDeployer(_ context.Context, _ string) (bool, string, error) {
-	return true, "gh-deployer", nil
+func (stubValidator) IsDeployer(_ context.Context, _ string) (bool, string, string, error) {
+	return true, "gh-deployer", "deployer@example.com", nil
 }
-func (stubValidator) SlackUserToGitHub(_ context.Context, _ string) (string, error) {
-	return "gh-user", nil
+func (stubValidator) SlackUserToGitHub(_ context.Context, _ string) (string, string, error) {
+	return "gh-user", "user@example.com", nil
 }
 
 // stubECR considers all tags valid.

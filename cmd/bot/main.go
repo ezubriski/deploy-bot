@@ -255,7 +255,8 @@ func logProdAutoDeployGuard(cfg *config.Config, auditLog audit.Logger, log *zap.
 			zap.Strings("apps", prodAutoDeployApps),
 		)
 		_ = auditLog.Log(context.Background(), audit.AuditEvent{
-			EventType: "startup",
+			EventType: audit.EventStartup,
+			Trigger:   audit.TriggerStartup,
 			Reason:    fmt.Sprintf("prod auto-deploy apps: %v", prodAutoDeployApps),
 		})
 	}

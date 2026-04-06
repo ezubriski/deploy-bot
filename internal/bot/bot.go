@@ -38,9 +38,9 @@ type githubClient interface {
 
 // deployValidator is the subset of *validator.Validator methods used by the bot.
 type deployValidator interface {
-	IsApprover(ctx context.Context, slackID string) (bool, string, error)
-	IsDeployer(ctx context.Context, slackID string) (bool, string, error)
-	SlackUserToGitHub(ctx context.Context, slackID string) (string, error)
+	IsApprover(ctx context.Context, slackID string) (bool, string, string, error)
+	IsDeployer(ctx context.Context, slackID string) (bool, string, string, error)
+	SlackUserToGitHub(ctx context.Context, slackID string) (string, string, error)
 }
 
 // tagCache is the subset of *ecr.Cache methods used by the bot.

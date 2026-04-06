@@ -31,46 +31,53 @@ func New(httpClient *http.Client, slackClient *slack.Client, cfg *config.Config,
 // SlackUserToGitHub resolves a Slack user ID to their GitHub login.
 // It first checks the github.users config map (for users with private GitHub
 // emails), then falls back to searching GitHub by Slack profile email.
-func (v *Validator) SlackUserToGitHub(ctx context.Context, slackUserID string) (string, error) {
-	if login, ok := v.cfg.GitHub.Users[slackUserID]; ok {
-		return login, nil
+// SlackUserToGitHub resolves a Slack user ID to their GitHub login and email.
+// The email is the Slack profile email used for the GitHub search.
+// For users mapped via github.users config, email is empty (no Slack lookup needed).
+func (v *Validator) SlackUserToGitHub(ctx context.Context, slackUserID string) (login string, email string, err error) {
+	if l, ok := v.cfg.GitHub.Users[slackUserID]; ok {
+		return l, "", nil
 	}
 
 	info, err := v.slack.GetUserInfoContext(ctx, slackUserID)
 	if err != nil {
-		return "", fmt.Errorf("get slack user info: %w", err)
+		return "", "", fmt.Errorf("get slack user info: %w", err)
 	}
-	email := info.Profile.Email
+	email = info.Profile.Email
 	if email == "" {
-		return "", fmt.Errorf("slack user %s has no email", slackUserID)
+		return "", "", fmt.Errorf("slack user %s has no email", slackUserID)
 	}
 
 	result, _, err := v.gh.Search.Users(ctx, fmt.Sprintf("%s in:email", email), nil)
 	if err != nil {
-		return "", fmt.Errorf("search github user: %w", err)
+		return "", email, fmt.Errorf("search github user: %w", err)
 	}
 	if result.GetTotal() == 0 || len(result.Users) == 0 {
-		return "", fmt.Errorf("no github user found for email %s", email)
+		return "", email, fmt.Errorf("no github user found for email %s", email)
 	}
-	return result.Users[0].GetLogin(), nil
+	return result.Users[0].GetLogin(), email, nil
 }
 
 // IsDeployer checks if a Slack user is a member of the deployer GitHub team.
-func (v *Validator) IsDeployer(ctx context.Context, slackUserID string) (bool, string, error) {
-	login, err := v.SlackUserToGitHub(ctx, slackUserID)
+// Returns the GitHub login and Slack profile email alongside the membership check.
+func (v *Validator) IsDeployer(ctx context.Context, slackUserID string) (bool, string, string, error) {
+	login, email, err := v.SlackUserToGitHub(ctx, slackUserID)
 	if err != nil {
-		return false, "", err
+		return false, "", email, err
 	}
-	return v.isTeamMember(ctx, login, v.cfg.GitHub.DeployerTeam)
+	ok, ghLogin, err := v.isTeamMember(ctx, login, v.cfg.GitHub.DeployerTeam)
+	return ok, ghLogin, email, err
 }
 
 // IsApprover checks if a Slack user is a member of the approver GitHub team.
-func (v *Validator) IsApprover(ctx context.Context, slackUserID string) (bool, string, error) {
-	login, err := v.SlackUserToGitHub(ctx, slackUserID)
+// Returns the GitHub login and Slack profile email alongside the membership check.
+func (v *Validator) IsApprover(ctx context.Context, slackUserID string) (bool, string, string, error) {
+	login, email, err := v.SlackUserToGitHub(ctx, slackUserID)
 	if err != nil {
-		return false, "", err
+		return false, "", email, err
 	}
-	return v.isTeamMember(ctx, login, v.cfg.GitHub.ApproverTeam)
+	ok, ghLogin, err := v.isTeamMember(ctx, login, v.cfg.GitHub.ApproverTeam)
+	return ok, ghLogin, email, err
 }
 
 func (v *Validator) isTeamMember(ctx context.Context, githubLogin, teamSlug string) (bool, string, error) {

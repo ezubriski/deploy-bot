@@ -278,13 +278,16 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			_ = s.audit.Log(ctx, audit.AuditEvent{
-				EventType:   audit.EventExpired,
-				App:         d.App,
-				Environment: d.Environment,
-				Tag:         d.Tag,
-				PRNumber:    d.PRNumber,
-				PRURL:       d.PRURL,
-				Requester:   d.Requester,
+				EventType:    audit.EventExpired,
+				Trigger:      audit.TriggerSweeper,
+				App:          d.App,
+				Environment:  d.Environment,
+				Tag:          d.Tag,
+				PRNumber:     d.PRNumber,
+				PRURL:        d.PRURL,
+				Requester:    d.Requester,
+				Reason:       "stale duration exceeded",
+				ActorSlackID: d.RequesterID,
 			})
 		}()
 		s.metrics.RecordDeploy(d.App, audit.EventExpired)

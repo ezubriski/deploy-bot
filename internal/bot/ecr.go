@@ -85,6 +85,7 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 			b.postNoOpNotice(ctx, evt.App, noopMsg)
 			_ = b.auditLog.Log(ctx, audit.AuditEvent{
 				EventType:   audit.EventNoop,
+				Trigger:     audit.TriggerECRPush,
 				App:         evt.App,
 				Environment: env,
 				Tag:         evt.Tag,
@@ -189,6 +190,7 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventApproved,
+			Trigger:     audit.TriggerECRPush,
 			App:         evt.App,
 			Environment: env,
 			Tag:         evt.Tag,
@@ -196,6 +198,8 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 			PRURL:       prURL,
 			Requester:   ecrRequesterName,
 			Approver:    ecrRequesterName,
+			AutoDeploy:  true,
+			MergeMethod: cfg.Deployment.MergeMethod,
 		})
 	}()
 	go func() {
@@ -266,6 +270,7 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventRequested,
+			Trigger:     audit.TriggerECRPush,
 			App:         evt.App,
 			Environment: env,
 			Tag:         evt.Tag,
@@ -360,13 +365,15 @@ func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEv
 	go func() {
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:   "conflict_failed",
+			EventType:   audit.EventConflictFailed,
+			Trigger:     audit.TriggerECRPush,
 			App:         evt.App,
 			Environment: env,
 			Tag:         evt.Tag,
 			PRNumber:    prNumber,
 			PRURL:       prURL,
 			Requester:   ecrRequesterName,
+			Reason:      "merge conflict could not be auto-resolved",
 		})
 	}()
 	wg.Wait()

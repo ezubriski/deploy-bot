@@ -70,7 +70,7 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 
 func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSelectedApp, preSelectedTag string) {
 	// Validate deployer
-	isMember, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
+	isMember, _, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to validate permissions: %v", err))
 		return
@@ -222,7 +222,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 		return
 	}
 
-	requesterGH, err := b.validator.SlackUserToGitHub(ctx, cmd.UserID)
+	requesterGH, requesterEmail, err := b.validator.SlackUserToGitHub(ctx, cmd.UserID)
 	if err != nil {
 		requesterGH = cmd.UserName
 	}
@@ -239,13 +239,16 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	go func() {
 		defer wg.Done()
 		_ = b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:   audit.EventCancelled,
-			App:         d.App,
-			Environment: d.Environment,
-			Tag:         d.Tag,
-			PRNumber:    prNumber,
-			PRURL:       d.PRURL,
-			Requester:   requesterGH,
+			EventType:    audit.EventCancelled,
+			Trigger:      audit.TriggerSlashCommand,
+			App:          d.App,
+			Environment:  d.Environment,
+			Tag:          d.Tag,
+			PRNumber:     prNumber,
+			PRURL:        d.PRURL,
+			Requester:    requesterGH,
+			ActorEmail:   requesterEmail,
+			ActorSlackID: cmd.UserID,
 		})
 	}()
 	go func() {
@@ -402,7 +405,7 @@ func eventIcon(eventType string) string {
 }
 
 func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appName string) {
-	isMember, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
+	isMember, _, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to validate permissions: %v", err))
 		return
