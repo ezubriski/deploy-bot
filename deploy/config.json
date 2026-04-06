@@ -1,10 +1,11 @@
 {
   "github": {
     "org": "myorg",
-    "repo": "gitops-repo",
-    "deployer_team": "deployers",
-    "approver_team": "senior-engineers"
+    "repo": "gitops-repo"
   },
+  "authorization": [
+    {"type": "github_teams", "value": ["deployers"]}
+  ],
   "slack": {
     "deploy_channel": "C01234567"
   },

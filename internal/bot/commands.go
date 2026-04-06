@@ -70,13 +70,13 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 
 func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSelectedApp, preSelectedTag string) {
 	// Validate deployer
-	isMember, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
+	isMember, _, err := b.validator.IsMember(ctx, cmd.UserID)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to validate permissions: %v", err))
 		return
 	}
 	if !isMember {
-		b.postEphemeralCommand(ctx, cmd, "You are not a member of the deployer team.")
+		b.postEphemeralCommand(ctx, cmd, "You are not a member of the authorized team.")
 		return
 	}
 
@@ -310,7 +310,7 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 				channel = group // post to the approver channel directly
 			}
 		} else {
-			approver = "approver team"
+			approver = "team"
 		}
 	}
 	_, _, err = b.slack.PostMessageContext(ctx, channel,
@@ -408,13 +408,13 @@ func eventIcon(eventType string) string {
 }
 
 func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appName string) {
-	isMember, _, err := b.validator.IsDeployer(ctx, cmd.UserID)
+	isMember, _, err := b.validator.IsMember(ctx, cmd.UserID)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to validate permissions: %v", err))
 		return
 	}
 	if !isMember {
-		b.postEphemeralCommand(ctx, cmd, "You are not a member of the deployer team.")
+		b.postEphemeralCommand(ctx, cmd, "You are not a member of the authorized team.")
 		return
 	}
 

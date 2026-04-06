@@ -79,14 +79,11 @@ func (s *stubGH) CommentNoOp(_ context.Context, _ int, _, _ string) error       
 func (s *stubGH) CommentAutoDeployFailed(_ context.Context, _ int, _ error) error    { return nil }
 func (s *stubGH) RemoveLabel(_ context.Context, _ int, _ string) error               { return nil }
 
-// stubValidator always approves/deploys and maps slack IDs to "gh-user".
+// stubValidator always authorizes and maps slack IDs to "gh-user".
 type stubValidator struct{}
 
-func (stubValidator) IsApprover(_ context.Context, _ string) (bool, validator.Identity, error) {
-	return true, validator.Identity{GitHubLogin: "gh-approver", Email: "approver@example.com", Name: "Test Approver"}, nil
-}
-func (stubValidator) IsDeployer(_ context.Context, _ string) (bool, validator.Identity, error) {
-	return true, validator.Identity{GitHubLogin: "gh-deployer", Email: "deployer@example.com", Name: "Test Deployer"}, nil
+func (stubValidator) IsMember(_ context.Context, _ string) (bool, validator.Identity, error) {
+	return true, validator.Identity{GitHubLogin: "gh-member", Email: "member@example.com", Name: "Test Member"}, nil
 }
 func (stubValidator) ResolveIdentity(_ context.Context, _ string) (validator.Identity, error) {
 	return validator.Identity{GitHubLogin: "gh-user", Email: "user@example.com", Name: "Test User"}, nil

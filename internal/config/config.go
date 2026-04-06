@@ -16,13 +16,57 @@ import (
 )
 
 type Config struct {
-	GitHub        GitHubConfig        `json:"github"`
-	Slack         SlackConfig         `json:"slack"`
-	Deployment    DeploymentConfig    `json:"deployment"`
-	AWS           AWSConfig           `json:"aws"`
-	ECREvents     ECREventsConfig     `json:"ecr_events,omitempty"`
-	RepoDiscovery RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
-	Apps          []AppConfig         `json:"apps"`
+	GitHub        GitHubConfig         `json:"github"`
+	Slack         SlackConfig          `json:"slack"`
+	Authorization []AuthorizationEntry `json:"authorization"`
+	Deployment    DeploymentConfig     `json:"deployment"`
+	AWS           AWSConfig            `json:"aws"`
+	ECREvents     ECREventsConfig      `json:"ecr_events,omitempty"`
+	RepoDiscovery RepoDiscoveryConfig  `json:"repo_discovery,omitempty"`
+	Apps          []AppConfig          `json:"apps"`
+}
+
+// AuthorizationEntry defines a single authorization source. A user is
+// authorized if they match ANY entry (OR logic). Value is always an array
+// of strings.
+type AuthorizationEntry struct {
+	Type  string   `json:"type"`
+	Value []string `json:"value"`
+}
+
+// Authorization type constants.
+const (
+	AuthGitHubTeams     = "github_teams"
+	AuthGitHubUsers     = "github_users"
+	AuthSlackUserGroups = "slack_user_groups"
+	AuthSlackEmails     = "slack_emails"
+)
+
+// ParseAuthValues returns the flattened values for each authorization source type.
+func ParseAuthValues(entries []AuthorizationEntry) (gitHubTeams, gitHubUsers, slackUserGroups, slackEmails []string, err error) {
+	for i, e := range entries {
+		switch e.Type {
+		case AuthGitHubTeams:
+			gitHubTeams = append(gitHubTeams, e.Value...)
+		case AuthGitHubUsers:
+			gitHubUsers = append(gitHubUsers, e.Value...)
+		case AuthSlackUserGroups:
+			slackUserGroups = append(slackUserGroups, e.Value...)
+		case AuthSlackEmails:
+			slackEmails = append(slackEmails, e.Value...)
+		default:
+			return nil, nil, nil, nil, fmt.Errorf("authorization[%d]: unknown type %q", i, e.Type)
+		}
+	}
+	return
+}
+
+// ParsedAuthorization holds the flattened authorization sources after parsing.
+type ParsedAuthorization struct {
+	GitHubTeams     []string
+	GitHubUsers     []string
+	SlackUserGroups []string
+	SlackEmails     []string
 }
 
 // RepoDiscoveryConfig holds settings for repo-sourced app discovery.
@@ -127,10 +171,8 @@ func (e *ECREventsConfig) PollIntervalDuration() time.Duration {
 }
 
 type GitHubConfig struct {
-	Org          string `json:"org"`
-	Repo         string `json:"repo"`
-	DeployerTeam string `json:"deployer_team"`
-	ApproverTeam string `json:"approver_team"`
+	Org  string `json:"org"`
+	Repo string `json:"repo"`
 	// Users maps Slack user IDs to GitHub logins for users whose GitHub email
 	// is private. Takes precedence over the Slack email → GitHub search lookup.
 	Users map[string]string `json:"users,omitempty"`

@@ -141,7 +141,8 @@ func printConfigText(path string, cfg *config.Config, errs []config.ValidationEr
 		name   string
 		checks []string
 	}{
-		{"github", []string{"org", "repo", "deployer_team", "approver_team"}},
+		{"github", []string{"org", "repo"}},
+		{"authorization", nil},
 		{"slack", []string{"deploy_channel"}},
 		{"deployment", []string{"stale_duration", "lock_ttl", "merge_method"}},
 		{"aws", []string{"ecr_region"}},
@@ -153,6 +154,16 @@ func printConfigText(path string, cfg *config.Config, errs []config.ValidationEr
 	}
 
 	for _, s := range sections {
+		if s.checks == nil {
+			// List-based section (e.g. authorization): check for section-level errors.
+			key := s.name + "."
+			if msg, ok := errMap[key]; ok {
+				fmt.Printf("  \u2717 %s: %s\n", s.name, msg)
+			} else {
+				fmt.Printf("  \u2713 %s (%d entries)\n", s.name, len(cfg.Authorization))
+			}
+			continue
+		}
 		for _, field := range s.checks {
 			key := s.name + "." + field
 			if msg, ok := errMap[key]; ok {

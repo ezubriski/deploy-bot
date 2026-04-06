@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -33,15 +34,26 @@ func ValidateConfig(cfg *Config) []ValidationError {
 	if cfg.GitHub.Repo == "" {
 		add("github", "repo", "required")
 	}
-	if cfg.GitHub.DeployerTeam == "" {
-		add("github", "deployer_team", "required")
-	}
-	if cfg.GitHub.ApproverTeam == "" {
-		add("github", "approver_team", "required")
-	}
 	if cfg.GitHub.RateLimitRetryWait != "" {
 		if _, err := time.ParseDuration(cfg.GitHub.RateLimitRetryWait); err != nil {
 			add("github", "rate_limit_retry_wait", fmt.Sprintf("invalid duration: %v", err))
+		}
+	}
+
+	// --- authorization ---
+	if len(cfg.Authorization) == 0 {
+		add("authorization", "", "at least one entry required")
+	}
+	ghTeams, ghUsers, _, slackEmails, parseErr := ParseAuthValues(cfg.Authorization)
+	if parseErr != nil {
+		add("authorization", "", parseErr.Error())
+	}
+	if (len(ghTeams) > 0 || len(ghUsers) > 0) && cfg.GitHub.Org == "" {
+		add("authorization", "", "github_team/github_user entries require github.org to be set")
+	}
+	for i, email := range slackEmails {
+		if !strings.Contains(email, "@") {
+			add("authorization", fmt.Sprintf("slack_emails[%d]", i), fmt.Sprintf("expected email address, got %q", email))
 		}
 	}
 

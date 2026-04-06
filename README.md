@@ -221,8 +221,7 @@ config.json
 
   ✓ github.org
   ✓ github.repo
-  ✓ github.deployer_team
-  ✓ github.approver_team
+  ✓ authorization (at least one entry)
   ✓ slack.deploy_channel
   ✓ deployment.stale_duration
   ✓ deployment.lock_ttl

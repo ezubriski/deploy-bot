@@ -404,13 +404,13 @@ func extractUserID(token string) string {
 func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent, appName, tag, approverID, reason string) {
 	const usage = "Usage: `deploy <app-env> <tag> [@approver] [reason...]`"
 
-	isMember, _, err := b.validator.IsDeployer(ctx, evt.UserID)
+	isMember, _, err := b.validator.IsMember(ctx, evt.UserID)
 	if err != nil {
 		b.replyMentionError(ctx, evt, fmt.Sprintf("Failed to validate permissions: %v", err), usage)
 		return
 	}
 	if !isMember {
-		b.replyMentionError(ctx, evt, "You are not a member of the deployer team.", usage)
+		b.replyMentionError(ctx, evt, "You are not a member of the authorized team.", usage)
 		return
 	}
 
@@ -424,13 +424,13 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 
 	// Validate approver if specified.
 	if approverID != "" {
-		isApprover, _, err := b.validator.IsApprover(ctx, approverID)
+		isApprover, _, err := b.validator.IsMember(ctx, approverID)
 		if err != nil {
 			b.replyMentionError(ctx, evt, fmt.Sprintf("Could not validate approver: %v", err), usage)
 			return
 		}
 		if !isApprover {
-			b.replyMentionError(ctx, evt, fmt.Sprintf("<@%s> is not a member of the approver team.", approverID), usage)
+			b.replyMentionError(ctx, evt, fmt.Sprintf("<@%s> is not a member of the authorized team.", approverID), usage)
 			return
 		}
 	}
@@ -552,13 +552,13 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 }
 
 func (b *Bot) handleMentionRollback(ctx context.Context, evt queue.AppMentionEvent, appName string) {
-	isMember, _, err := b.validator.IsDeployer(ctx, evt.UserID)
+	isMember, _, err := b.validator.IsMember(ctx, evt.UserID)
 	if err != nil {
 		b.replyMentionError(ctx, evt, fmt.Sprintf("Failed to validate permissions: %v", err), "Usage: `rollback <app-env>`")
 		return
 	}
 	if !isMember {
-		b.replyMentionError(ctx, evt, "You are not a member of the deployer team.", "Usage: `rollback <app-env>`")
+		b.replyMentionError(ctx, evt, "You are not a member of the authorized team.", "Usage: `rollback <app-env>`")
 		return
 	}
 

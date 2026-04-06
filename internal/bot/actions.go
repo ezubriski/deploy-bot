@@ -53,14 +53,14 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	}
 
 	approverID := callback.User.ID
-	isMember, approverIdent, err := b.validator.IsApprover(ctx, approverID)
+	isMember, approverIdent, err := b.validator.IsMember(ctx, approverID)
 	if err != nil {
 		b.log.Error("validate approver", zap.Error(err))
 		b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, "Failed to validate your permissions.")
 		return
 	}
 	if !isMember {
-		b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, "You are not a member of the approver team.")
+		b.replyEphemeral(ctx, callback.Channel.ID, callback.User.ID, "You are not a member of the authorized team.")
 		return
 	}
 
@@ -341,7 +341,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	validationWg.Add(2)
 	go func() {
 		defer validationWg.Done()
-		isMember, _, approverErr = b.validator.IsApprover(ctx, approverID)
+		isMember, _, approverErr = b.validator.IsMember(ctx, approverID)
 	}()
 	go func() {
 		defer validationWg.Done()
@@ -350,7 +350,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	validationWg.Wait()
 
 	if approverErr != nil || !isMember {
-		msg := fmt.Sprintf("<@%s> — deploy request for *%s* `%s` failed: selected approver <@%s> is not a member of the approver team.", requesterID, appVal, tag, approverID)
+		msg := fmt.Sprintf("<@%s> — deploy request for *%s* `%s` failed: selected approver <@%s> is not a member of the authorized team.", requesterID, appVal, tag, approverID)
 		if approverErr != nil {
 			msg = fmt.Sprintf("<@%s> — deploy request for *%s* `%s` failed: could not validate approver: %v", requesterID, appVal, tag, approverErr)
 		}
@@ -574,11 +574,11 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 		return
 	}
 
-	isMember, rejecterIdent, err := b.validator.IsApprover(ctx, approverID)
+	isMember, rejecterIdent, err := b.validator.IsMember(ctx, approverID)
 	if err != nil || !isMember {
 		_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
 			slack.MsgOptionText(fmt.Sprintf(
-				"<@%s> — rejection of <%s|PR #%d> (*%s* %s `%s`) failed: not a member of the approver team.",
+				"<@%s> — rejection of <%s|PR #%d> (*%s* %s `%s`) failed: not a member of the authorized team.",
 				approverID, d.PRURL, prNumber, d.App, d.Environment, d.Tag,
 			), false),
 		)

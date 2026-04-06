@@ -1,10 +1,11 @@
 {
   "github": {
     "org": "your-org",
-    "repo": "deploy-bot-test-gitops",
-    "deployer_team": "deploy-bot-testers",
-    "approver_team": "deploy-bot-testers"
+    "repo": "deploy-bot-test-gitops"
   },
+  "authorization": [
+    {"type": "github_teams", "value": ["deploy-bot-testers"]}
+  ],
   "slack": {
     "deploy_channel": "C_YOUR_TEST_CHANNEL_ID"
   },

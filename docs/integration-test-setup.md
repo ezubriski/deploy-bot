@@ -52,8 +52,8 @@ gh label create "deploy-bot/pending" --color "0075ca" --repo <your-org>/deploy-b
 ### Teams
 
 Create a GitHub team (e.g. `deploy-bot-testers`) in your org. Both the
-requester and approver test accounts must be members. Use this team for both
-`deployer_team` and `approver_team` in the test config.
+requester and approver test accounts must be members. Use this team for
+a `github_team` entry in the `authorization` list in the test config.
 
 The team members must have Slack accounts whose **email address** matches
 their GitHub account's primary email. The validator resolves
@@ -188,7 +188,7 @@ values.
 | `INTEGRATION_APP` | App name to use in tests — must match an entry in `config.json` |
 | `INTEGRATION_TAG` | ECR tag to deploy — must exist in the ECR repo (e.g. `v0.0.1`) |
 | `INTEGRATION_REQUESTER_ID` | Slack user ID acting as the deploy requester |
-| `INTEGRATION_APPROVER_ID` | Slack user ID acting as the approver (must be in approver team) |
+| `INTEGRATION_APPROVER_ID` | Slack user ID acting as the approver (must be in the configured team) |
 | `AWS_PROFILE` or `AWS_REGION` | Standard AWS SDK env vars for credentials and region |
 
 Set these in a `.env.integration` file (gitignored) and source it before running:

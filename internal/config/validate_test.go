@@ -4,12 +4,17 @@ import (
 	"testing"
 )
 
+func authEntry(typ string, values ...string) AuthorizationEntry {
+	return AuthorizationEntry{Type: typ, Value: values}
+}
+
 func TestValidateConfig_Valid(t *testing.T) {
 	cfg := &Config{
-		GitHub:     GitHubConfig{Org: "org", Repo: "repo", DeployerTeam: "deployers", ApproverTeam: "approvers"},
-		Slack:      SlackConfig{DeployChannel: "C123"},
-		Deployment: DeploymentConfig{StaleDuration: "2h", LockTTL: "5m", MergeMethod: "squash"},
-		AWS:        AWSConfig{ECRRegion: "us-east-1"},
+		GitHub:        GitHubConfig{Org: "org", Repo: "repo"},
+		Authorization: []AuthorizationEntry{authEntry(AuthGitHubTeams, "deployers")},
+		Slack:         SlackConfig{DeployChannel: "C123"},
+		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m", MergeMethod: "squash"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
 		Apps: []AppConfig{
 			{App: "myapp", Environment: "dev", KustomizePath: "apps/myapp", ECRRepo: "123.dkr.ecr.us-east-1.amazonaws.com/myapp", TagPattern: "^v[0-9]+$"},
 		},
@@ -29,8 +34,7 @@ func TestValidateConfig_MissingRequiredFields(t *testing.T) {
 	required := map[string]bool{
 		"github.org":                false,
 		"github.repo":               false,
-		"github.deployer_team":      false,
-		"github.approver_team":      false,
+		"authorization.":            false,
 		"slack.deploy_channel":      false,
 		"deployment.stale_duration": false,
 		"deployment.lock_ttl":       false,
@@ -54,11 +58,12 @@ func TestValidateConfig_MissingRequiredFields(t *testing.T) {
 
 func TestValidateConfig_InvalidDurations(t *testing.T) {
 	cfg := &Config{
-		GitHub:     GitHubConfig{Org: "o", Repo: "r", DeployerTeam: "d", ApproverTeam: "a"},
-		Slack:      SlackConfig{DeployChannel: "C1"},
-		Deployment: DeploymentConfig{StaleDuration: "bad", LockTTL: "also_bad"},
-		AWS:        AWSConfig{ECRRegion: "us-east-1"},
-		Apps:       []AppConfig{{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r"}},
+		GitHub:        GitHubConfig{Org: "o", Repo: "r"},
+		Authorization: []AuthorizationEntry{authEntry(AuthSlackEmails, "user@example.com")},
+		Slack:         SlackConfig{DeployChannel: "C1"},
+		Deployment:    DeploymentConfig{StaleDuration: "bad", LockTTL: "also_bad"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
+		Apps:          []AppConfig{{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r"}},
 	}
 
 	errs := ValidateConfig(cfg)
@@ -79,11 +84,12 @@ func TestValidateConfig_InvalidDurations(t *testing.T) {
 
 func TestValidateConfig_InvalidMergeMethod(t *testing.T) {
 	cfg := &Config{
-		GitHub:     GitHubConfig{Org: "o", Repo: "r", DeployerTeam: "d", ApproverTeam: "a"},
-		Slack:      SlackConfig{DeployChannel: "C1"},
-		Deployment: DeploymentConfig{StaleDuration: "2h", LockTTL: "5m", MergeMethod: "yolo"},
-		AWS:        AWSConfig{ECRRegion: "us-east-1"},
-		Apps:       []AppConfig{{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r"}},
+		GitHub:        GitHubConfig{Org: "o", Repo: "r"},
+		Authorization: []AuthorizationEntry{authEntry(AuthSlackEmails, "user@example.com")},
+		Slack:         SlackConfig{DeployChannel: "C1"},
+		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m", MergeMethod: "yolo"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
+		Apps:          []AppConfig{{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r"}},
 	}
 
 	errs := ValidateConfig(cfg)
@@ -97,11 +103,12 @@ func TestValidateConfig_InvalidMergeMethod(t *testing.T) {
 
 func TestValidateConfig_InvalidTagPattern(t *testing.T) {
 	cfg := &Config{
-		GitHub:     GitHubConfig{Org: "o", Repo: "r", DeployerTeam: "d", ApproverTeam: "a"},
-		Slack:      SlackConfig{DeployChannel: "C1"},
-		Deployment: DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
-		AWS:        AWSConfig{ECRRegion: "us-east-1"},
-		Apps:       []AppConfig{{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r", TagPattern: "[invalid"}},
+		GitHub:        GitHubConfig{Org: "o", Repo: "r"},
+		Authorization: []AuthorizationEntry{authEntry(AuthSlackEmails, "user@example.com")},
+		Slack:         SlackConfig{DeployChannel: "C1"},
+		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
+		Apps:          []AppConfig{{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r", TagPattern: "[invalid"}},
 	}
 
 	errs := ValidateConfig(cfg)
@@ -115,10 +122,11 @@ func TestValidateConfig_InvalidTagPattern(t *testing.T) {
 
 func TestValidateConfig_DuplicateApps(t *testing.T) {
 	cfg := &Config{
-		GitHub:     GitHubConfig{Org: "o", Repo: "r", DeployerTeam: "d", ApproverTeam: "a"},
-		Slack:      SlackConfig{DeployChannel: "C1"},
-		Deployment: DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
-		AWS:        AWSConfig{ECRRegion: "us-east-1"},
+		GitHub:        GitHubConfig{Org: "o", Repo: "r"},
+		Authorization: []AuthorizationEntry{authEntry(AuthSlackEmails, "user@example.com")},
+		Slack:         SlackConfig{DeployChannel: "C1"},
+		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
 		Apps: []AppConfig{
 			{App: "myapp", Environment: "dev", KustomizePath: "p1", ECRRepo: "r1"},
 			{App: "myapp", Environment: "dev", KustomizePath: "p2", ECRRepo: "r2"},
@@ -136,10 +144,11 @@ func TestValidateConfig_DuplicateApps(t *testing.T) {
 
 func TestValidateConfig_ConflictingKustomizePaths(t *testing.T) {
 	cfg := &Config{
-		GitHub:     GitHubConfig{Org: "o", Repo: "r", DeployerTeam: "d", ApproverTeam: "a"},
-		Slack:      SlackConfig{DeployChannel: "C1"},
-		Deployment: DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
-		AWS:        AWSConfig{ECRRegion: "us-east-1"},
+		GitHub:        GitHubConfig{Org: "o", Repo: "r"},
+		Authorization: []AuthorizationEntry{authEntry(AuthSlackEmails, "user@example.com")},
+		Slack:         SlackConfig{DeployChannel: "C1"},
+		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
 		Apps: []AppConfig{
 			{App: "frontend", Environment: "dev", KustomizePath: "apps/web/kustomization.yaml", ECRRepo: "r1"},
 			{App: "backend", Environment: "dev", KustomizePath: "apps/web/kustomization.yaml", ECRRepo: "r2"},
@@ -158,10 +167,11 @@ func TestValidateConfig_ConflictingKustomizePaths(t *testing.T) {
 func TestValidateConfig_SameKustomizePathDifferentAppsIsConflict(t *testing.T) {
 	// Same path, different app names and environments — still a conflict.
 	cfg := &Config{
-		GitHub:     GitHubConfig{Org: "o", Repo: "r", DeployerTeam: "d", ApproverTeam: "a"},
-		Slack:      SlackConfig{DeployChannel: "C1"},
-		Deployment: DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
-		AWS:        AWSConfig{ECRRegion: "us-east-1"},
+		GitHub:        GitHubConfig{Org: "o", Repo: "r"},
+		Authorization: []AuthorizationEntry{authEntry(AuthSlackEmails, "user@example.com")},
+		Slack:         SlackConfig{DeployChannel: "C1"},
+		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
 		Apps: []AppConfig{
 			{App: "myapp", Environment: "dev", KustomizePath: "apps/shared/kustomization.yaml", ECRRepo: "r1"},
 			{App: "myapp", Environment: "prod", KustomizePath: "apps/shared/kustomization.yaml", ECRRepo: "r1"},

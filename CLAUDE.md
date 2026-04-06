@@ -64,7 +64,7 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 
 **Redis state** (`internal/store`): Pending deploys are stored as `pending:<pr_number>` keys with a TTL equal to `stale_duration`. Per-app deploy locks use `lock:<env>/<app>` keys (SET NX with `lock_ttl` TTL) so the same app in different environments locks independently. The history list (`history`) holds up to 100 `HistoryEntry` records, newest-first, populated by every completion path (approved, rejected, expired, cancelled). User events and ECR events use separate Redis streams (`user:events` and `ecr:events`); the worker drains the user stream with priority before checking the ECR stream. Deploy thread parent timestamps are stored as `thread:<env>` keys with a 10-minute TTL, created atomically (SET NX) to prevent duplicate parent messages from concurrent workers.
 
-**Identity chain** (`internal/validator`): Slack user ID -> email (Slack API) -> GitHub login (GitHub API) -> team membership check. Used to gate deployer and approver actions.
+**Authorization** (`internal/validator`, `internal/approvers`): Users are authorized via OR logic across three configurable sources: direct Slack user IDs, Slack user group membership, and GitHub team membership (Slack user ID -> email -> GitHub login -> team check). The `authorization` config section defines which sources are active. The approvers cache pre-fetches all sources into a single Redis set for fast modal validation; the validator does live checks authoritatively in the worker.
 
 **Sweeper** (`internal/sweeper`): Polls Redis every 5 minutes for expired pending deploys, closes their PRs, notifies the requester, releases locks, and pushes history entries.
 
@@ -96,7 +96,7 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 | `internal/repoconfig` | Shared `.deploy-bot.json` schema, parsing (with apiVersion), and validation (stdlib-only) |
 | `internal/reposcanner` | Repo-sourced app discovery: scan, validate, conflict detect, ConfigMap write |
 | `internal/sanitize` | Input sanitization for user-provided text in Slack/GitHub and tag/branch name validation |
-| `internal/approvers` | Cached approver team membership lookups with periodic refresh |
+| `internal/approvers` | Cached team membership lookups with periodic refresh |
 | `internal/audit` | Audit log writes (S3 or zap fallback) |
 | `internal/config` | Config struct, file loading, discovered-path merge, hot-reload watcher, `Holder` |
 | `internal/metrics` | Prometheus counters/gauges (pending deploys, deploy events by app/outcome) |

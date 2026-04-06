@@ -142,11 +142,44 @@ See [`terraform/examples/elasticache/`](https://github.com/ezubriski/deploy-bot/
 |---|---|---|
 | `github.org` | | GitHub organisation |
 | `github.repo` | | GitOps repository name |
-| `github.deployer_team` | | GitHub team slug -- members can request deploys |
-| `github.approver_team` | | GitHub team slug -- members can approve/reject |
 | `github.users` | `{}` | Optional map of Slack user ID to GitHub login for users with private GitHub emails (e.g. `{"U12345": "ghlogin"}`) |
 | `github.rate_limit_max_retries` | `3` | Max retries on GitHub secondary rate limit |
 | `github.rate_limit_retry_wait` | `"2m"` | Max wait between rate-limit retries |
+
+### Authorization
+
+A list of typed entries. At least one entry is required. A user is authorized if they match **any** entry (OR logic).
+
+Each entry has `type` and `value` (always an array of strings):
+
+| Type | Description |
+|---|---|
+| `github_teams` | GitHub team slugs -- members resolved via Slack email → GitHub login → team membership |
+| `github_users` | GitHub logins -- Slack users whose resolved GitHub login matches are authorized |
+| `slack_user_groups` | Slack user group names or IDs (`S...`) |
+| `slack_emails` | Email addresses resolved to Slack users via the Slack API |
+
+Example:
+
+```json
+"authorization": [
+  {"type": "github_teams", "value": ["deployers"]},
+  {"type": "slack_emails", "value": ["alice@example.com", "bob@example.com"]}
+]
+```
+
+!!! warning "GitHub authorization is best-effort"
+    `github_teams` and `github_users` rely on matching a Slack user to a GitHub
+    user by email address. This requires the GitHub user's email to be **public**
+    on their GitHub profile. Users with private GitHub emails will fail to resolve
+    and will not be authorized through these sources.
+
+    For users with private GitHub emails, either use `github.users` to manually
+    map Slack user IDs to GitHub logins, or authorize them via `slack_emails` or
+    `slack_user_groups` instead.
+
+    Slack-based sources (`slack_emails`, `slack_user_groups`) work consistently
+    as long as the app is granted the `users:read.email` scope.
 
 ### Slack
 
@@ -297,10 +330,11 @@ Operator-managed apps always take precedence. If an `(app, environment)` pair ex
 {
   "github": {
     "org": "myorg",
-    "repo": "gitops-repo",
-    "deployer_team": "deployers",
-    "approver_team": "senior-engineers"
+    "repo": "gitops-repo"
   },
+  "authorization": [
+    {"type": "github_teams", "value": ["deployers"]}
+  ],
   "slack": {
     "deploy_channel": "C01234567"
   },

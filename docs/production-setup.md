@@ -229,10 +229,11 @@ See [configuration.md](configuration.md) for all secret fields and auth combinat
 {
   "github": {
     "org": "your-org",
-    "repo": "your-gitops-repo",
-    "deployer_team": "developers",
-    "approver_team": "senior-engineers"
+    "repo": "your-gitops-repo"
   },
+  "authorization": [
+    {"type": "github_teams", "value": ["developers"]}
+  ],
   "slack": {
     "deploy_channel": "C0123456789"
   },

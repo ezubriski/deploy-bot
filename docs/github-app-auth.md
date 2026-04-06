@@ -104,7 +104,7 @@ Each component requests only the permissions it needs when minting its installat
 |---|---|---|---|
 | Worker (bot + sweeper) | contents:write, pull_requests:write, issues:write, members:read | Gitops repo only | PR creation, merge, close, labels, team membership checks |
 | Validator | members:read | All | Slack-to-GitHub identity resolution, team membership gating |
-| Approver cache | members:read | All | Periodic approver team membership refresh |
+| Team membership cache | members:read | All | Periodic team membership refresh |
 | Scanner | contents:read, statuses:write | All | Config file reads, conflict commit statuses |
 
 This scoping is not possible with PATs, which always carry their full scope.
