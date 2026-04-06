@@ -201,7 +201,7 @@ func TestPoller_LockedApp(t *testing.T) {
 	ctx := context.Background()
 
 	// Pre-lock the app.
-	_, _ = st.AcquireLock(ctx, "dev", "myapp", "someone", 5*60_000_000_000)
+	_, _ = st.AcquireLock(ctx, "dev", "myapp-dev", "someone", 5*60_000_000_000)
 
 	p.poll(ctx)
 

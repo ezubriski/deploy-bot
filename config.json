@@ -15,9 +15,7 @@
     "lock_ttl": "5m"
   },
   "aws": {
-    "ecr_role_arn": "arn:aws:iam::ECR_ACCOUNT_ID:role/deploy-bot-ecr-reader",
     "ecr_region": "us-east-1",
-    "audit_role_arn": "arn:aws:iam::AUDIT_ACCOUNT_ID:role/deploy-bot-audit-writer",
     "audit_bucket": "my-audit-logs",
     "audit_region": "us-east-1"
   },

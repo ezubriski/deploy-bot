@@ -58,10 +58,10 @@ func TestHandleECRPush_Locked(t *testing.T) {
 
 	ctx := context.Background()
 	// Pre-acquire lock.
-	_, _ = st.AcquireLock(ctx, "dev", "myapp", "someone", 5*60_000_000_000)
+	_, _ = st.AcquireLock(ctx, "dev", "myapp-dev", "someone", 5*60_000_000_000)
 
 	b.handleECRPush(ctx, queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+		App: "myapp-dev", Tag: "v1.0.0", Repository: "myrepo",
 	})
 
 	// No PR should be created when locked.
@@ -83,7 +83,7 @@ func TestHandleECRPush_NoOp(t *testing.T) {
 	b := newECRTestBot(t, gh, sl, st, apps)
 
 	b.handleECRPush(context.Background(), queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+		App: "myapp-dev", Tag: "v1.0.0", Repository: "myrepo",
 	})
 
 	// Should post a no-op notice.
@@ -92,7 +92,7 @@ func TestHandleECRPush_NoOp(t *testing.T) {
 	}
 
 	// Lock should be released.
-	locked, err := st.IsLocked(context.Background(), "dev", "myapp")
+	locked, err := st.IsLocked(context.Background(), "dev", "myapp-dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestHandleECRPush_ApprovalRequired(t *testing.T) {
 	b := newECRTestBot(t, &stubGH{}, sl, st, apps)
 
 	b.handleECRPush(context.Background(), queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+		App: "myapp-dev", Tag: "v1.0.0", Repository: "myrepo",
 	})
 
 	// Should post approval request.
@@ -156,7 +156,7 @@ func TestHandleECRPush_AutoDeploy(t *testing.T) {
 	b := newECRTestBot(t, gh, sl, st, apps)
 
 	b.handleECRPush(context.Background(), queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+		App: "myapp-dev", Tag: "v1.0.0", Repository: "myrepo",
 	})
 
 	if !merged {
@@ -167,7 +167,7 @@ func TestHandleECRPush_AutoDeploy(t *testing.T) {
 	}
 
 	// Lock should be released after auto-deploy.
-	locked, err := st.IsLocked(context.Background(), "dev", "myapp")
+	locked, err := st.IsLocked(context.Background(), "dev", "myapp-dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestHandleECRPush_ProdGuard(t *testing.T) {
 	b := newECRTestBot(t, gh, sl, st, apps)
 
 	b.handleECRPush(context.Background(), queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+		App: "myapp-prod", Tag: "v1.0.0", Repository: "myrepo",
 	})
 
 	// Prod guard should prevent auto-deploy — should fall back to approval.
@@ -243,7 +243,7 @@ func TestHandleECRPush_AutoDeploy_MergeConflict_RebaseSucceeds(t *testing.T) {
 	b := newECRTestBot(t, gh, sl, st, apps)
 
 	b.handleECRPush(context.Background(), queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+		App: "myapp-dev", Tag: "v1.0.0", Repository: "myrepo",
 	})
 
 	if mergeAttempts != 2 {
@@ -255,7 +255,7 @@ func TestHandleECRPush_AutoDeploy_MergeConflict_RebaseSucceeds(t *testing.T) {
 		t.Error("expected no pending deploy after successful rebase+merge")
 	}
 	// Lock should be released.
-	locked, _ := st.IsLocked(context.Background(), "dev", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "dev", "myapp-dev")
 	if locked {
 		t.Error("lock should be released after successful auto-deploy")
 	}
@@ -286,7 +286,7 @@ func TestHandleECRPush_AutoDeploy_MergeConflict_RebaseFails(t *testing.T) {
 	b := newECRTestBot(t, gh, sl, st, apps)
 
 	b.handleECRPush(context.Background(), queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+		App: "myapp-dev", Tag: "v1.0.0", Repository: "myrepo",
 	})
 
 	if !prClosed {
@@ -296,7 +296,7 @@ func TestHandleECRPush_AutoDeploy_MergeConflict_RebaseFails(t *testing.T) {
 		t.Error("expected failure notice to deploy channel")
 	}
 	// Lock should be released.
-	locked, _ := st.IsLocked(context.Background(), "dev", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "dev", "myapp-dev")
 	if locked {
 		t.Error("lock should be released after failure")
 	}
@@ -327,63 +327,15 @@ func TestHandleECRPush_AutoDeploy_MergeConflict_NoOp(t *testing.T) {
 	b := newECRTestBot(t, gh, sl, st, apps)
 
 	b.handleECRPush(context.Background(), queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
+		App: "myapp-dev", Tag: "v1.0.0", Repository: "myrepo",
 	})
 
 	if !prClosed {
 		t.Error("expected PR to be closed on no-op")
 	}
 	// Lock should be released.
-	locked, _ := st.IsLocked(context.Background(), "dev", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "dev", "myapp-dev")
 	if locked {
 		t.Error("lock should be released after no-op")
-	}
-}
-
-func TestHandleECRPush_AutoDeploy_FailureNotifiesApproverGroup(t *testing.T) {
-	st := newTestStore(t)
-	sl := &captureSlack{}
-	apps := []config.AppConfig{{
-		App: "myapp", Environment: "dev",
-		KustomizePath:           "apps/myapp/kustomization.yaml",
-		AutoDeploy:              true,
-		AutoDeployApproverGroup: "C_APPROVERS",
-	}}
-
-	gh := &stubGH{
-		mergePR: func(_ context.Context, _ int, _ string) error {
-			return fmt.Errorf("unexpected error")
-		},
-	}
-	b := newECRTestBot(t, gh, sl, st, apps)
-
-	b.handleECRPush(context.Background(), queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
-	})
-
-	// Should post failure notice to the approver channel.
-	if !sl.hasMessageTo("C_APPROVERS") {
-		t.Error("expected failure notice to approver channel")
-	}
-}
-
-func TestHandleECRPush_ApproverGroupChannel(t *testing.T) {
-	st := newTestStore(t)
-	sl := &captureSlack{}
-	apps := []config.AppConfig{{
-		App: "myapp", Environment: "dev",
-		KustomizePath:           "apps/myapp/kustomization.yaml",
-		AutoDeployApproverGroup: "C_APPROVERS",
-	}}
-
-	b := newECRTestBot(t, &stubGH{}, sl, st, apps)
-
-	b.handleECRPush(context.Background(), queue.ECRPushEvent{
-		App: "myapp", Tag: "v1.0.0", Repository: "myrepo",
-	})
-
-	// Should post to the approver channel, not deploy channel.
-	if !sl.hasMessageTo("C_APPROVERS") {
-		t.Error("expected approval request to approver channel")
 	}
 }

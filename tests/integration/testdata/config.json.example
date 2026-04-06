@@ -16,14 +16,13 @@
     "label": "deploy-bot"
   },
   "aws": {
-    "ecr_role_arn": "arn:aws:iam::123456789012:role/deploy-bot-test-ecr",
     "ecr_region": "us-east-1",
-    "audit_role_arn": "arn:aws:iam::123456789012:role/deploy-bot-test-audit",
     "audit_bucket": "deploy-bot-test-audit"
   },
   "apps": [
     {
       "app": "test-app",
+      "environment": "dev",
       "kustomize_path": "apps/test-app/kustomization.yaml",
       "ecr_repo": "123456789012.dkr.ecr.us-east-1.amazonaws.com/deploy-bot-test-app",
       "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"

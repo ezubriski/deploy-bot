@@ -189,11 +189,10 @@ func printConfigText(path string, cfg *config.Config, errs []config.ValidationEr
 		validCount := 0
 		for i, app := range cfg.Apps {
 			prefix := fmt.Sprintf("apps[%d]", i)
-			name := app.App
-			if name == "" {
+			name := app.FullName()
+			if app.App == "" || app.Environment == "" {
 				name = "?"
 			}
-			name += " (" + app.Environment + ")"
 
 			var appFieldErrs []string
 			for _, field := range []string{"app", "environment", "kustomize_path", "ecr_repo", "tag_pattern"} {

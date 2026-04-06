@@ -52,13 +52,12 @@ func parseRepoConfig(data []byte, sourceRepo string, rdCfg config.RepoDiscoveryC
 		e := cfg.Apps[i]
 		valid = append(valid, config.DiscoveredAppConfig{
 			AppConfig: config.AppConfig{
-				App:                     e.App,
-				Environment:             e.Environment,
-				KustomizePath:           e.KustomizePath,
-				ECRRepo:                 e.ECRRepo,
-				TagPattern:              e.TagPattern,
-				AutoDeploy:              e.AutoDeploy,
-				AutoDeployApproverGroup: e.AutoDeployApproverGroup,
+				App:           e.App,
+				Environment:   e.Environment,
+				KustomizePath: e.KustomizePath,
+				ECRRepo:       e.ECRRepo,
+				TagPattern:    e.TagPattern,
+				AutoDeploy:    e.AutoDeploy,
 			},
 			SourceRepo: sourceRepo,
 		})

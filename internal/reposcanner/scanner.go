@@ -165,17 +165,13 @@ func (s *Scanner) scan(ctx context.Context) {
 
 	// Detect conflicts with operator config.
 	conflicts := s.detectConflicts(c, allDiscovered)
-	warnChannel := rd.WarnChannel
-	if warnChannel == "" {
-		warnChannel = c.Slack.DeployChannel
-	}
-	s.conflict.emitWarnings(ctx, s.slack, warnChannel, configFile, conflicts)
+	s.conflict.emitWarnings(ctx, s.slack, c.Slack.DeployChannel, configFile, conflicts)
 	s.setCommitStatuses(ctx, allDiscovered, conflicts)
 
 	// Filter out conflicting entries.
 	var filtered []config.DiscoveredAppConfig
 	for _, d := range allDiscovered {
-		key := d.App + "\x00" + d.Environment
+		key := d.FullName()
 		if _, conflicting := conflicts[key]; !conflicting {
 			filtered = append(filtered, d)
 		}
@@ -269,9 +265,9 @@ func (s *Scanner) detectConflicts(c *config.Config, discovered []config.Discover
 	operatorApps := make(map[string]struct{}, len(c.Apps))
 	operatorPaths := make(map[string]string, len(c.Apps)) // kustomize_path -> "app (env)"
 	for _, a := range c.Apps {
-		operatorApps[a.App+"\x00"+a.Environment] = struct{}{}
+		operatorApps[a.FullName()] = struct{}{}
 		if a.KustomizePath != "" {
-			operatorPaths[a.KustomizePath] = fmt.Sprintf("%s (%s)", a.App, a.Environment)
+			operatorPaths[a.KustomizePath] = a.FullName()
 		}
 	}
 
@@ -280,7 +276,7 @@ func (s *Scanner) detectConflicts(c *config.Config, discovered []config.Discover
 	discoveredPaths := make(map[string]string) // kustomize_path -> "app (env) from repo"
 
 	for _, d := range discovered {
-		key := d.App + "\x00" + d.Environment
+		key := d.FullName()
 		if _, ok := conflicts[key]; ok {
 			continue
 		}
@@ -310,7 +306,7 @@ func (s *Scanner) detectConflicts(c *config.Config, discovered []config.Discover
 			}
 
 			// Check kustomize_path conflict with other discovered apps.
-			label := fmt.Sprintf("%s (%s) from %s", d.App, d.Environment, d.SourceRepo)
+			label := fmt.Sprintf("%s from %s", d.FullName(), d.SourceRepo)
 			if other, ok := discoveredPaths[d.KustomizePath]; ok {
 				conflicts[key] = conflictInfo{
 					App:        d.App,
@@ -337,9 +333,8 @@ func (s *Scanner) writeConfigMap(ctx context.Context, c *config.Config, apps []c
 		return
 	}
 
-	ns := rd.ConfigMapNamespace
 	name := rd.ConfigMapTargetName()
-	changed, err := s.cmWriter.Write(ctx, ns, name, "discovered.json", data)
+	changed, err := s.cmWriter.Write(ctx, "", name, "discovered.json", data)
 	if err != nil {
 		s.log.Error("reposcanner: write configmap", zap.Error(err))
 		return

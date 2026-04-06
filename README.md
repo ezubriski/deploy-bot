@@ -135,7 +135,7 @@ Start with the quickstart. Move to the production guide when you're ready to har
 
 ## Commands
 
-App names include the environment suffix (e.g. `myapp-dev`, `myapp-prod`). Use `apps` to list configured apps.
+App names are composed from the base name and environment (e.g. `myapp-dev`, `myapp-prod`). Use `apps` to list configured apps.
 
 ### Slash commands
 

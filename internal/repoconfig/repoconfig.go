@@ -34,13 +34,12 @@ type RepoConfigFile struct {
 
 // AppEntry is a single app definition within a .deploy-bot.json file.
 type AppEntry struct {
-	App                     string `json:"app"`
-	Environment             string `json:"environment"`
-	KustomizePath           string `json:"kustomize_path"`
-	ECRRepo                 string `json:"ecr_repo"`
-	TagPattern              string `json:"tag_pattern"`
-	AutoDeploy              bool   `json:"auto_deploy,omitempty"`
-	AutoDeployApproverGroup string `json:"auto_deploy_approver_group,omitempty"`
+	App           string `json:"app"`
+	Environment   string `json:"environment"`
+	KustomizePath string `json:"kustomize_path"`
+	ECRRepo       string `json:"ecr_repo"`
+	TagPattern    string `json:"tag_pattern"`
+	AutoDeploy    bool   `json:"auto_deploy,omitempty"`
 }
 
 // ValidationError describes a validation failure for a single app entry.

@@ -86,8 +86,8 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 	var appOptions []*slack.OptionBlockObject
 	for _, app := range b.cfg.Load().Apps {
 		appOptions = append(appOptions, slack.NewOptionBlockObject(
-			app.App,
-			slack.NewTextBlockObject("plain_text", app.App, false, false),
+			app.FullName(),
+			slack.NewTextBlockObject("plain_text", app.FullName(), false, false),
 			nil,
 		))
 	}
@@ -95,7 +95,7 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 	// Build tag options for first app (or pre-selected)
 	tagApp := preSelectedApp
 	if tagApp == "" && len(b.cfg.Load().Apps) > 0 {
-		tagApp = b.cfg.Load().Apps[0].App
+		tagApp = b.cfg.Load().Apps[0].FullName()
 	}
 	tags := b.ecrCache.RecentTags(tagApp)
 	var tagOptions []*slack.OptionBlockObject
@@ -298,22 +298,10 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	remaining := time.Until(d.ExpiresAt).Round(time.Minute)
 	cfg := b.cfg.Load()
 	approver := slackMention(d.ApproverID)
-	channel := cfg.Slack.DeployChannel
-	// If no specific approver (ECR deploys), mention the approver group.
 	if d.ApproverID == "" {
-		if appCfg, ok := cfg.AppByName(d.App); ok {
-			group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
-			if strings.HasPrefix(group, "S") {
-				approver = fmt.Sprintf("<!subteam^%s>", group)
-			} else if strings.HasPrefix(group, "C") {
-				approver = "approvers"
-				channel = group // post to the approver channel directly
-			}
-		} else {
-			approver = "team"
-		}
+		approver = "team"
 	}
-	_, _, err = b.slack.PostMessageContext(ctx, channel,
+	_, _, err = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel,
 		slack.MsgOptionText(fmt.Sprintf(
 			":bell: %s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for approval. Expires in *%s*. <%s|PR #%d>",
 			approver, d.App, d.Environment, d.Tag, slackMention(d.RequesterID), remaining, d.PRURL, d.PRNumber,
@@ -501,7 +489,7 @@ func (b *Bot) handleApps(ctx context.Context, cmd slack.SlashCommand) {
 		if app.SourceRepo != "" {
 			source = app.SourceRepo
 		}
-		line := fmt.Sprintf("• *%s* (`%s`) — source: `%s`", app.App, app.Environment, source)
+		line := fmt.Sprintf("• *%s* (`%s`) — source: `%s`", app.FullName(), app.Environment, source)
 		if app.AutoDeploy {
 			line += " — auto-deploy"
 		}

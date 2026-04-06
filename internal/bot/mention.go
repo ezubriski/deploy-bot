@@ -228,7 +228,7 @@ func (b *Bot) handleMentionApps(ctx context.Context, evt queue.AppMentionEvent) 
 		if app.SourceRepo != "" {
 			source = app.SourceRepo
 		}
-		line := fmt.Sprintf("• *%s* (`%s`) — source: `%s`", app.App, app.Environment, source)
+		line := fmt.Sprintf("• *%s* (`%s`) — source: `%s`", app.FullName(), app.Environment, source)
 		if app.AutoDeploy {
 			line += " — auto-deploy"
 		}
@@ -629,7 +629,7 @@ func (b *Bot) unknownAppMessage(name string) string {
 	}
 	var names []string
 	for _, a := range cfg.Apps {
-		names = append(names, fmt.Sprintf("`%s` (%s)", a.App, a.Environment))
+		names = append(names, fmt.Sprintf("`%s`", a.FullName()))
 	}
 	return fmt.Sprintf("Unknown app `%s`. App names include the environment — available apps:\n%s", name, strings.Join(names, ", "))
 }

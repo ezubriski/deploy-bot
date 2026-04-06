@@ -266,7 +266,7 @@ func seedPendingDeploy(t *testing.T, st *store.Store, prNumber int) {
 	t.Helper()
 	ctx := context.Background()
 	d := &store.PendingDeploy{
-		App:         "myapp",
+		App:         "myapp-prod",
 		Environment: "prod",
 		Tag:         "v2.0.0",
 		PRNumber:    prNumber,
@@ -282,7 +282,7 @@ func seedPendingDeploy(t *testing.T, st *store.Store, prNumber int) {
 	if err := st.Set(ctx, d, 2*time.Hour); err != nil {
 		t.Fatalf("seed pending deploy: %v", err)
 	}
-	_, _ = st.AcquireLock(ctx, "prod", "myapp", "U_REQUESTER", 5*time.Minute)
+	_, _ = st.AcquireLock(ctx, "prod", "myapp-prod", "U_REQUESTER", 5*time.Minute)
 }
 
 // approveAction returns the BlockAction for an approve button press on PR 1.
@@ -310,7 +310,7 @@ func deploySubmitCallback() slack.InteractionCallback {
 			CallbackID: ModalCallbackDeploy,
 			State: &slack.ViewState{
 				Values: map[string]map[string]slack.BlockAction{
-					BlockApp:       {ActionApp: {SelectedOption: slack.OptionBlockObject{Value: "myapp"}}},
+					BlockApp:       {ActionApp: {SelectedOption: slack.OptionBlockObject{Value: "myapp-prod"}}},
 					BlockTag:       {ActionTag: {SelectedOption: slack.OptionBlockObject{}}},
 					BlockTagManual: {ActionTagManual: {Value: "v2.0.0"}},
 					BlockReason:    {ActionReason: {Value: "test"}},
@@ -351,88 +351,9 @@ func TestHandleDeploySubmit_NoChange(t *testing.T) {
 	}
 
 	// Lock must be released.
-	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp-prod")
 	if locked {
 		t.Error("expected deploy lock released after no-op")
-	}
-}
-
-// TestHandleDeploySubmit_NoChange_ChannelGroup verifies that when the app's
-// AutoDeployApproverGroup is a channel ID (C…) the no-op notice is posted
-// directly to that channel instead of the deploy channel.
-func TestHandleDeploySubmit_NoChange_ChannelGroup(t *testing.T) {
-	st := newTestStore(t)
-	sl := &captureSlack{}
-	gh := &stubGH{
-		createDeployPR: func(_ context.Context, _ githubpkg.CreatePRParams) (int, string, error) {
-			return 0, "", githubpkg.ErrNoChange
-		},
-	}
-
-	cfg := &config.Config{
-		Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
-		Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
-		Apps: []config.AppConfig{
-			{
-				App: "myapp", Environment: "prod",
-				KustomizePath:           "apps/myapp/kustomization.yaml",
-				TagPattern:              ".*",
-				AutoDeployApproverGroup: "C_APPROVER_CHANNEL",
-			},
-		},
-	}
-	b := &Bot{
-		slack: sl, store: st, gh: gh,
-		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: nopAudit{},
-		metrics: metrics.New(prometheus.NewRegistry()), cfg: config.NewHolder(cfg, ""), log: zap.NewNop(),
-	}
-
-	b.handleDeploySubmit(context.Background(), deploySubmitCallback())
-
-	// Notice goes to the configured approver channel, not the default deploy channel.
-	if !sl.hasMessageTo("C_APPROVER_CHANNEL") {
-		t.Error("expected no-op notice posted to AutoDeployApproverGroup channel")
-	}
-	if sl.hasMessageTo("C_DEPLOY") {
-		t.Error("no-op notice should not be posted to deploy channel when a specific channel is configured")
-	}
-}
-
-// TestHandleDeploySubmit_NoChange_UserGroup verifies that when the app's
-// AutoDeployApproverGroup is a user group ID (S…) the notice is sent to the
-// deploy channel (the mention will be embedded in the text).
-func TestHandleDeploySubmit_NoChange_UserGroup(t *testing.T) {
-	st := newTestStore(t)
-	sl := &captureSlack{}
-	gh := &stubGH{
-		createDeployPR: func(_ context.Context, _ githubpkg.CreatePRParams) (int, string, error) {
-			return 0, "", githubpkg.ErrNoChange
-		},
-	}
-
-	cfg := &config.Config{
-		Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
-		Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
-		Apps: []config.AppConfig{
-			{
-				App: "myapp", Environment: "prod",
-				KustomizePath:           "apps/myapp/kustomization.yaml",
-				TagPattern:              ".*",
-				AutoDeployApproverGroup: "S01234567",
-			},
-		},
-	}
-	b := &Bot{
-		slack: sl, store: st, gh: gh,
-		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: nopAudit{},
-		metrics: metrics.New(prometheus.NewRegistry()), cfg: config.NewHolder(cfg, ""), log: zap.NewNop(),
-	}
-
-	b.handleDeploySubmit(context.Background(), deploySubmitCallback())
-
-	// Notice goes to deploy channel (the mention text is embedded there).
-	if !sl.hasMessageTo("C_DEPLOY") {
-		t.Error("expected no-op notice posted to deploy channel for user group ID")
 	}
 }
 
@@ -467,7 +388,7 @@ func TestHandleApprove_ConflictAutoResolved(t *testing.T) {
 	if d != nil {
 		t.Error("expected pending deploy deleted after successful merge")
 	}
-	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp-prod")
 	if locked {
 		t.Error("expected lock released after successful merge")
 	}
@@ -513,7 +434,7 @@ func TestHandleApprove_ConflictUnresolvable(t *testing.T) {
 	}
 
 	// Lock kept: deploy still in flight.
-	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp-prod")
 	if !locked {
 		t.Error("expected deploy lock to remain held after unresolvable conflict")
 	}
@@ -556,7 +477,7 @@ func TestHandleApprove_ConflictRebaseIsNoOp(t *testing.T) {
 	if d != nil {
 		t.Error("expected pending deploy removed after no-op close")
 	}
-	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp-prod")
 	if locked {
 		t.Error("expected lock released after no-op close")
 	}
@@ -613,12 +534,12 @@ func TestHandleDeploySubmit_HappyPath(t *testing.T) {
 	if err != nil || d == nil {
 		t.Fatal("expected pending deploy stored")
 	}
-	if d.App != "myapp" || d.Tag != "v2.0.0" || d.Environment != "prod" {
+	if d.App != "myapp-prod" || d.Tag != "v2.0.0" || d.Environment != "prod" {
 		t.Errorf("deploy = %+v", d)
 	}
 
 	// Lock held.
-	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp-prod")
 	if !locked {
 		t.Error("expected deploy lock held")
 	}
@@ -670,7 +591,7 @@ func TestHandleApprove_HappyPath(t *testing.T) {
 	}
 
 	// Lock released.
-	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp-prod")
 	if locked {
 		t.Error("expected lock released after merge")
 	}
@@ -750,7 +671,7 @@ func TestHandleRejectSubmit_HappyPath(t *testing.T) {
 	}
 
 	// Lock released.
-	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp-prod")
 	if locked {
 		t.Error("expected lock released after reject")
 	}
@@ -821,7 +742,7 @@ func TestHandleCancel_HappyPath(t *testing.T) {
 	}
 
 	// Lock released.
-	locked, _ := st.IsLocked(context.Background(), "prod", "myapp")
+	locked, _ := st.IsLocked(context.Background(), "prod", "myapp-prod")
 	if locked {
 		t.Error("expected lock released after cancel")
 	}

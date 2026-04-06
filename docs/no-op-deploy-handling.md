@@ -28,34 +28,12 @@ the kustomization file, it short-circuits the deploy:
 
 ### Slack notifications
 
-**ECR-triggered no-op** -- posted to the deploy channel, mentioning the
-`auto_deploy_approver_group` if one is configured:
-
-> <!subteam^S01234567> `myapp` (`prod`) is already running `v1.2.3` -- no changes to deploy. No PR created.
-
-Without a group configured:
+**ECR-triggered no-op** -- posted to the deploy channel:
 
 > `myapp` (`prod`) is already running `v1.2.3` -- no changes to deploy. No PR created.
 
-The group mention ensures the people who would have been asked to approve an
-ECR-triggered deploy are still aware the image arrived -- even though no
-action is needed.
-
-**User-initiated no-op** -- posted to the deploy channel (without a group
-mention) and the requester receives a DM with the same message.
-
-### Slack mention format
-
-`auto_deploy_approver_group` stores a Slack ID directly -- no handle or API
-lookup is needed at notification time:
-
-- Channel ID (`C...`) -- the bot posts the no-op notice to that channel
-  instead of `deploy_channel`.
-- User group ID (`S...`) -- the bot posts to `deploy_channel` with a
-  `<!subteam^S...>` mention embedded in the message.
-
-The `C`/`S` prefix disambiguates at runtime. No additional Slack scopes are
-required beyond what the bot already holds.
+**User-initiated no-op** -- posted to the deploy channel and the requester
+receives a DM with the same message.
 
 ## Audit Log Entry
 

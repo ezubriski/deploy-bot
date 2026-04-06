@@ -176,8 +176,7 @@ func TestParseRepoConfig_AutoDeployFields(t *testing.T) {
 				"environment": "dev",
 				"kustomize_path": "path",
 				"ecr_repo": "repo",
-				"auto_deploy": true,
-				"auto_deploy_approver_group": "C01234567"
+				"auto_deploy": true
 			}
 		]
 	}`)
@@ -188,9 +187,6 @@ func TestParseRepoConfig_AutoDeployFields(t *testing.T) {
 	}
 	if !apps[0].AutoDeploy {
 		t.Error("expected auto_deploy = true")
-	}
-	if apps[0].AutoDeployApproverGroup != "C01234567" {
-		t.Errorf("auto_deploy_approver_group = %q", apps[0].AutoDeployApproverGroup)
 	}
 }
 

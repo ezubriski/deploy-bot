@@ -71,7 +71,7 @@ func New(httpClient *http.Client, slackClient *slack.Client, rdb *redis.Client, 
 // repeated Slack and GitHub API calls. For users mapped via github.users config,
 // only the GitHub login is available (no Slack lookup needed).
 func (v *Validator) ResolveIdentity(ctx context.Context, slackUserID string) (Identity, error) {
-	if l, ok := v.cfg.GitHub.Users[slackUserID]; ok {
+	if l, ok := v.cfg.IdentityOverrides[slackUserID]; ok {
 		return Identity{GitHubLogin: l}, nil
 	}
 

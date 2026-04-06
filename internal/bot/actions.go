@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -533,31 +532,9 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterIdent.String()))
 }
 
-// postNoOpNotice posts a no-op notification to the appropriate Slack target.
-// If the app has an AutoDeployApproverGroup configured:
-//   - Group ID (S…): posts to deploy_channel with a <!subteam^S…> mention
-//   - Channel ID (C…): posts directly to that channel
-//
-// Otherwise posts to deploy_channel without a mention.
+// postNoOpNotice posts a no-op notification to the deploy channel.
 func (b *Bot) postNoOpNotice(ctx context.Context, appName, msg string) {
-	cfg := b.cfg.Load()
-	appCfg, ok := cfg.AppByName(appName)
-	if !ok {
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, slack.MsgOptionText(msg, false))
-		return
-	}
-	group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
-	switch {
-	case strings.HasPrefix(group, "S"):
-		// User group: mention in the deploy channel.
-		text := fmt.Sprintf("<!subteam^%s> %s", group, msg)
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, slack.MsgOptionText(text, false))
-	case strings.HasPrefix(group, "C"):
-		// Channel: post directly there.
-		_, _, _ = b.slack.PostMessageContext(ctx, group, slack.MsgOptionText(msg, false))
-	default:
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, slack.MsgOptionText(msg, false))
-	}
+	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel, slack.MsgOptionText(msg, false))
 }
 
 func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.InteractionCallback) {

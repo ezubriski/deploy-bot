@@ -95,10 +95,10 @@ func ValidateConfig(cfg *Config) []ValidationError {
 		add("aws", "ecr_region", "required")
 	}
 
-	// --- ecr_events ---
-	if cfg.ECREvents.PollInterval != "" {
-		if _, err := time.ParseDuration(cfg.ECREvents.PollInterval); err != nil {
-			add("ecr_events", "poll_interval", fmt.Sprintf("invalid duration: %v", err))
+	// --- ecr_auto_deploy ---
+	if cfg.ECRAutoDeploy.PollInterval != "" {
+		if _, err := time.ParseDuration(cfg.ECRAutoDeploy.PollInterval); err != nil {
+			add("ecr_auto_deploy", "poll_interval", fmt.Sprintf("invalid duration: %v", err))
 		}
 	}
 
@@ -138,8 +138,8 @@ func ValidateConfig(cfg *Config) []ValidationError {
 			}
 		}
 
-		key := app.App + "/" + app.Environment
 		if app.App != "" && app.Environment != "" {
+			key := app.FullName()
 			if seen[key] {
 				add(prefix, "app", fmt.Sprintf("duplicate app+environment: %s", key))
 			}
@@ -150,10 +150,7 @@ func ValidateConfig(cfg *Config) []ValidationError {
 			if other, ok := kustomizePaths[app.KustomizePath]; ok {
 				add(prefix, "kustomize_path", fmt.Sprintf("conflicts with %s — both target %s", other, app.KustomizePath))
 			} else {
-				label := app.App
-				if app.Environment != "" {
-					label += " (" + app.Environment + ")"
-				}
+				label := app.FullName()
 				kustomizePaths[app.KustomizePath] = label
 			}
 		}

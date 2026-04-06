@@ -126,7 +126,7 @@ func main() {
 
 	// Start ECR poller if configured. It enqueues to the same Redis stream
 	// as Slack events, using its own buffer for Redis backpressure.
-	if cfg.ECREvents.SQSQueueURL != "" {
+	if cfg.ECRAutoDeploy.Enabled && cfg.ECRAutoDeploy.SQSQueueURL != "" {
 		ecrBuf := buffer.New(buffer.DefaultSize, rdb, queue.StreamKeyECR, log)
 		go ecrBuf.Run(ctx)
 		poller, err := ecrpoller.New(ctx, rdb, ecrBuf, redisStore, config.NewHolder(cfg, configPath), log)

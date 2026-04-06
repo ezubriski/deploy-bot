@@ -9,9 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
@@ -77,10 +75,6 @@ func NewLogger(ctx context.Context, cfg *config.Config, log *zap.Logger) (Logger
 
 	clientCfg := baseCfg.Copy()
 	clientCfg.Region = cfg.AWS.AuditRegion
-	if cfg.AWS.AuditRoleARN != "" {
-		stsClient := sts.NewFromConfig(baseCfg)
-		clientCfg.Credentials = stscreds.NewAssumeRoleProvider(stsClient, cfg.AWS.AuditRoleARN)
-	}
 
 	s3Client := s3.NewFromConfig(clientCfg)
 

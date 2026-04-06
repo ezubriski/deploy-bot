@@ -131,7 +131,7 @@ Create `config.json`:
   },
   "apps": [
     {
-      "app": "myapp-dev",
+      "app": "myapp",
       "environment": "dev",
       "kustomize_path": "apps/myapp/overlays/dev/kustomization.yaml",
       "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp"
