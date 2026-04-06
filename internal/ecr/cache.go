@@ -31,9 +31,16 @@ const (
 type appCache struct {
 	mu         sync.RWMutex
 	tags       []string // sorted newest first
+	newestPush time.Time
 	pattern    *regexp.Regexp
 	repoName   string
 	registryID string
+}
+
+// ecrCacheEntry is the Redis-persisted form of an app's tag cache.
+type ecrCacheEntry struct {
+	Tags       []string  `json:"tags"`
+	NewestPush time.Time `json:"newest_push"`
 }
 
 const ecrPrefix = "ecr:"
@@ -132,9 +139,10 @@ func (c *Cache) Populate(ctx context.Context) {
 	}
 	var needsFetch []appEntry
 	for name, ac := range apps {
-		if tags, ok := c.readTagsFromRedis(ctx, name); ok {
+		if tags, newest, ok := c.readTagsFromRedis(ctx, name); ok {
 			ac.mu.Lock()
 			ac.tags = tags
+			ac.newestPush = newest
 			ac.mu.Unlock()
 			c.log.Debug("ecr cache loaded from redis", zap.String("app", name), zap.Int("tags", len(tags)))
 		} else {
@@ -175,11 +183,12 @@ func (c *Cache) Populate(ctx context.Context) {
 				return
 			}
 			for _, entry := range g.apps {
-				tags := applyImages(images, entry.ac)
+				tags, newest := applyImages(images, entry.ac)
 				entry.ac.mu.Lock()
 				entry.ac.tags = tags
+				entry.ac.newestPush = newest
 				entry.ac.mu.Unlock()
-				c.writeTagsToRedis(ctx, entry.name, tags)
+				c.writeTagsToRedis(ctx, entry.name, tags, newest)
 				c.metrics.ObserveECRRefresh(entry.name, time.Since(start))
 				c.log.Debug("ecr cache refreshed", zap.String("app", entry.name), zap.Int("tags", len(tags)))
 			}
@@ -219,7 +228,10 @@ func (c *Cache) fetchImages(ctx context.Context, ac *appCache) ([]types.ImageDet
 	input := &ecr.DescribeImagesInput{
 		RepositoryName: aws.String(ac.repoName),
 		RegistryId:     aws.String(ac.registryID),
-		Filter:         &types.DescribeImagesFilter{TagStatus: types.TagStatusTagged},
+		Filter: &types.DescribeImagesFilter{
+			TagStatus:   types.TagStatusTagged,
+			ImageStatus: types.ImageStatusFilterActive,
+		},
 	}
 
 	var images []types.ImageDetail
@@ -234,7 +246,9 @@ func (c *Cache) fetchImages(ctx context.Context, ac *appCache) ([]types.ImageDet
 	return images, nil
 }
 
-func applyImages(images []types.ImageDetail, ac *appCache) []string {
+// applyImages filters and sorts images by tag pattern, returning tags newest-first
+// and the push timestamp of the newest image.
+func applyImages(images []types.ImageDetail, ac *appCache) ([]string, time.Time) {
 	type tagTime struct {
 		tag  string
 		time time.Time
@@ -255,10 +269,14 @@ func applyImages(images []types.ImageDetail, ac *appCache) []string {
 	})
 
 	tags := make([]string, 0, len(tagged))
-	for _, tt := range tagged {
+	var newest time.Time
+	for i, tt := range tagged {
 		tags = append(tags, tt.tag)
+		if i == 0 {
+			newest = tt.time
+		}
 	}
-	return tags
+	return tags, newest
 }
 
 func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error {
@@ -269,38 +287,45 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 		return err
 	}
 
-	tags := applyImages(images, ac)
+	allTags, newest := applyImages(images, ac)
 
+	// Incremental merge: only update if there are tags newer than what we have.
 	ac.mu.Lock()
-	ac.tags = tags
+	previousNewest := ac.newestPush
+	if newest.After(previousNewest) || len(ac.tags) == 0 {
+		ac.tags = allTags
+		ac.newestPush = newest
+	}
 	ac.mu.Unlock()
 
-	// Persist to Redis for cross-replica sharing.
-	c.writeTagsToRedis(ctx, appName, tags)
+	// Only write to Redis if something changed.
+	if newest.After(previousNewest) || len(allTags) != len(ac.tags) {
+		c.writeTagsToRedis(ctx, appName, allTags, newest)
+	}
 
 	c.metrics.ObserveECRRefresh(appName, time.Since(start))
-	c.log.Debug("ecr cache refreshed", zap.String("app", appName), zap.Int("tags", len(tags)))
+	c.log.Debug("ecr cache refreshed", zap.String("app", appName), zap.Int("tags", len(allTags)))
 	return nil
 }
 
-func (c *Cache) writeTagsToRedis(ctx context.Context, appName string, tags []string) {
-	data, err := json.Marshal(tags)
+func (c *Cache) writeTagsToRedis(ctx context.Context, appName string, tags []string, newest time.Time) {
+	data, err := json.Marshal(ecrCacheEntry{Tags: tags, NewestPush: newest})
 	if err != nil {
 		return
 	}
 	c.rdb.Set(ctx, ecrPrefix+appName, data, 0)
 }
 
-func (c *Cache) readTagsFromRedis(ctx context.Context, appName string) ([]string, bool) {
+func (c *Cache) readTagsFromRedis(ctx context.Context, appName string) ([]string, time.Time, bool) {
 	data, err := c.rdb.Get(ctx, ecrPrefix+appName).Bytes()
 	if err != nil {
-		return nil, false
+		return nil, time.Time{}, false
 	}
-	var tags []string
-	if json.Unmarshal(data, &tags) != nil {
-		return nil, false
+	var entry ecrCacheEntry
+	if json.Unmarshal(data, &entry) != nil {
+		return nil, time.Time{}, false
 	}
-	return tags, true
+	return entry.Tags, entry.NewestPush, true
 }
 
 // Tags returns up to limit of the most recent tags for an app.
