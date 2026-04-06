@@ -229,7 +229,6 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			PRURL:       d.PRURL,
 			ActorEmail:  approverIdent.Email,
 			ActorName:   approverIdent.Name,
-			MergeMethod: cfg.Deployment.MergeMethod,
 		})
 	}()
 	go func() {

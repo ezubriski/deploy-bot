@@ -196,7 +196,6 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 			PRNumber:    prNumber,
 			PRURL:       prURL,
 			AutoDeploy:  true,
-			MergeMethod: cfg.Deployment.MergeMethod,
 		})
 	}()
 	go func() {

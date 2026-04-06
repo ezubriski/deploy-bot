@@ -52,7 +52,6 @@ type AuditEvent struct {
 	ActorEmail  string    `json:"actor_email,omitempty"`
 	ActorName   string    `json:"actor_name,omitempty"`
 	AutoDeploy  bool      `json:"auto_deploy,omitempty"`
-	MergeMethod string    `json:"merge_method,omitempty"`
 }
 
 // Logger is the interface satisfied by both the S3-backed logger and the
@@ -150,7 +149,6 @@ func (l *zapLogger) Log(_ context.Context, event AuditEvent) error {
 		zap.String("actor_email", event.ActorEmail),
 		zap.String("actor_name", event.ActorName),
 		zap.Bool("auto_deploy", event.AutoDeploy),
-		zap.String("merge_method", event.MergeMethod),
 		zap.Time("timestamp", event.Timestamp),
 	)
 	return nil
