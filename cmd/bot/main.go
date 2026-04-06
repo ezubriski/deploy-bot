@@ -143,7 +143,7 @@ func main() {
 	if err != nil {
 		log.Fatal("validator github client", zap.Error(err))
 	}
-	val := validator.New(valHTTP, rawSlack, cfgHolder.Load(), log)
+	val := validator.New(valHTTP, rawSlack, redisStore.Redis(), cfgHolder.Load(), log)
 
 	// Log prod auto-deploy guard status at startup.
 	logProdAutoDeployGuard(initialCfg, auditLog, log)

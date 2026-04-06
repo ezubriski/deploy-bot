@@ -130,7 +130,7 @@ func TestMain(m *testing.M) {
 	if valErr != nil {
 		fatalf("validator github client: %v", valErr)
 	}
-	val := validator.New(valHTTP, rawSlack, cfg, log)
+	val := validator.New(valHTTP, rawSlack, redisStore.Redis(), cfg, log)
 	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m2, cfgHolder, log)
 
 	// Delete any leftover stream from a previous test run. This clears the

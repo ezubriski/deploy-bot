@@ -2,63 +2,59 @@ package validator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
-	"time"
 
 	"github.com/google/go-github/v60/github"
+	"github.com/redis/go-redis/v9"
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
 )
 
-// identityCacheTTL controls how long resolved Slack → GitHub identity mappings
-// are cached. User email and GitHub login change infrequently.
-const identityCacheTTL = 15 * time.Minute
+const identityPrefix = "identity:"
 
 type cachedIdentity struct {
-	ghLogin string
-	email   string
-	expires time.Time
+	GitHubLogin string `json:"github_login"`
+	Email       string `json:"email"`
 }
 
 type Validator struct {
 	gh    *github.Client
 	slack *slack.Client
+	rdb   *redis.Client
 	cfg   *config.Config
 	log   *zap.Logger
-
-	mu    sync.RWMutex
-	cache map[string]cachedIdentity // keyed by Slack user ID
 }
 
-func New(httpClient *http.Client, slackClient *slack.Client, cfg *config.Config, log *zap.Logger) *Validator {
+func New(httpClient *http.Client, slackClient *slack.Client, rdb *redis.Client, cfg *config.Config, log *zap.Logger) *Validator {
 	return &Validator{
 		gh:    github.NewClient(httpClient),
 		slack: slackClient,
+		rdb:   rdb,
 		cfg:   cfg,
 		log:   log,
-		cache: make(map[string]cachedIdentity),
 	}
 }
 
 // SlackUserToGitHub resolves a Slack user ID to their GitHub login and email.
-// Results are cached for 15 minutes to reduce Slack and GitHub API calls.
-// For users mapped via github.users config, the cache is bypassed (no API calls needed).
+// Results are cached in Redis (no expiry) to avoid repeated Slack and GitHub
+// API calls. For users mapped via github.users config, the cache is bypassed.
 func (v *Validator) SlackUserToGitHub(ctx context.Context, slackUserID string) (login string, email string, err error) {
 	if l, ok := v.cfg.GitHub.Users[slackUserID]; ok {
 		return l, "", nil
 	}
 
-	// Check cache.
-	v.mu.RLock()
-	if cached, ok := v.cache[slackUserID]; ok && time.Now().Before(cached.expires) {
-		v.mu.RUnlock()
-		return cached.ghLogin, cached.email, nil
+	// Check Redis cache.
+	key := identityPrefix + slackUserID
+	if data, err := v.rdb.Get(ctx, key).Bytes(); err == nil {
+		var cached cachedIdentity
+		if json.Unmarshal(data, &cached) == nil {
+			return cached.GitHubLogin, cached.Email, nil
+		}
 	}
-	v.mu.RUnlock()
 
 	// Resolve via Slack API.
 	info, err := v.slack.GetUserInfoContext(ctx, slackUserID)
@@ -81,14 +77,10 @@ func (v *Validator) SlackUserToGitHub(ctx context.Context, slackUserID string) (
 
 	login = result.Users[0].GetLogin()
 
-	// Cache the result.
-	v.mu.Lock()
-	v.cache[slackUserID] = cachedIdentity{
-		ghLogin: login,
-		email:   email,
-		expires: time.Now().Add(identityCacheTTL),
+	// Cache in Redis with no expiry.
+	if data, err := json.Marshal(cachedIdentity{GitHubLogin: login, Email: email}); err == nil {
+		v.rdb.Set(ctx, key, data, 0)
 	}
-	v.mu.Unlock()
 
 	return login, email, nil
 }
