@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/google/go-github/v60/github"
 	"github.com/slack-go/slack"
@@ -12,11 +14,24 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/config"
 )
 
+// identityCacheTTL controls how long resolved Slack → GitHub identity mappings
+// are cached. User email and GitHub login change infrequently.
+const identityCacheTTL = 15 * time.Minute
+
+type cachedIdentity struct {
+	ghLogin string
+	email   string
+	expires time.Time
+}
+
 type Validator struct {
 	gh    *github.Client
 	slack *slack.Client
 	cfg   *config.Config
 	log   *zap.Logger
+
+	mu    sync.RWMutex
+	cache map[string]cachedIdentity // keyed by Slack user ID
 }
 
 func New(httpClient *http.Client, slackClient *slack.Client, cfg *config.Config, log *zap.Logger) *Validator {
@@ -25,20 +40,27 @@ func New(httpClient *http.Client, slackClient *slack.Client, cfg *config.Config,
 		slack: slackClient,
 		cfg:   cfg,
 		log:   log,
+		cache: make(map[string]cachedIdentity),
 	}
 }
 
-// SlackUserToGitHub resolves a Slack user ID to their GitHub login.
-// It first checks the github.users config map (for users with private GitHub
-// emails), then falls back to searching GitHub by Slack profile email.
 // SlackUserToGitHub resolves a Slack user ID to their GitHub login and email.
-// The email is the Slack profile email used for the GitHub search.
-// For users mapped via github.users config, email is empty (no Slack lookup needed).
+// Results are cached for 15 minutes to reduce Slack and GitHub API calls.
+// For users mapped via github.users config, the cache is bypassed (no API calls needed).
 func (v *Validator) SlackUserToGitHub(ctx context.Context, slackUserID string) (login string, email string, err error) {
 	if l, ok := v.cfg.GitHub.Users[slackUserID]; ok {
 		return l, "", nil
 	}
 
+	// Check cache.
+	v.mu.RLock()
+	if cached, ok := v.cache[slackUserID]; ok && time.Now().Before(cached.expires) {
+		v.mu.RUnlock()
+		return cached.ghLogin, cached.email, nil
+	}
+	v.mu.RUnlock()
+
+	// Resolve via Slack API.
 	info, err := v.slack.GetUserInfoContext(ctx, slackUserID)
 	if err != nil {
 		return "", "", fmt.Errorf("get slack user info: %w", err)
@@ -48,6 +70,7 @@ func (v *Validator) SlackUserToGitHub(ctx context.Context, slackUserID string) (
 		return "", "", fmt.Errorf("slack user %s has no email", slackUserID)
 	}
 
+	// Resolve via GitHub API.
 	result, _, err := v.gh.Search.Users(ctx, fmt.Sprintf("%s in:email", email), nil)
 	if err != nil {
 		return "", email, fmt.Errorf("search github user: %w", err)
@@ -55,7 +78,19 @@ func (v *Validator) SlackUserToGitHub(ctx context.Context, slackUserID string) (
 	if result.GetTotal() == 0 || len(result.Users) == 0 {
 		return "", email, fmt.Errorf("no github user found for email %s", email)
 	}
-	return result.Users[0].GetLogin(), email, nil
+
+	login = result.Users[0].GetLogin()
+
+	// Cache the result.
+	v.mu.Lock()
+	v.cache[slackUserID] = cachedIdentity{
+		ghLogin: login,
+		email:   email,
+		expires: time.Now().Add(identityCacheTTL),
+	}
+	v.mu.Unlock()
+
+	return login, email, nil
 }
 
 // IsDeployer checks if a Slack user is a member of the deployer GitHub team.
