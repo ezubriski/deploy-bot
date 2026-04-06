@@ -178,7 +178,7 @@ values.
 |---|---|
 | `AWS_SECRET_NAME` | Secrets Manager path (e.g. `deploy-bot/test-secrets`) |
 | `CONFIG_PATH` | Path to test config (default: `tests/integration/testdata/config.json`) |
-| `INTEGRATION_APP` | App name to use in tests — must match an entry in `config.json` |
+| `INTEGRATION_APP` | Full app name (`app-environment`, e.g. `nginx-dev`) — must match a `FullName()` in `config.json` |
 | `INTEGRATION_TAG` | ECR tag to deploy — must exist in the ECR repo (e.g. `v0.0.1`) |
 | `INTEGRATION_REQUESTER_ID` | Slack user ID acting as the deploy requester |
 | `INTEGRATION_APPROVER_ID` | Slack user ID acting as the approver (must be in the configured team) |
@@ -189,7 +189,7 @@ Set these in a `.env.integration` file (gitignored) and source it before running
 ```bash
 export AWS_SECRET_NAME=deploy-bot/test-secrets
 export AWS_REGION=us-east-1
-export INTEGRATION_APP=test-app
+export INTEGRATION_APP=test-app-dev
 export INTEGRATION_TAG=v0.0.1
 export INTEGRATION_REQUESTER_ID=U01234ABCDE
 export INTEGRATION_APPROVER_ID=U09876ZYXWV
