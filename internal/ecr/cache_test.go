@@ -6,8 +6,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -57,9 +59,13 @@ func newTestCache(t *testing.T, apps map[string][]string, patterns map[string]st
 	m := metrics.New(prometheus.NewRegistry())
 	log := zap.NewNop()
 
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+
 	c := &Cache{
 		apps:    make(map[string]*appCache, len(apps)),
 		client:  nil, // nil is safe as long as tests don't trigger ECR API calls
+		rdb:     rdb,
 		metrics: m,
 		log:     log,
 	}

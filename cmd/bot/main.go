@@ -129,7 +129,7 @@ func main() {
 	slackMaxRetries, slackRetryWait := cfgHolder.Load().Slack.RateLimitConfig()
 	slackClient := slackclient.New(rawSlack, slackMaxRetries, slackRetryWait, log)
 
-	ecrCache, err := ecr.NewCache(ctx, cfgHolder.Load(), m, log)
+	ecrCache, err := ecr.NewCache(ctx, cfgHolder.Load(), redisStore.Redis(), m, log)
 	if err != nil {
 		log.Fatal("init ecr cache", zap.Error(err))
 	}

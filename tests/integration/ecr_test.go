@@ -13,7 +13,7 @@ import (
 // present in memory. ValidateTag must fall through to a live DescribeImages
 // call and confirm the tag exists.
 func TestValidateTag_CacheMiss(t *testing.T) {
-	freshCache, err := ecr.NewCache(env.ctx, env.cfg, env.metrics, env.log)
+	freshCache, err := ecr.NewCache(env.ctx, env.cfg, env.store.Redis(), env.metrics, env.log)
 	if err != nil {
 		t.Fatalf("new ecr cache: %v", err)
 	}

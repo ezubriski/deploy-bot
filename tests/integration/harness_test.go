@@ -107,7 +107,7 @@ func TestMain(m *testing.M) {
 
 	m2 := metrics.NewDefault()
 
-	ecrCache, err := ecr.NewCache(ctx, cfg, m2, log)
+	ecrCache, err := ecr.NewCache(ctx, cfg, redisStore.Redis(), m2, log)
 	if err != nil {
 		fatalf("init ecr cache: %v", err)
 	}

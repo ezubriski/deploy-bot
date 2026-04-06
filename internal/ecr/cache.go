@@ -2,6 +2,7 @@ package ecr
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecr/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
@@ -34,17 +36,21 @@ type appCache struct {
 	registryID string
 }
 
+const ecrPrefix = "ecr:"
+
 // Cache holds per-app tag caches backed by a single shared ECR client
-// (all apps use the same assumed role).
+// (all apps use the same assumed role). Tags are also persisted to Redis
+// so they are shared across replicas and survive restarts.
 type Cache struct {
 	mu      sync.RWMutex // protects apps map for AddApps
 	apps    map[string]*appCache
 	client  *ecr.Client // shared across all apps
+	rdb     *redis.Client
 	metrics *metrics.Metrics
 	log     *zap.Logger
 }
 
-func NewCache(ctx context.Context, cfg *config.Config, m *metrics.Metrics, log *zap.Logger) (*Cache, error) {
+func NewCache(ctx context.Context, cfg *config.Config, rdb *redis.Client, m *metrics.Metrics, log *zap.Logger) (*Cache, error) {
 	baseCfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
@@ -60,6 +66,7 @@ func NewCache(ctx context.Context, cfg *config.Config, m *metrics.Metrics, log *
 	c := &Cache{
 		apps:    make(map[string]*appCache),
 		client:  ecr.NewFromConfig(clientCfg),
+		rdb:     rdb,
 		metrics: m,
 		log:     log,
 	}
@@ -107,9 +114,9 @@ func newAppCache(app config.AppConfig) (*appCache, error) {
 	}, nil
 }
 
-// Populate fetches tags for all apps concurrently. Apps sharing the same ECR
-// repo are deduplicated so the API is called once per unique repository.
-// Fails open — logs warnings on error.
+// Populate loads tags for all apps. Tries Redis first (shared across replicas);
+// falls back to ECR API for any apps missing from Redis. Apps sharing the same
+// ECR repo are deduplicated so the API is called once per unique repository.
 func (c *Cache) Populate(ctx context.Context) {
 	c.mu.RLock()
 	apps := make(map[string]*appCache, len(c.apps))
@@ -118,21 +125,38 @@ func (c *Cache) Populate(ctx context.Context) {
 	}
 	c.mu.RUnlock()
 
-	// Deduplicate by repo — multiple apps may share the same ECR repo.
+	// Try Redis first for each app.
 	type appEntry struct {
 		name string
 		ac   *appCache
 	}
+	var needsFetch []appEntry
+	for name, ac := range apps {
+		if tags, ok := c.readTagsFromRedis(ctx, name); ok {
+			ac.mu.Lock()
+			ac.tags = tags
+			ac.mu.Unlock()
+			c.log.Debug("ecr cache loaded from redis", zap.String("app", name), zap.Int("tags", len(tags)))
+		} else {
+			needsFetch = append(needsFetch, appEntry{name, ac})
+		}
+	}
+
+	if len(needsFetch) == 0 {
+		return
+	}
+
+	// Deduplicate remaining by repo — multiple apps may share the same ECR repo.
 	type repoGroup struct {
 		apps []appEntry
 	}
 	byRepo := map[string]*repoGroup{}
-	for name, ac := range apps {
-		key := ac.registryID + "/" + ac.repoName
+	for _, entry := range needsFetch {
+		key := entry.ac.registryID + "/" + entry.ac.repoName
 		if g, ok := byRepo[key]; ok {
-			g.apps = append(g.apps, appEntry{name, ac})
+			g.apps = append(g.apps, entry)
 		} else {
-			byRepo[key] = &repoGroup{apps: []appEntry{{name, ac}}}
+			byRepo[key] = &repoGroup{apps: []appEntry{entry}}
 		}
 	}
 
@@ -155,6 +179,7 @@ func (c *Cache) Populate(ctx context.Context) {
 				entry.ac.mu.Lock()
 				entry.ac.tags = tags
 				entry.ac.mu.Unlock()
+				c.writeTagsToRedis(ctx, entry.name, tags)
 				c.metrics.ObserveECRRefresh(entry.name, time.Since(start))
 				c.log.Debug("ecr cache refreshed", zap.String("app", entry.name), zap.Int("tags", len(tags)))
 			}
@@ -250,9 +275,32 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 	ac.tags = tags
 	ac.mu.Unlock()
 
+	// Persist to Redis for cross-replica sharing.
+	c.writeTagsToRedis(ctx, appName, tags)
+
 	c.metrics.ObserveECRRefresh(appName, time.Since(start))
 	c.log.Debug("ecr cache refreshed", zap.String("app", appName), zap.Int("tags", len(tags)))
 	return nil
+}
+
+func (c *Cache) writeTagsToRedis(ctx context.Context, appName string, tags []string) {
+	data, err := json.Marshal(tags)
+	if err != nil {
+		return
+	}
+	c.rdb.Set(ctx, ecrPrefix+appName, data, 0)
+}
+
+func (c *Cache) readTagsFromRedis(ctx context.Context, appName string) ([]string, bool) {
+	data, err := c.rdb.Get(ctx, ecrPrefix+appName).Bytes()
+	if err != nil {
+		return nil, false
+	}
+	var tags []string
+	if json.Unmarshal(data, &tags) != nil {
+		return nil, false
+	}
+	return tags, true
 }
 
 // Tags returns up to limit of the most recent tags for an app.
