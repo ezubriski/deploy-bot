@@ -37,9 +37,17 @@ type appCache struct {
 	registryID string
 }
 
-// ecrCacheEntry is the Redis-persisted form of an app's tag cache.
+// repoTag is a tag with its push timestamp, stored unfiltered in Redis.
+type repoTag struct {
+	Tag      string    `json:"tag"`
+	PushedAt time.Time `json:"pushed_at"`
+}
+
+// ecrCacheEntry is the Redis-persisted form of a repo's tag cache.
+// Tags are stored unfiltered so apps with different tag patterns sharing
+// the same repo can filter on read without separate cache entries.
 type ecrCacheEntry struct {
-	Tags       []string  `json:"tags"`
+	Tags       []repoTag `json:"tags"`
 	NewestPush time.Time `json:"newest_push"`
 }
 
@@ -121,9 +129,8 @@ func newAppCache(app config.AppConfig) (*appCache, error) {
 	}, nil
 }
 
-// Populate loads tags for all apps. Tries Redis first (shared across replicas);
-// falls back to ECR API for any apps missing from Redis. Apps sharing the same
-// ECR repo are deduplicated so the API is called once per unique repository.
+// Populate loads tags for all apps. Tries Redis first (keyed by repo, shared
+// across apps and replicas); falls back to ECR API for repos missing from Redis.
 func (c *Cache) Populate(ctx context.Context) {
 	c.mu.RLock()
 	apps := make(map[string]*appCache, len(c.apps))
@@ -132,21 +139,40 @@ func (c *Cache) Populate(ctx context.Context) {
 	}
 	c.mu.RUnlock()
 
-	// Try Redis first for each app.
 	type appEntry struct {
 		name string
 		ac   *appCache
 	}
-	var needsFetch []appEntry
+
+	// Group all apps by repo.
+	type repoGroup struct {
+		apps []appEntry
+	}
+	byRepo := map[string]*repoGroup{}
 	for name, ac := range apps {
-		if tags, newest, ok := c.readTagsFromRedis(ctx, name); ok {
-			ac.mu.Lock()
-			ac.tags = tags
-			ac.newestPush = newest
-			ac.mu.Unlock()
-			c.log.Debug("ecr cache loaded from redis", zap.String("app", name), zap.Int("tags", len(tags)))
+		key := ac.registryID + "/" + ac.repoName
+		if g, ok := byRepo[key]; ok {
+			g.apps = append(g.apps, appEntry{name, ac})
 		} else {
-			needsFetch = append(needsFetch, appEntry{name, ac})
+			byRepo[key] = &repoGroup{apps: []appEntry{{name, ac}}}
+		}
+	}
+
+	// Try Redis per repo, then fall back to ECR API.
+	var needsFetch []*repoGroup
+	for _, group := range byRepo {
+		sample := group.apps[0].ac
+		if repoTags, _, ok := c.readRepoTagsFromRedis(ctx, sample); ok {
+			for _, entry := range group.apps {
+				filtered, newest := filterRepoTags(repoTags, entry.ac)
+				entry.ac.mu.Lock()
+				entry.ac.tags = filtered
+				entry.ac.newestPush = newest
+				entry.ac.mu.Unlock()
+				c.log.Debug("ecr cache loaded from redis", zap.String("app", entry.name), zap.Int("tags", len(filtered)))
+			}
+		} else {
+			needsFetch = append(needsFetch, group)
 		}
 	}
 
@@ -154,23 +180,9 @@ func (c *Cache) Populate(ctx context.Context) {
 		return
 	}
 
-	// Deduplicate remaining by repo — multiple apps may share the same ECR repo.
-	type repoGroup struct {
-		apps []appEntry
-	}
-	byRepo := map[string]*repoGroup{}
-	for _, entry := range needsFetch {
-		key := entry.ac.registryID + "/" + entry.ac.repoName
-		if g, ok := byRepo[key]; ok {
-			g.apps = append(g.apps, entry)
-		} else {
-			byRepo[key] = &repoGroup{apps: []appEntry{entry}}
-		}
-	}
-
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, 5)
-	for _, group := range byRepo {
+	for _, group := range needsFetch {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(g *repoGroup) {
@@ -182,15 +194,18 @@ func (c *Cache) Populate(ctx context.Context) {
 				c.log.Warn("ecr cache populate failed", zap.String("app", g.apps[0].name), zap.Error(err))
 				return
 			}
+			allRepoTags := imagesToRepoTags(images)
+			if len(allRepoTags) > 0 {
+				c.writeRepoTagsToRedis(ctx, g.apps[0].ac, allRepoTags, allRepoTags[0].PushedAt)
+			}
 			for _, entry := range g.apps {
-				tags, newest := applyImages(images, entry.ac)
+				filtered, newest := filterRepoTags(allRepoTags, entry.ac)
 				entry.ac.mu.Lock()
-				entry.ac.tags = tags
+				entry.ac.tags = filtered
 				entry.ac.newestPush = newest
 				entry.ac.mu.Unlock()
-				c.writeTagsToRedis(ctx, entry.name, tags, newest)
 				c.metrics.ObserveECRRefresh(entry.name, time.Since(start))
-				c.log.Debug("ecr cache refreshed", zap.String("app", entry.name), zap.Int("tags", len(tags)))
+				c.log.Debug("ecr cache refreshed", zap.String("app", entry.name), zap.Int("tags", len(filtered)))
 			}
 		}(group)
 	}
@@ -246,37 +261,21 @@ func (c *Cache) fetchImages(ctx context.Context, ac *appCache) ([]types.ImageDet
 	return images, nil
 }
 
-// applyImages filters and sorts images by tag pattern, returning tags newest-first
-// and the push timestamp of the newest image.
-func applyImages(images []types.ImageDetail, ac *appCache) ([]string, time.Time) {
-	type tagTime struct {
-		tag  string
-		time time.Time
-	}
-	var tagged []tagTime
+// imagesToRepoTags extracts all tagged images sorted newest-first (unfiltered).
+func imagesToRepoTags(images []types.ImageDetail) []repoTag {
+	var all []repoTag
 	for _, img := range images {
 		if img.ImagePushedAt == nil {
 			continue
 		}
 		for _, t := range img.ImageTags {
-			if ac.pattern.MatchString(t) {
-				tagged = append(tagged, tagTime{tag: t, time: *img.ImagePushedAt})
-			}
+			all = append(all, repoTag{Tag: t, PushedAt: *img.ImagePushedAt})
 		}
 	}
-	sort.Slice(tagged, func(i, j int) bool {
-		return tagged[i].time.After(tagged[j].time)
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].PushedAt.After(all[j].PushedAt)
 	})
-
-	tags := make([]string, 0, len(tagged))
-	var newest time.Time
-	for i, tt := range tagged {
-		tags = append(tags, tt.tag)
-		if i == 0 {
-			newest = tt.time
-		}
-	}
-	return tags, newest
+	return all
 }
 
 func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error {
@@ -287,37 +286,42 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 		return err
 	}
 
-	allTags, newest := applyImages(images, ac)
+	allRepoTags := imagesToRepoTags(images)
+	filteredTags, newest := filterRepoTags(allRepoTags, ac)
 
-	// Incremental merge: only update if there are tags newer than what we have.
 	ac.mu.Lock()
 	previousNewest := ac.newestPush
 	if newest.After(previousNewest) || len(ac.tags) == 0 {
-		ac.tags = allTags
+		ac.tags = filteredTags
 		ac.newestPush = newest
 	}
 	ac.mu.Unlock()
 
-	// Only write to Redis if something changed.
-	if newest.After(previousNewest) || len(allTags) != len(ac.tags) {
-		c.writeTagsToRedis(ctx, appName, allTags, newest)
+	// Write unfiltered repo tags to Redis (shared across apps with same repo).
+	if len(allRepoTags) > 0 {
+		repoNewest := allRepoTags[0].PushedAt
+		c.writeRepoTagsToRedis(ctx, ac, allRepoTags, repoNewest)
 	}
 
 	c.metrics.ObserveECRRefresh(appName, time.Since(start))
-	c.log.Debug("ecr cache refreshed", zap.String("app", appName), zap.Int("tags", len(allTags)))
+	c.log.Debug("ecr cache refreshed", zap.String("app", appName), zap.Int("tags", len(filteredTags)))
 	return nil
 }
 
-func (c *Cache) writeTagsToRedis(ctx context.Context, appName string, tags []string, newest time.Time) {
+func repoKey(ac *appCache) string {
+	return ecrPrefix + ac.registryID + "/" + ac.repoName
+}
+
+func (c *Cache) writeRepoTagsToRedis(ctx context.Context, ac *appCache, tags []repoTag, newest time.Time) {
 	data, err := json.Marshal(ecrCacheEntry{Tags: tags, NewestPush: newest})
 	if err != nil {
 		return
 	}
-	c.rdb.Set(ctx, ecrPrefix+appName, data, 0)
+	c.rdb.Set(ctx, repoKey(ac), data, 0)
 }
 
-func (c *Cache) readTagsFromRedis(ctx context.Context, appName string) ([]string, time.Time, bool) {
-	data, err := c.rdb.Get(ctx, ecrPrefix+appName).Bytes()
+func (c *Cache) readRepoTagsFromRedis(ctx context.Context, ac *appCache) ([]repoTag, time.Time, bool) {
+	data, err := c.rdb.Get(ctx, repoKey(ac)).Bytes()
 	if err != nil {
 		return nil, time.Time{}, false
 	}
@@ -326,6 +330,22 @@ func (c *Cache) readTagsFromRedis(ctx context.Context, appName string) ([]string
 		return nil, time.Time{}, false
 	}
 	return entry.Tags, entry.NewestPush, true
+}
+
+// filterRepoTags applies the app's tag pattern to unfiltered repo tags,
+// returning matched tags sorted newest-first.
+func filterRepoTags(tags []repoTag, ac *appCache) ([]string, time.Time) {
+	var filtered []string
+	var newest time.Time
+	for _, t := range tags {
+		if ac.pattern.MatchString(t.Tag) {
+			filtered = append(filtered, t.Tag)
+			if t.PushedAt.After(newest) {
+				newest = t.PushedAt
+			}
+		}
+	}
+	return filtered, newest
 }
 
 // Tags returns up to limit of the most recent tags for an app.
