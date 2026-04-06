@@ -417,6 +417,9 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		requesterGH, requesterEmail, ghErr = b.validator.SlackUserToGitHub(ctx, requesterID)
 		if ghErr != nil {
 			requesterGH = callback.User.Name
+			if requesterGH == "" {
+				requesterGH = requesterID // Slack user ID as last resort
+			}
 		}
 	}()
 	prepWg.Wait()
@@ -530,7 +533,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber))
+	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterGH))
 }
 
 // postNoOpNotice posts a no-op notification to the appropriate Slack target.

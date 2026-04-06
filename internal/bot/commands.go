@@ -225,6 +225,9 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	requesterGH, requesterEmail, err := b.validator.SlackUserToGitHub(ctx, cmd.UserID)
 	if err != nil {
 		requesterGH = cmd.UserName
+		if requesterGH == "" {
+			requesterGH = "slack:" + cmd.UserID
+		}
 	}
 
 	cfg := b.cfg.Load()
@@ -276,7 +279,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
 	wg.Wait()
 	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cmd.UserName))
+	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", requesterGH), zap.String("slack_id", cmd.UserID))
 }
 
 func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg string) {
