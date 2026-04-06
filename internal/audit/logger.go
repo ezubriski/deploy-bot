@@ -47,8 +47,6 @@ type AuditEvent struct {
 	Tag          string    `json:"tag,omitempty"`
 	PRNumber     int       `json:"pr_number,omitempty"`
 	PRURL        string    `json:"pr_url,omitempty"`
-	Requester    string    `json:"requester,omitempty"`
-	Approver     string    `json:"approver,omitempty"`
 	Reason       string    `json:"reason,omitempty"`
 	Rejection    string    `json:"rejection,omitempty"`
 	ActorEmail   string    `json:"actor_email,omitempty"`
@@ -148,8 +146,6 @@ func (l *zapLogger) Log(_ context.Context, event AuditEvent) error {
 		zap.String("tag", event.Tag),
 		zap.Int("pr_number", event.PRNumber),
 		zap.String("pr_url", event.PRURL),
-		zap.String("requester", event.Requester),
-		zap.String("approver", event.Approver),
 		zap.String("reason", event.Reason),
 		zap.String("rejection", event.Rejection),
 		zap.String("actor_email", event.ActorEmail),

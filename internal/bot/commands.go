@@ -250,7 +250,6 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 			Tag:          d.Tag,
 			PRNumber:     prNumber,
 			PRURL:        d.PRURL,
-			Requester:    cancellerIdent.String(),
 			ActorEmail:   cancellerIdent.Email,
 			ActorSlackID: cmd.UserID,
 			ActorName:    cancellerIdent.Name,

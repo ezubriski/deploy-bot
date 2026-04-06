@@ -89,7 +89,6 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 				App:         evt.App,
 				Environment: env,
 				Tag:         evt.Tag,
-				Requester:   ecrRequesterName,
 			})
 			b.log.Info("ecr push no-op: tag already current", zap.String("app", evt.App), zap.String("tag", evt.Tag))
 			return
@@ -196,8 +195,6 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 			Tag:         evt.Tag,
 			PRNumber:    prNumber,
 			PRURL:       prURL,
-			Requester:   ecrRequesterName,
-			Approver:    ecrRequesterName,
 			AutoDeploy:  true,
 			MergeMethod: cfg.Deployment.MergeMethod,
 		})
@@ -276,7 +273,6 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 			Tag:         evt.Tag,
 			PRNumber:    prNumber,
 			PRURL:       prURL,
-			Requester:   ecrRequesterName,
 			Reason:      reason,
 		})
 	}()
@@ -372,7 +368,6 @@ func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEv
 			Tag:         evt.Tag,
 			PRNumber:    prNumber,
 			PRURL:       prURL,
-			Requester:   ecrRequesterName,
 			Reason:      "merge conflict could not be auto-resolved",
 		})
 	}()

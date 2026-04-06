@@ -285,7 +285,6 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 				Tag:          d.Tag,
 				PRNumber:     d.PRNumber,
 				PRURL:        d.PRURL,
-				Requester:    d.Requester,
 				Reason:       "stale duration exceeded",
 				ActorSlackID: d.RequesterID,
 			})
