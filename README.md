@@ -240,7 +240,7 @@ Config is valid.
 
 ```
 $ deploy-bot-config validate --file .deploy-bot.json
-.deploy-bot.json (deploy-bot/v1)
+.deploy-bot.json (deploy-bot/v2)
 
   ✓ apps[0] (myapp-dev): ok
   ✗ apps[1] (broken): kustomize_path: required

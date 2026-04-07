@@ -68,49 +68,53 @@ func New(httpClient *http.Client, slackClient *slack.Client, rdb *redis.Client, 
 
 // ResolveIdentity resolves a Slack user ID to their full identity (GitHub login,
 // email, display name). Results are cached in Redis (no expiry) to avoid
-// repeated Slack and GitHub API calls. For users mapped via github.users config,
-// only the GitHub login is available (no Slack lookup needed).
+// repeated Slack and GitHub API calls.
+//
+// Always attempts to resolve email and name from Slack. The GitHub login is
+// taken from `identity_overrides` if set; otherwise resolved via GitHub email
+// search. A partial identity (email/name only) is returned when GitHub
+// resolution fails.
 func (v *Validator) ResolveIdentity(ctx context.Context, slackUserID string) (Identity, error) {
-	if l, ok := v.cfg.IdentityOverrides[slackUserID]; ok {
-		return Identity{GitHubLogin: l}, nil
-	}
-
 	// Check Redis cache.
 	key := identityPrefix + slackUserID
 	if data, err := v.rdb.Get(ctx, key).Bytes(); err == nil {
 		var cached cachedIdentity
-		if json.Unmarshal(data, &cached) == nil && cached.GitHubLogin != "" {
+		if json.Unmarshal(data, &cached) == nil && cached.Email != "" {
 			return cached, nil
 		}
 	}
 
-	// Resolve via Slack API.
+	// Resolve email and name via Slack API.
 	info, err := v.slack.GetUserInfoContext(ctx, slackUserID)
 	if err != nil {
 		return Identity{}, fmt.Errorf("get slack user info: %w", err)
 	}
 	email := info.Profile.Email
-	if email == "" {
-		return Identity{}, fmt.Errorf("slack user %s has no email", slackUserID)
-	}
 	name := info.Profile.RealName
-
-	// Resolve via GitHub API.
-	result, _, err := v.gh.Search.Users(ctx, fmt.Sprintf("%s in:email", email), nil)
-	if err != nil {
-		return Identity{Email: email, Name: name}, fmt.Errorf("search github user: %w", err)
-	}
-	if result.GetTotal() == 0 || len(result.Users) == 0 {
-		return Identity{Email: email, Name: name}, fmt.Errorf("no github user found for email %s", email)
+	if email == "" {
+		return Identity{Name: name}, fmt.Errorf("slack user %s has no email", slackUserID)
 	}
 
-	id := Identity{
-		GitHubLogin: result.Users[0].GetLogin(),
-		Email:       email,
-		Name:        name,
+	id := Identity{Email: email, Name: name}
+
+	// Identity override takes precedence over GitHub email search.
+	if login, ok := v.cfg.IdentityOverrides[slackUserID]; ok {
+		id.GitHubLogin = login
+	} else {
+		result, _, err := v.gh.Search.Users(ctx, fmt.Sprintf("%s in:email", email), nil)
+		if err != nil {
+			v.log.Warn("identity: github search failed",
+				zap.String("email", email), zap.Error(err))
+		} else if result.GetTotal() == 0 || len(result.Users) == 0 {
+			v.log.Warn("identity: no github user found for email",
+				zap.String("email", email))
+		} else {
+			id.GitHubLogin = result.Users[0].GetLogin()
+		}
 	}
 
-	// Cache in Redis with no expiry.
+	// Cache the identity. We cache partial identities (email/name without
+	// GitHub login) so we don't keep retrying failed GitHub searches.
 	if data, err := json.Marshal(id); err == nil {
 		v.rdb.Set(ctx, key, data, 0)
 	}
@@ -167,6 +171,12 @@ func (v *Validator) IsMember(ctx context.Context, slackUserID string) (bool, Ide
 		id, err := v.ResolveIdentity(ctx, slackUserID)
 		if err != nil {
 			return false, id, err
+		}
+
+		// Skip GitHub-based checks if we couldn't resolve a GitHub login
+		// (private email, no GitHub account, or no identity_overrides entry).
+		if id.GitHubLogin == "" {
+			return false, id, nil
 		}
 
 		// GitHub users: direct login match.

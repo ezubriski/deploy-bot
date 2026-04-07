@@ -12,14 +12,19 @@ func TestParse(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "explicit v1",
-			input:   `{"apiVersion":"deploy-bot/v1","apps":[]}`,
-			wantVer: VersionV1,
+			name:    "explicit v2",
+			input:   `{"apiVersion":"deploy-bot/v2","apps":[]}`,
+			wantVer: VersionV2,
 		},
 		{
-			name:    "missing version defaults to v1",
+			name:    "missing version is rejected",
 			input:   `{"apps":[]}`,
-			wantVer: VersionV1,
+			wantErr: true,
+		},
+		{
+			name:    "v1 is no longer supported",
+			input:   `{"apiVersion":"deploy-bot/v1","apps":[]}`,
+			wantErr: true,
 		},
 		{
 			name:    "unknown version",
@@ -28,7 +33,7 @@ func TestParse(t *testing.T) {
 		},
 		{
 			name:    "bad prefix",
-			input:   `{"apiVersion":"other/v1","apps":[]}`,
+			input:   `{"apiVersion":"other/v2","apps":[]}`,
 			wantErr: true,
 		},
 		{
@@ -38,8 +43,8 @@ func TestParse(t *testing.T) {
 		},
 		{
 			name:    "with apps",
-			input:   `{"apiVersion":"deploy-bot/v1","apps":[{"app":"a","environment":"dev","kustomize_path":"p","ecr_repo":"r"}]}`,
-			wantVer: VersionV1,
+			input:   `{"apiVersion":"deploy-bot/v2","apps":[{"app":"a","environment":"dev","kustomize_path":"p","ecr_repo":"r"}]}`,
+			wantVer: VersionV2,
 		},
 	}
 
@@ -65,7 +70,7 @@ func TestParse(t *testing.T) {
 func TestValidate(t *testing.T) {
 	t.Run("all valid", func(t *testing.T) {
 		cfg := &RepoConfigFile{
-			APIVersion: VersionV1,
+			APIVersion: VersionV2,
 			Apps: []AppEntry{
 				{App: "a", Environment: "dev", KustomizePath: "apps/a/dev", ECRRepo: "r"},
 				{App: "b", Environment: "prod", KustomizePath: "apps/b/prod", ECRRepo: "r", TagPattern: `^v\d+$`},

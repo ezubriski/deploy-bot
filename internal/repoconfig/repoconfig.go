@@ -11,12 +11,9 @@ import (
 )
 
 const (
-	// VersionV1 is the first API version. All fields are required.
-	VersionV1 = "deploy-bot/v1"
-
-	// VersionV2 allows omitting app and kustomize_path when
-	// enforce_repo_naming is enabled. The scanner derives them
-	// from the repository name.
+	// VersionV2 is the only supported API version. It allows omitting app
+	// and kustomize_path when enforce_repo_naming is enabled; the scanner
+	// derives them from the repository name.
 	VersionV2 = "deploy-bot/v2"
 
 	// VersionPrefix is the namespace prefix for all API versions.
@@ -57,9 +54,9 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("apps[%d]: %s: %s", e.Index, e.Field, e.Msg)
 }
 
-// Parse unmarshals a .deploy-bot.json file and normalises the API version.
-// Files without an apiVersion field are treated as deploy-bot/v1.
-// Unknown or malformed versions return a hard error.
+// Parse unmarshals a .deploy-bot.json file and validates the API version.
+// Only deploy-bot/v2 is supported. Missing or unknown versions return a
+// hard error.
 func Parse(data []byte) (*RepoConfigFile, error) {
 	var cfg RepoConfigFile
 	if err := json.Unmarshal(data, &cfg); err != nil {
@@ -67,18 +64,15 @@ func Parse(data []byte) (*RepoConfigFile, error) {
 	}
 
 	if cfg.APIVersion == "" {
-		cfg.APIVersion = VersionV1
+		return nil, fmt.Errorf("apiVersion is required (must be %s)", CurrentVersion)
 	}
 
 	if !strings.HasPrefix(cfg.APIVersion, VersionPrefix) {
 		return nil, fmt.Errorf("unsupported apiVersion %q (expected prefix %q)", cfg.APIVersion, VersionPrefix)
 	}
 
-	switch cfg.APIVersion {
-	case VersionV1, VersionV2:
-		// ok
-	default:
-		return nil, fmt.Errorf("unsupported apiVersion %q (this tool supports up to %s)", cfg.APIVersion, CurrentVersion)
+	if cfg.APIVersion != VersionV2 {
+		return nil, fmt.Errorf("unsupported apiVersion %q (only %s is supported)", cfg.APIVersion, CurrentVersion)
 	}
 
 	return &cfg, nil
@@ -86,15 +80,15 @@ func Parse(data []byte) (*RepoConfigFile, error) {
 
 // ValidateOpts controls validation behavior.
 type ValidateOpts struct {
-	// RepoNaming indicates enforce_repo_naming is active. When true and the
-	// config is v2, app and kustomize_path may be omitted (derived from
-	// RepoName). If specified explicitly, they must match the derived values.
+	// RepoNaming indicates enforce_repo_naming is active. When true,
+	// app and kustomize_path may be omitted (derived from RepoName). If
+	// specified explicitly, they must match the derived values.
 	RepoNaming bool
 	// RepoName is the repository name used to derive app and kustomize_path
 	// when RepoNaming is true (e.g. "my-service" from "org/my-service").
 	RepoName string
 	// Exempt indicates this repo is exempt from enforce_repo_naming.
-	// v1 configs are accepted and no derivation is applied.
+	// No derivation is applied; all fields must be specified explicitly.
 	Exempt bool
 	// KustomizePathFn derives the kustomize_path from repo name and
 	// environment. If nil, defaults to "<env>/<repo>/kustomization.yaml".
@@ -125,15 +119,6 @@ func Validate(cfg *RepoConfigFile) []ValidationError {
 
 // ValidateWithOpts checks all app entries with the given options.
 func ValidateWithOpts(cfg *RepoConfigFile, opts ValidateOpts) []ValidationError {
-	// When enforcement is on and the repo is not exempt, v1 is rejected.
-	if opts.RepoNaming && !opts.Exempt && cfg.APIVersion == VersionV1 {
-		return []ValidationError{{
-			Index: -1, Field: "apiVersion",
-			Msg: "enforce_repo_naming requires apiVersion deploy-bot/v2. " +
-				"Update your config or contact the operator to add this repo to exempt_repos.",
-		}}
-	}
-
 	var errs []ValidationError
 	seen := make(map[string]int) // "app\x00env" -> first index
 
@@ -143,8 +128,8 @@ func ValidateWithOpts(cfg *RepoConfigFile, opts ValidateOpts) []ValidationError 
 	}
 	kpaths := make(map[string]kpathEntry) // kustomize_path -> first occurrence
 
-	// Derive fields when enforcement is on, the config is v2, and the repo is not exempt.
-	allowDerived := opts.RepoNaming && !opts.Exempt && cfg.APIVersion == VersionV2
+	// Derive fields when enforcement is on and the repo is not exempt.
+	allowDerived := opts.RepoNaming && !opts.Exempt
 
 	for i, e := range cfg.Apps {
 		app := strings.TrimSpace(e.App)

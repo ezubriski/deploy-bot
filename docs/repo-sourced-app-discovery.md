@@ -39,14 +39,14 @@ derived from the repository name (see [naming-conventions.md](naming-conventions
 }
 ```
 
-### Flexible naming (v1)
+### Explicit fields (v2 without enforcement)
 
-Without `enforce_repo_naming`, or for repos listed in `exempt_repos`, teams
-use `apiVersion: deploy-bot/v1` and specify all fields explicitly:
+Without `enforce_repo_naming`, or for repos listed in `exempt_repos`, all
+fields must be specified explicitly:
 
 ```json
 {
-  "apiVersion": "deploy-bot/v1",
+  "apiVersion": "deploy-bot/v2",
   "apps": [
     {
       "app": "myapp",
@@ -68,14 +68,11 @@ use `apiVersion: deploy-bot/v1` and specify all fields explicitly:
 }
 ```
 
-### API versions
+### API version
 
-| Version | `app` | `kustomize_path` | `tag_pattern` | When to use |
-|---|---|---|---|---|
-| `deploy-bot/v2` | Optional (derived from repo name) | Optional (derived from template) | Optional (falls back to operator default) | Recommended. Use with `enforce_repo_naming` |
-| `deploy-bot/v1` | Required | Required | Optional | Flexible naming, or exempt repos during migration |
-
-If `apiVersion` is omitted, it defaults to `v1`.
+`apiVersion: deploy-bot/v2` is required. With `enforce_repo_naming` and the
+repo not in `exempt_repos`, `app` and `kustomize_path` may be omitted (the
+scanner derives them from the repo name). Otherwise all fields are required.
 
 The collector validates each entry against the same schema rules as the
 primary config (e.g. `environment` is required, `tag_pattern` compiles as

@@ -295,11 +295,11 @@ Repositories can declare their own app entries by placing a JSON file (default `
 }
 ```
 
-**Flexible (v1)** -- all fields specified explicitly. Use without `enforce_repo_naming`, or for repos listed in `exempt_repos`:
+**Explicit fields** -- all fields specified explicitly. Use without `enforce_repo_naming`, or for repos listed in `exempt_repos`:
 
 ```json
 {
-  "apiVersion": "deploy-bot/v1",
+  "apiVersion": "deploy-bot/v2",
   "apps": [
     {
       "app": "myapp",
