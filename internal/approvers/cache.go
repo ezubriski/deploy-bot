@@ -10,76 +10,142 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
+
+	"github.com/ezubriski/deploy-bot/internal/config"
 )
 
-const approversKey = "approvers"
+const membersKey = "team_members"
 
-// Cache maintains a set of Slack user IDs who are members of the GitHub
-// approver team. The set is stored in Redis so it is shared across replicas
-// and survives pod restarts. It is refreshed periodically in the background.
+// Cache maintains a set of Slack user IDs who are authorized to interact with
+// the bot. The set is stored in Redis so it is shared across replicas and
+// survives pod restarts. It is refreshed periodically in the background.
+//
+// Sources are combined with OR logic:
+//   - authorization.github_teams: GitHub team members resolved to Slack IDs
+//   - authorization.github_users: GitHub users resolved to Slack IDs
+//   - authorization.slack_user_groups: Slack user group members
+//   - authorization.slack_emails: email addresses resolved to Slack user IDs
 //
 // A stale or incomplete cache fails open: unknown users are treated as
-// non-approvers and the deploy modal returns an inline error. The live
-// IsApprover check in the worker remains the authoritative gate.
+// non-members and the deploy modal returns an inline error. The live
+// IsMember check in the worker remains the authoritative gate.
 type Cache struct {
-	rdb      *redis.Client
-	gh       *github.Client
-	slack    *slack.Client
-	org      string
-	teamSlug string
-	log      *zap.Logger
+	rdb   *redis.Client
+	gh    *github.Client
+	slack *slack.Client
+	auth  config.ParsedAuthorization
+	org   string
+	log   *zap.Logger
 }
 
-func New(httpClient *http.Client, slackClient *slack.Client, rdb *redis.Client, org, teamSlug string, log *zap.Logger) *Cache {
+// New creates a Cache. The httpClient may be nil if no GitHub team is configured.
+func New(httpClient *http.Client, slackClient *slack.Client, rdb *redis.Client, org string, auth config.ParsedAuthorization, log *zap.Logger) *Cache {
+	var gh *github.Client
+	if httpClient != nil {
+		gh = github.NewClient(httpClient)
+	}
 	return &Cache{
-		rdb:      rdb,
-		gh:       github.NewClient(httpClient),
-		slack:    slackClient,
-		org:      org,
-		teamSlug: teamSlug,
-		log:      log,
+		rdb:   rdb,
+		gh:    gh,
+		slack: slackClient,
+		auth:  auth,
+		org:   org,
+		log:   log,
 	}
 }
 
-// IsApprover returns true if the Slack user ID is in the cached approver set.
-func (c *Cache) IsApprover(slackUserID string) bool {
-	ok, err := c.rdb.SIsMember(context.Background(), approversKey, slackUserID).Result()
+// IsMember returns true if the Slack user ID is in the cached member set.
+func (c *Cache) IsMember(slackUserID string) bool {
+	ok, err := c.rdb.SIsMember(context.Background(), membersKey, slackUserID).Result()
 	if err != nil {
-		c.log.Warn("approver cache: redis read failed, failing open", zap.Error(err))
+		c.log.Warn("team cache: redis read failed, failing open", zap.Error(err))
 		return false
 	}
 	return ok
 }
 
-// Refresh fetches the current GitHub team roster and rebuilds the Slack user
-// ID set in Redis. Errors are logged but do not clear the existing set.
+// Refresh fetches all configured authorization sources and rebuilds the
+// Slack user ID set in Redis. Errors from individual sources are logged
+// but do not prevent other sources from being collected.
 func (c *Cache) Refresh(ctx context.Context) error {
-	members, err := c.fetchTeamMembers(ctx)
-	if err != nil {
-		return fmt.Errorf("fetch team members: %w", err)
+	seen := map[string]struct{}{}
+	var ids []string
+
+	addID := func(id string) {
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
 	}
 
-	ids := make([]string, 0, len(members))
-	for _, login := range members {
-		slackID, email, err := c.resolveSlackID(ctx, login)
+	// Source 1: Slack emails (resolved to Slack user IDs).
+	for _, email := range c.auth.SlackEmails {
+		slackUser, err := c.slack.GetUserByEmailContext(ctx, email)
 		if err != nil {
-			c.log.Warn("approver cache: could not resolve team member",
+			c.log.Warn("team cache: could not resolve slack email",
 				zap.String("email", email), zap.Error(err))
 			continue
 		}
-		ids = append(ids, slackID)
+		addID(slackUser.ID)
+	}
+
+	// Source 2: Slack user group members.
+	for _, groupID := range c.auth.SlackUserGroups {
+		members, err := c.slack.GetUserGroupMembersContext(ctx, groupID)
+		if err != nil {
+			c.log.Warn("team cache: could not fetch slack user group members",
+				zap.String("group", groupID), zap.Error(err))
+			continue
+		}
+		for _, m := range members {
+			addID(m)
+		}
+	}
+
+	// Source 3: GitHub users (resolved to Slack IDs).
+	if c.gh != nil {
+		for _, login := range c.auth.GitHubUsers {
+			slackID, email, err := c.resolveSlackID(ctx, login)
+			if err != nil {
+				c.log.Warn("team cache: could not resolve github user",
+					zap.String("login", login), zap.String("email", email), zap.Error(err))
+				continue
+			}
+			addID(slackID)
+		}
+	}
+
+	// Source 4: GitHub team members (resolved to Slack IDs).
+	if c.gh != nil {
+		for _, team := range c.auth.GitHubTeams {
+			ghMembers, err := c.fetchTeamMembers(ctx, team)
+			if err != nil {
+				c.log.Warn("team cache: could not fetch github team members",
+					zap.String("team", team), zap.Error(err))
+				continue
+			}
+			for _, login := range ghMembers {
+				slackID, email, err := c.resolveSlackID(ctx, login)
+				if err != nil {
+					c.log.Warn("team cache: could not resolve team member",
+						zap.String("email", email), zap.Error(err))
+					continue
+				}
+				addID(slackID)
+			}
+		}
 	}
 
 	if len(ids) > 0 {
 		pipe := c.rdb.Pipeline()
-		pipe.Del(ctx, approversKey)
-		pipe.SAdd(ctx, approversKey, strSliceToAny(ids)...)
+		pipe.Del(ctx, membersKey)
+		pipe.SAdd(ctx, membersKey, strSliceToAny(ids)...)
 		if _, err := pipe.Exec(ctx); err != nil {
-			return fmt.Errorf("write approver set to redis: %w", err)
+			return fmt.Errorf("write member set to redis: %w", err)
 		}
 	}
 
-	c.log.Info("approver cache refreshed", zap.Int("count", len(ids)))
+	c.log.Info("team membership cache refreshed", zap.Int("count", len(ids)))
 	return nil
 }
 
@@ -102,7 +168,7 @@ func (c *Cache) StartRefresh(ctx context.Context, interval time.Duration) {
 				return
 			case <-ticker.C:
 				if err := c.Refresh(ctx); err != nil {
-					c.log.Error("approver cache refresh failed", zap.Error(err))
+					c.log.Error("team membership cache refresh failed", zap.Error(err))
 				}
 			}
 		}
@@ -110,14 +176,14 @@ func (c *Cache) StartRefresh(ctx context.Context, interval time.Duration) {
 }
 
 // fetchTeamMembers returns the GitHub logins of all active team members.
-func (c *Cache) fetchTeamMembers(ctx context.Context) ([]string, error) {
+func (c *Cache) fetchTeamMembers(ctx context.Context, teamSlug string) ([]string, error) {
 	var logins []string
 	opts := &github.TeamListTeamMembersOptions{
 		Role:        "all",
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 	for {
-		members, resp, err := c.gh.Teams.ListTeamMembersBySlug(ctx, c.org, c.teamSlug, opts)
+		members, resp, err := c.gh.Teams.ListTeamMembersBySlug(ctx, c.org, teamSlug, opts)
 		if err != nil {
 			return nil, err
 		}

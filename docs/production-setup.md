@@ -229,10 +229,11 @@ See [configuration.md](configuration.md) for all secret fields and auth combinat
 {
   "github": {
     "org": "your-org",
-    "repo": "your-gitops-repo",
-    "deployer_team": "developers",
-    "approver_team": "senior-engineers"
+    "repo": "your-gitops-repo"
   },
+  "authorization": [
+    {"type": "github_teams", "value": ["developers"]}
+  ],
   "slack": {
     "deploy_channel": "C0123456789"
   },
@@ -248,7 +249,8 @@ See [configuration.md](configuration.md) for all secret fields and auth combinat
     "audit_bucket": "<terraform audit_bucket_name output>",
     "audit_region": "us-east-1"
   },
-  "ecr_events": {
+  "ecr_auto_deploy": {
+    "enabled": true,
     "sqs_queue_url": "<terraform sqs_queue_url output>"
   },
   "repo_discovery": {
@@ -260,7 +262,7 @@ See [configuration.md](configuration.md) for all secret fields and auth combinat
   },
   "apps": [
     {
-      "app": "myapp-prod",
+      "app": "myapp",
       "environment": "prod",
       "kustomize_path": "apps/myapp/overlays/prod/kustomization.yaml",
       "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",

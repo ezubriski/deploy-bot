@@ -52,8 +52,8 @@ gh label create "deploy-bot/pending" --color "0075ca" --repo <your-org>/deploy-b
 ### Teams
 
 Create a GitHub team (e.g. `deploy-bot-testers`) in your org. Both the
-requester and approver test accounts must be members. Use this team for both
-`deployer_team` and `approver_team` in the test config.
+requester and approver test accounts must be members. Use this team for
+a `github_team` entry in the `authorization` list in the test config.
 
 The team members must have Slack accounts whose **email address** matches
 their GitHub account's primary email. The validator resolves
@@ -100,19 +100,12 @@ Repeat for any additional test tags you want to deploy.
 aws s3api create-bucket --bucket deploy-bot-test-audit --region us-east-1
 ```
 
-### IAM roles
+### IAM credentials
 
-Create three roles following the same pattern as production (`README.md` →
-IAM section), substituting test resource ARNs. Name them something like:
-
-- `deploy-bot-test` (bot role, assumes the two below)
-- `deploy-bot-test-ecr`
-- `deploy-bot-test-audit`
-
-For local development the bot role is not needed — your local AWS credentials
-(via `~/.aws/credentials` or environment variables) are used directly. The ECR
-and audit roles are still assumed via STS, so your local credentials must have
-`sts:AssumeRole` permission for those two roles.
+The bot uses ambient IAM credentials for all AWS API calls (ECR, S3, Secrets Manager).
+For local development, your local AWS credentials (via `~/.aws/credentials` or
+environment variables) are used directly and must have the necessary permissions
+for ECR reads, S3 audit writes, and Secrets Manager reads.
 
 ### Secrets Manager
 
@@ -185,10 +178,10 @@ values.
 |---|---|
 | `AWS_SECRET_NAME` | Secrets Manager path (e.g. `deploy-bot/test-secrets`) |
 | `CONFIG_PATH` | Path to test config (default: `tests/integration/testdata/config.json`) |
-| `INTEGRATION_APP` | App name to use in tests — must match an entry in `config.json` |
+| `INTEGRATION_APP` | Full app name (`app-environment`, e.g. `nginx-dev`) — must match a `FullName()` in `config.json` |
 | `INTEGRATION_TAG` | ECR tag to deploy — must exist in the ECR repo (e.g. `v0.0.1`) |
 | `INTEGRATION_REQUESTER_ID` | Slack user ID acting as the deploy requester |
-| `INTEGRATION_APPROVER_ID` | Slack user ID acting as the approver (must be in approver team) |
+| `INTEGRATION_APPROVER_ID` | Slack user ID acting as the approver (must be in the configured team) |
 | `AWS_PROFILE` or `AWS_REGION` | Standard AWS SDK env vars for credentials and region |
 
 Set these in a `.env.integration` file (gitignored) and source it before running:
@@ -196,7 +189,7 @@ Set these in a `.env.integration` file (gitignored) and source it before running
 ```bash
 export AWS_SECRET_NAME=deploy-bot/test-secrets
 export AWS_REGION=us-east-1
-export INTEGRATION_APP=test-app
+export INTEGRATION_APP=test-app-dev
 export INTEGRATION_TAG=v0.0.1
 export INTEGRATION_REQUESTER_ID=U01234ABCDE
 export INTEGRATION_APPROVER_ID=U09876ZYXWV

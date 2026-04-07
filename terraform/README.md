@@ -211,7 +211,8 @@ Set the `sqs_queue_url` output in your `config.json`:
 
 ```json
 {
-  "ecr_events": {
+  "ecr_auto_deploy": {
+    "enabled": true,
     "sqs_queue_url": "<module.deploy_bot.sqs_queue_url>"
   }
 }

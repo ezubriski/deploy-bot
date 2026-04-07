@@ -142,11 +142,49 @@ See [`terraform/examples/elasticache/`](https://github.com/ezubriski/deploy-bot/
 |---|---|---|
 | `github.org` | | GitHub organisation |
 | `github.repo` | | GitOps repository name |
-| `github.deployer_team` | | GitHub team slug -- members can request deploys |
-| `github.approver_team` | | GitHub team slug -- members can approve/reject |
-| `github.users` | `{}` | Optional map of Slack user ID to GitHub login for users with private GitHub emails (e.g. `{"U12345": "ghlogin"}`) |
 | `github.rate_limit_max_retries` | `3` | Max retries on GitHub secondary rate limit |
 | `github.rate_limit_retry_wait` | `"2m"` | Max wait between rate-limit retries |
+
+### Identity Overrides
+
+| Field | Default | Description |
+|---|---|---|
+| `identity_overrides` | `{}` | Top-level map of Slack user ID to GitHub login for users with private GitHub emails (e.g. `{"U12345": "ghlogin"}`). Used by the identity chain when email-based resolution fails |
+
+### Authorization
+
+A list of typed entries. At least one entry is required. A user is authorized if they match **any** entry (OR logic).
+
+Each entry has `type` and `value` (always an array of strings):
+
+| Type | Description |
+|---|---|
+| `github_teams` | GitHub team slugs -- members resolved via Slack email → GitHub login → team membership |
+| `github_users` | GitHub logins -- Slack users whose resolved GitHub login matches are authorized |
+| `slack_user_groups` | Slack user group names or IDs (`S...`) |
+| `slack_emails` | Email addresses resolved to Slack users via the Slack API |
+
+Example:
+
+```json
+"authorization": [
+  {"type": "github_teams", "value": ["deployers"]},
+  {"type": "slack_emails", "value": ["alice@example.com", "bob@example.com"]}
+]
+```
+
+!!! warning "GitHub authorization is best-effort"
+    `github_teams` and `github_users` rely on matching a Slack user to a GitHub
+    user by email address. This requires the GitHub user's email to be **public**
+    on their GitHub profile. Users with private GitHub emails will fail to resolve
+    and will not be authorized through these sources.
+
+    For users with private GitHub emails, either use `identity_overrides` to manually
+    map Slack user IDs to GitHub logins, or authorize them via `slack_emails` or
+    `slack_user_groups` instead.
+
+    Slack-based sources (`slack_emails`, `slack_user_groups`) work consistently
+    as long as the app is granted the `users:read.email` scope.
 
 ### Slack
 
@@ -174,20 +212,21 @@ See [`terraform/examples/elasticache/`](https://github.com/ezubriski/deploy-bot/
 
 | Field | Default | Description |
 |---|---|---|
-| `aws.ecr_role_arn` | | Optional role to assume for ECR reads. Omit to use pod identity directly |
 | `aws.ecr_region` | | Region of app ECR repositories |
-| `aws.audit_role_arn` | | Optional role to assume for S3 audit writes. Omit to use pod identity directly |
 | `aws.audit_region` | | Region of the audit S3 bucket |
 | `aws.audit_bucket` | | S3 bucket for audit logs. If empty, audit events are written to the application log via zap instead of S3 |
 
-### ECR Events (ECR push-triggered deploys)
+The bot uses ambient IAM credentials (IRSA, instance profile, or environment variables) for all AWS API calls. No role ARNs are configured.
 
-Disabled by default. When `sqs_queue_url` is set, the receiver polls an SQS queue for ECR push events from EventBridge and enqueues matching deploys.
+### ECR Auto Deploy (ECR push-triggered deploys)
+
+Disabled by default. When `enabled` is true and `sqs_queue_url` is set, the receiver polls an SQS queue for ECR push events from EventBridge and enqueues matching deploys.
 
 | Field | Default | Description |
 |---|---|---|
-| `ecr_events.sqs_queue_url` | `""` (disabled) | SQS queue URL to poll for ECR push events |
-| `ecr_events.poll_interval` | `"30s"` | How often to long-poll the SQS queue |
+| `ecr_auto_deploy.enabled` | `false` | Enable ECR push-triggered deploys |
+| `ecr_auto_deploy.sqs_queue_url` | `""` | SQS queue URL to poll for ECR push events |
+| `ecr_auto_deploy.poll_interval` | `"30s"` | How often to long-poll the SQS queue |
 
 See [ecr-push-triggered-deploys.md](ecr-push-triggered-deploys.md) for the full design.
 
@@ -203,31 +242,28 @@ Disabled by default. When enabled, the receiver scans GitHub repos for `.deploy-
 | `repo_discovery.repo_prefix` | `""` (all) | Only scan repos whose name starts with this prefix |
 | `repo_discovery.discovered_path` | `"/etc/deploy-bot/discovered.json"` | Where the bot reads merged discovered apps |
 | `repo_discovery.configmap_name` | `"deploy-bot-discovered"` | ConfigMap to write discovered apps to |
-| `repo_discovery.configmap_namespace` | inferred from pod | Namespace of the ConfigMap |
 | `repo_discovery.rate_limit_floor` | `500` | Pause scanning when GitHub rate limit remaining drops below this |
-| `repo_discovery.warn_channel` | deploy channel | Slack channel for conflict warnings |
 
 See [repo-sourced-app-discovery.md](repo-sourced-app-discovery.md) for the full design.
 
 ### Apps
 
-Each entry in the `apps[]` array defines one deployable application. App names include the environment (e.g. `myapp-dev`, `myapp-prod`) and must be unique.
+Each entry in the `apps[]` array defines one deployable application. The `app` field is the base name (e.g. `"myapp"`); the bot constructs the composite `app-environment` (e.g. `myapp-dev`, `myapp-prod`) internally via `FullName()`. Each `(app, environment)` pair must be unique.
 
 | Field | Default | Description |
 |---|---|---|
-| `app` | | App name (including environment, e.g. `myapp-prod`). Must be unique across all entries |
+| `app` | | Base app name (e.g. `myapp`). The bot constructs the full name as `app-environment`. Must be unique per environment |
 | `environment` | | **Required.** Environment name (e.g. `dev`, `prod`). Included in lock keys, branch names, PR titles, and all Slack messages |
 | `kustomize_path` | | Path to the kustomization.yaml in the gitops repo |
 | `ecr_repo` | | Full ECR repository URI (e.g. `123456789.dkr.ecr.us-east-1.amazonaws.com/myapp`) |
 | `tag_pattern` | | Regex pattern for valid tags. Tags not matching are rejected by the modal and filtered by the ECR poller |
 | `auto_deploy` | `false` | When true, ECR push events for this app deploy automatically without human approval. Subject to `allow_prod_auto_deploy` |
-| `auto_deploy_approver_group` | | Slack ID to notify for ECR-triggered deploys. Channel ID (`C...`) posts there directly; user group ID (`S...`) mentions the group in deploy channel |
 
 Example:
 
 ```json
 {
-  "app": "myapp-prod",
+  "app": "myapp",
   "environment": "prod",
   "kustomize_path": "apps/myapp/overlays/prod/kustomization.yaml",
   "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",
@@ -259,14 +295,14 @@ Repositories can declare their own app entries by placing a JSON file (default `
 }
 ```
 
-**Flexible (v1)** -- all fields specified explicitly. Use without `enforce_repo_naming`, or for repos listed in `exempt_repos`:
+**Explicit fields** -- all fields specified explicitly. Use without `enforce_repo_naming`, or for repos listed in `exempt_repos`:
 
 ```json
 {
-  "apiVersion": "deploy-bot/v1",
+  "apiVersion": "deploy-bot/v2",
   "apps": [
     {
-      "app": "myapp-dev",
+      "app": "myapp",
       "environment": "dev",
       "kustomize_path": "apps/myapp/overlays/dev/kustomization.yaml",
       "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",
@@ -274,7 +310,7 @@ Repositories can declare their own app entries by placing a JSON file (default `
       "auto_deploy": true
     },
     {
-      "app": "myapp-prod",
+      "app": "myapp",
       "environment": "prod",
       "kustomize_path": "apps/myapp/overlays/prod/kustomization.yaml",
       "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",
@@ -297,10 +333,11 @@ Operator-managed apps always take precedence. If an `(app, environment)` pair ex
 {
   "github": {
     "org": "myorg",
-    "repo": "gitops-repo",
-    "deployer_team": "deployers",
-    "approver_team": "senior-engineers"
+    "repo": "gitops-repo"
   },
+  "authorization": [
+    {"type": "github_teams", "value": ["deployers"]}
+  ],
   "slack": {
     "deploy_channel": "C01234567"
   },
@@ -315,7 +352,8 @@ Operator-managed apps always take precedence. If an `(app, environment)` pair ex
     "audit_bucket": "my-audit-logs",
     "audit_region": "us-east-1"
   },
-  "ecr_events": {
+  "ecr_auto_deploy": {
+    "enabled": true,
     "sqs_queue_url": "https://sqs.us-east-1.amazonaws.com/123456789012/deploy-bot-ecr-events",
     "poll_interval": "30s"
   },
@@ -327,7 +365,7 @@ Operator-managed apps always take precedence. If an `(app, environment)` pair ex
   },
   "apps": [
     {
-      "app": "myapp-prod",
+      "app": "myapp",
       "environment": "prod",
       "kustomize_path": "apps/myapp/overlays/prod/kustomization.yaml",
       "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",

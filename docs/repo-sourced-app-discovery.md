@@ -29,8 +29,7 @@ derived from the repository name (see [naming-conventions.md](naming-conventions
     {
       "environment": "dev",
       "ecr_repo": "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp",
-      "auto_deploy": true,
-      "auto_deploy_approver_group": "C01234567"
+      "auto_deploy": true
     },
     {
       "environment": "prod",
@@ -40,14 +39,14 @@ derived from the repository name (see [naming-conventions.md](naming-conventions
 }
 ```
 
-### Flexible naming (v1)
+### Explicit fields (v2 without enforcement)
 
-Without `enforce_repo_naming`, or for repos listed in `exempt_repos`, teams
-use `apiVersion: deploy-bot/v1` and specify all fields explicitly:
+Without `enforce_repo_naming`, or for repos listed in `exempt_repos`, all
+fields must be specified explicitly:
 
 ```json
 {
-  "apiVersion": "deploy-bot/v1",
+  "apiVersion": "deploy-bot/v2",
   "apps": [
     {
       "app": "myapp",
@@ -55,8 +54,7 @@ use `apiVersion: deploy-bot/v1` and specify all fields explicitly:
       "kustomize_path": "apps/myapp/overlays/dev/kustomization.yaml",
       "ecr_repo": "123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp",
       "tag_pattern": "^v\\d+\\.\\d+\\.\\d+$",
-      "auto_deploy": true,
-      "auto_deploy_approver_group": "C01234567"
+      "auto_deploy": true
     },
     {
       "app": "myapp",
@@ -70,14 +68,11 @@ use `apiVersion: deploy-bot/v1` and specify all fields explicitly:
 }
 ```
 
-### API versions
+### API version
 
-| Version | `app` | `kustomize_path` | `tag_pattern` | When to use |
-|---|---|---|---|---|
-| `deploy-bot/v2` | Optional (derived from repo name) | Optional (derived from template) | Optional (falls back to operator default) | Recommended. Use with `enforce_repo_naming` |
-| `deploy-bot/v1` | Required | Required | Optional | Flexible naming, or exempt repos during migration |
-
-If `apiVersion` is omitted, it defaults to `v1`.
+`apiVersion: deploy-bot/v2` is required. With `enforce_repo_naming` and the
+repo not in `exempt_repos`, `app` and `kustomize_path` may be omitted (the
+scanner derives them from the repo name). Otherwise all fields are required.
 
 The collector validates each entry against the same schema rules as the
 primary config (e.g. `environment` is required, `tag_pattern` compiles as
@@ -93,7 +88,7 @@ before they reach the scanner, reducing noise in Slack.
 ### Fields NOT settable from repos
 
 Repo-sourced configs can only set per-app fields. They cannot modify global
-settings (`github`, `slack`, `deployment`, `aws`, `ecr_events`). Any
+settings (`github`, `slack`, `deployment`, `aws`, `ecr_auto_deploy`). Any
 unrecognised top-level keys are ignored with a warning.
 
 ## Precedence
@@ -158,7 +153,7 @@ When the collector detects a conflict (repo-sourced app collides on
 
 ### Slack
 
-Posts to the configured `warn_channel` (defaults to `deploy_channel`):
+Posts to the deploy channel:
 
 > App `myapp` (`prod`) is defined in both operator config and repo
 > `my-org/myapp`. Remove it from operator config for the repo-sourced
@@ -221,9 +216,7 @@ pairs already present in the primary. This merge happens on every reload.
     "repo_prefix": "",
     "discovered_path": "/etc/deploy-bot/discovered.json",
     "configmap_name": "deploy-bot-discovered",
-    "configmap_namespace": "deploy-bot",
-    "rate_limit_floor": 500,
-    "warn_channel": ""
+    "rate_limit_floor": 500
   }
 }
 ```
@@ -236,9 +229,7 @@ pairs already present in the primary. This merge happens on every reload.
 | `repo_prefix` | `""` (all repos) | Only scan repos whose name starts with this prefix |
 | `discovered_path` | `"/etc/deploy-bot/discovered.json"` | Where the bot reads the merged discovered apps |
 | `configmap_name` | `"deploy-bot-discovered"` | ConfigMap to write discovered apps to |
-| `configmap_namespace` | `""` (inferred from pod) | Namespace of the ConfigMap |
 | `rate_limit_floor` | `500` | Pause scanning when remaining rate limit drops below this |
-| `warn_channel` | `""` (uses `deploy_channel`) | Slack channel for conflict warnings |
 
 ### Discovered file format
 

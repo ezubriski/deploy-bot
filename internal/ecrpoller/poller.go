@@ -47,8 +47,8 @@ type sqsClient interface {
 // initialised. The poller is inactive until Run is called.
 func New(ctx context.Context, rdb *redis.Client, buf bufferAdder, st *store.Store, cfg *config.Holder, log *zap.Logger) (*Poller, error) {
 	c := cfg.Load()
-	if c.ECREvents.SQSQueueURL == "" {
-		return nil, fmt.Errorf("ecr_events.sqs_queue_url is not configured")
+	if c.ECRAutoDeploy.SQSQueueURL == "" {
+		return nil, fmt.Errorf("ecr_auto_deploy.sqs_queue_url is not configured")
 	}
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx)
@@ -59,8 +59,8 @@ func New(ctx context.Context, rdb *redis.Client, buf bufferAdder, st *store.Stor
 
 	return &Poller{
 		sqs:          sqsClient,
-		queueURL:     c.ECREvents.SQSQueueURL,
-		pollInterval: c.ECREvents.PollIntervalDuration(),
+		queueURL:     c.ECRAutoDeploy.SQSQueueURL,
+		pollInterval: c.ECRAutoDeploy.PollIntervalDuration(),
 		rdb:          rdb,
 		buf:          buf,
 		store:        st,
@@ -156,7 +156,7 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 		// Validate tag against pattern.
 		if appCfg.TagPattern != "" && !appCfg.CompiledTagPattern().MatchString(imageTag) {
 			p.log.Debug("ecrpoller: tag does not match pattern",
-				zap.String("app", appCfg.App),
+				zap.String("app", appCfg.FullName()),
 				zap.String("tag", imageTag),
 				zap.String("pattern", appCfg.TagPattern),
 			)
@@ -164,14 +164,14 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 		}
 
 		// Check deploy lock — skip if locked.
-		locked, err := p.store.IsLocked(ctx, appCfg.Environment, appCfg.App)
+		locked, err := p.store.IsLocked(ctx, appCfg.Environment, appCfg.FullName())
 		if err != nil {
-			p.log.Error("ecrpoller: check lock", zap.String("app", appCfg.App), zap.Error(err))
+			p.log.Error("ecrpoller: check lock", zap.String("app", appCfg.FullName()), zap.Error(err))
 			continue
 		}
 		if locked {
 			p.log.Info("ecrpoller: app locked, skipping",
-				zap.String("app", appCfg.App),
+				zap.String("app", appCfg.FullName()),
 				zap.String("tag", imageTag),
 			)
 			continue
@@ -179,18 +179,18 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 
 		// Enqueue to Redis stream (via buffer on failure).
 		evt := queue.NewECRPushEvent(queue.ECRPushEvent{
-			App:        appCfg.App,
+			App:        appCfg.FullName(),
 			Tag:        imageTag,
 			Repository: appCfg.ECRRepo,
 		})
 
 		if err := queue.EnqueueECR(ctx, p.rdb, evt); err != nil {
-			p.log.Warn("ecrpoller: enqueue failed, buffering", zap.String("app", appCfg.App), zap.Error(err))
+			p.log.Warn("ecrpoller: enqueue failed, buffering", zap.String("app", appCfg.FullName()), zap.Error(err))
 			p.buf.Add(evt)
 		}
 		enqueued++
 		p.log.Info("ecrpoller: event enqueued",
-			zap.String("app", appCfg.App),
+			zap.String("app", appCfg.FullName()),
 			zap.String("tag", imageTag),
 		)
 	}

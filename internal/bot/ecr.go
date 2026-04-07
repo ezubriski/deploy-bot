@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -252,7 +251,7 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	go func() {
 		defer wg.Done()
 		// Post approval request to the appropriate channel.
-		b.postECRApprovalRequest(ctx, appCfg, cfg, pendingInfo{
+		b.postECRApprovalRequest(ctx, cfg, pendingInfo{
 			App:         evt.App,
 			Environment: env,
 			Tag:         evt.Tag,
@@ -281,9 +280,8 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	b.log.Info("ecr push: approval requested", zap.String("app", evt.App), zap.String("tag", evt.Tag), zap.Int("pr", prNumber))
 }
 
-// postECRApprovalRequest posts an approval message to the appropriate target
-// based on auto_deploy_approver_group config.
-func (b *Bot) postECRApprovalRequest(ctx context.Context, appCfg *config.AppConfig, cfg *config.Config, deploy pendingInfo) {
+// postECRApprovalRequest posts an approval message to the deploy channel.
+func (b *Bot) postECRApprovalRequest(ctx context.Context, cfg *config.Config, deploy pendingInfo) {
 	text := fmt.Sprintf(
 		"*ECR Deploy Request*\n\nNew image `%s:%s` detected in ECR.\n*App:* %s\n*Environment:* %s\n*PR:* <%s|#%d>",
 		deploy.App, deploy.Tag, deploy.App, deploy.Environment, deploy.PRURL, deploy.PRNumber,
@@ -297,7 +295,7 @@ func (b *Bot) postECRApprovalRequest(ctx context.Context, appCfg *config.AppConf
 		slack.NewTextBlockObject("plain_text", "Reject", false, false))
 	btnReject.Style = "danger"
 
-	blocks := []slack.MsgOption{
+	opts := []slack.MsgOption{
 		slack.MsgOptionBlocks(
 			slack.NewSectionBlock(
 				slack.NewTextBlockObject("mrkdwn", text, false, false),
@@ -306,27 +304,12 @@ func (b *Bot) postECRApprovalRequest(ctx context.Context, appCfg *config.AppConf
 			slack.NewActionBlock("", btnApprove, btnReject),
 		),
 	}
-
-	// Thread if volume threshold is met.
-	opts := append(blocks, threadOption(b.getThreadTS(ctx, deploy.Environment))...)
-
-	group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
-	switch {
-	case strings.HasPrefix(group, "S"):
-		// User group: mention in the deploy channel.
-		mention := fmt.Sprintf("<!subteam^%s>", group)
-		opts = append(opts, slack.MsgOptionText(mention+" "+text, false))
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
-	case strings.HasPrefix(group, "C"):
-		// Channel: post directly there.
-		_, _, _ = b.slack.PostMessageContext(ctx, group, opts...)
-	default:
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
-	}
+	opts = append(opts, threadOption(b.getThreadTS(ctx, deploy.Environment))...)
+	_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
 }
 
-// notifyECRAutoDeployFailed posts a failure notice mentioning the approver
-// group (if configured), closes the PR, and releases the lock.
+// notifyECRAutoDeployFailed posts a failure notice to the deploy channel,
+// closes the PR, and releases the lock.
 func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEvent, appCfg *config.AppConfig, cfg *config.Config, prNumber int, prURL string, failErr error) {
 	env := appCfg.Environment
 
@@ -344,18 +327,7 @@ func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEv
 		defer wg.Done()
 		opts := []slack.MsgOption{slack.MsgOptionText(msg, false)}
 		opts = append(opts, threadOption(b.getThreadTS(ctx, env))...)
-
-		group := appCfg.EffectiveApproverGroup(cfg.Slack.ApproverGroup)
-		switch {
-		case strings.HasPrefix(group, "S"):
-			mention := fmt.Sprintf("<!subteam^%s> ", group)
-			opts = append(opts, slack.MsgOptionText(mention+msg, false))
-			_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
-		case strings.HasPrefix(group, "C"):
-			_, _, _ = b.slack.PostMessageContext(ctx, group, opts...)
-		default:
-			_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
-		}
+		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
 	}()
 	go func() {
 		defer wg.Done()

@@ -75,8 +75,7 @@ If the rebase attempt fails or the retry merge also conflicts:
 
 - The PR is closed and the deploy branch is deleted.
 - The lock is released.
-- A message is posted to the deploy channel (mentioning
-  `auto_deploy_approver_group` if set):
+- A message is posted to the deploy channel:
   > Auto-deploy of `myapp` `v1.2.3` failed -- merge conflict could not be
   > auto-resolved. Branch has been cleaned up. Manual deploy may be needed.
 - An audit log entry is written with `event_type: "conflict_failed"`.

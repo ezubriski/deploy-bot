@@ -106,7 +106,7 @@ status=$(check_api "$DEPLOY_BOT_TOKEN" GET "/orgs/${GITHUB_ORG}/teams?per_page=1
 if [ "$status" = "200" ]; then
   pass "Organization members: read (team listing)"
 else
-  fail "Organization members: read (HTTP ${status}) — required for approver/deployer team checks"
+  fail "Organization members: read (HTTP ${status}) — required for team membership checks"
 fi
 
 # --- Write permission checks (non-destructive) ---

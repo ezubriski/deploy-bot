@@ -99,21 +99,34 @@ func main() {
 	evtBuffer := buffer.New(cfg.Slack.BufferSize, rdb, queue.StreamKeyUser, log)
 	go evtBuffer.Run(ctx)
 
-	approverHTTP, err := secrets.ApproverHTTPClient()
-	if err != nil {
-		log.Fatal("approver github client", zap.Error(err))
+	ghTeams, ghUsers, slackGroups, slackEmails, authErr := config.ParseAuthValues(cfg.Authorization)
+	if authErr != nil {
+		log.Fatal("parse authorization config", zap.Error(authErr))
 	}
-	approverCache := approvers.New(approverHTTP, slackClient, rdb, cfg.GitHub.Org, cfg.GitHub.ApproverTeam, log)
-	if err := approverCache.Refresh(ctx); err != nil {
+	parsedAuth := config.ParsedAuthorization{
+		GitHubTeams:     ghTeams,
+		GitHubUsers:     ghUsers,
+		SlackUserGroups: slackGroups,
+		SlackEmails:     slackEmails,
+	}
+	var memberHTTP *http.Client
+	if len(parsedAuth.GitHubTeams) > 0 || len(parsedAuth.GitHubUsers) > 0 {
+		memberHTTP, err = secrets.MemberCacheHTTPClient()
+		if err != nil {
+			log.Fatal("member cache github client", zap.Error(err))
+		}
+	}
+	memberCache := approvers.New(memberHTTP, slackClient, rdb, cfg.GitHub.Org, parsedAuth, log)
+	if err := memberCache.Refresh(ctx); err != nil {
 		// Fail open: log the error but continue. The cache will retry on the
-		// next tick, and the worker still validates approvers authoritatively.
-		log.Warn("approver cache initial refresh failed", zap.Error(err))
+		// next tick, and the worker still validates members authoritatively.
+		log.Warn("member cache initial refresh failed", zap.Error(err))
 	}
-	approverCache.StartRefresh(ctx, approverRefreshInterval)
+	memberCache.StartRefresh(ctx, approverRefreshInterval)
 
 	// Start ECR poller if configured. It enqueues to the same Redis stream
 	// as Slack events, using its own buffer for Redis backpressure.
-	if cfg.ECREvents.SQSQueueURL != "" {
+	if cfg.ECRAutoDeploy.Enabled && cfg.ECRAutoDeploy.SQSQueueURL != "" {
 		ecrBuf := buffer.New(buffer.DefaultSize, rdb, queue.StreamKeyECR, log)
 		go ecrBuf.Run(ctx)
 		poller, err := ecrpoller.New(ctx, rdb, ecrBuf, redisStore, config.NewHolder(cfg, configPath), log)
@@ -185,7 +198,7 @@ func main() {
 				}
 				if callback.Type == slack.InteractionTypeViewSubmission &&
 					callback.View.CallbackID == bot.ModalCallbackDeploy {
-					validateAndDispatch(ctx, sm, rdb, cfg, approverCache, evtBuffer, evt, callback, log)
+					validateAndDispatch(ctx, sm, rdb, cfg, memberCache, evtBuffer, evt, callback, log)
 				} else {
 					enqueueAndAck(ctx, sm, rdb, evtBuffer, evt, log)
 				}
@@ -230,7 +243,7 @@ func validateAndDispatch(
 	sm *socketmode.Client,
 	rdb *redis.Client,
 	cfg *config.Config,
-	approverCache *approvers.Cache,
+	memberCache *approvers.Cache,
 	buf *buffer.Buffer,
 	evt socketmode.Event,
 	callback slack.InteractionCallback,
@@ -246,9 +259,9 @@ func validateAndDispatch(
 	// Fast, in-memory checks only. Lock checks are deferred to the worker
 	// so the modal responds immediately even under heavy load.
 
-	// Check approver team membership via cache (in-memory).
-	if approverID != "" && !approverCache.IsApprover(approverID) {
-		errs[bot.BlockApprover] = "Selected approver is not a member of the approver team."
+	// Check team membership via cache (in-memory).
+	if approverID != "" && !memberCache.IsMember(approverID) {
+		errs[bot.BlockApprover] = "Selected approver is not a member of the authorized team."
 	}
 
 	// Validate manual tag override against the app's tag pattern (in-memory).

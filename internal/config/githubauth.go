@@ -73,9 +73,9 @@ func (s *Secrets) ValidatorHTTPClient() (*http.Client, error) {
 	return s.patClient(s.GitHubToken), nil
 }
 
-// ApproverHTTPClient returns an *http.Client for the approver cache.
+// MemberCacheHTTPClient returns an *http.Client for the team membership cache.
 // Scoped to: members (read) only.
-func (s *Secrets) ApproverHTTPClient() (*http.Client, error) {
+func (s *Secrets) MemberCacheHTTPClient() (*http.Client, error) {
 	return s.ValidatorHTTPClient()
 }
 

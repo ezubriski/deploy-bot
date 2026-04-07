@@ -10,11 +10,11 @@ We recommend enforcing strong conventions via `enforce_repo_naming` to avoid con
 
 By default, app teams choose their own `app` name and `kustomize_path` in their `.deploy-bot.json`. This works well for small teams but requires coordination to avoid collisions.
 
-**Example `.deploy-bot.json`** (v1 or v2):
+**Example `.deploy-bot.json`**:
 
 ```json
 {
-  "apiVersion": "deploy-bot/v1",
+  "apiVersion": "deploy-bot/v2",
   "apps": [
     {
       "app": "my-service",
@@ -129,12 +129,7 @@ Some repos may need to break convention — for example, during a migration or w
 }
 ```
 
-Exempt repos can use `apiVersion: deploy-bot/v1` and specify any `app` name and `kustomize_path`. Non-exempt repos using v1 when enforcement is on are rejected:
-
-```
-✗ apiVersion: enforce_repo_naming requires apiVersion deploy-bot/v2.
-  Update your config or contact the operator to add this repo to exempt_repos.
-```
+Exempt repos must specify `app` and `kustomize_path` explicitly (no derivation is applied even when `enforce_repo_naming` is on globally).
 
 **Validating locally as an exempt repo:**
 
@@ -142,14 +137,9 @@ Exempt repos can use `apiVersion: deploy-bot/v1` and specify any `app` name and 
 deploy-bot-config validate --file .deploy-bot.json --repo-naming --repo legacy-app --exempt
 ```
 
-### API versions
+### API version
 
-| Version | `app` | `kustomize_path` | `tag_pattern` |
-|---|---|---|---|
-| `deploy-bot/v1` | Required | Required | Optional |
-| `deploy-bot/v2` | Optional (derived) | Optional (derived) | Optional (defaults from operator) |
-
-v2 configs work with or without `enforce_repo_naming`. When enforcement is off, v2 behaves like v1 (all fields required). When enforcement is on, omitted fields are derived from the repo name and operator template.
+`apiVersion: deploy-bot/v2` is required. With `enforce_repo_naming` enabled and the repo not in `exempt_repos`, `app` and `kustomize_path` may be omitted (derived from the repo name). Otherwise all fields must be specified explicitly.
 
 ### Validating locally
 

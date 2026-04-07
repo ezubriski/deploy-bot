@@ -8,6 +8,7 @@ import (
 
 func TestParseRepoConfig_Valid(t *testing.T) {
 	data := []byte(`{
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{
 				"app": "myapp",
@@ -45,6 +46,7 @@ func TestParseRepoConfig_Valid(t *testing.T) {
 
 func TestParseRepoConfig_MissingRequiredFields(t *testing.T) {
 	data := []byte(`{
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{"app": "", "environment": "dev", "kustomize_path": "path", "ecr_repo": "repo"},
 			{"app": "myapp", "environment": "", "kustomize_path": "path", "ecr_repo": "repo"},
@@ -64,6 +66,7 @@ func TestParseRepoConfig_MissingRequiredFields(t *testing.T) {
 
 func TestParseRepoConfig_InvalidRegex(t *testing.T) {
 	data := []byte(`{
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{
 				"app": "myapp",
@@ -86,6 +89,7 @@ func TestParseRepoConfig_InvalidRegex(t *testing.T) {
 
 func TestParseRepoConfig_PartialValid(t *testing.T) {
 	data := []byte(`{
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{"app": "good", "environment": "dev", "kustomize_path": "path/dev", "ecr_repo": "repo"},
 			{"app": "", "environment": "dev", "kustomize_path": "path/broken", "ecr_repo": "repo"},
@@ -114,7 +118,7 @@ func TestParseRepoConfig_InvalidJSON(t *testing.T) {
 }
 
 func TestParseRepoConfig_EmptyApps(t *testing.T) {
-	data := []byte(`{"apps": []}`)
+	data := []byte(`{"apiVersion":"deploy-bot/v2","apps":[]}`)
 	apps, errs := parseRepoConfig(data, "org/repo", config.RepoDiscoveryConfig{})
 	if len(errs) != 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -126,7 +130,7 @@ func TestParseRepoConfig_EmptyApps(t *testing.T) {
 
 func TestParseRepoConfig_WithAPIVersion(t *testing.T) {
 	data := []byte(`{
-		"apiVersion": "deploy-bot/v1",
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{
 				"app": "myapp",
@@ -170,14 +174,14 @@ func TestParseRepoConfig_UnknownAPIVersion(t *testing.T) {
 
 func TestParseRepoConfig_AutoDeployFields(t *testing.T) {
 	data := []byte(`{
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{
 				"app": "myapp",
 				"environment": "dev",
 				"kustomize_path": "path",
 				"ecr_repo": "repo",
-				"auto_deploy": true,
-				"auto_deploy_approver_group": "C01234567"
+				"auto_deploy": true
 			}
 		]
 	}`)
@@ -188,9 +192,6 @@ func TestParseRepoConfig_AutoDeployFields(t *testing.T) {
 	}
 	if !apps[0].AutoDeploy {
 		t.Error("expected auto_deploy = true")
-	}
-	if apps[0].AutoDeployApproverGroup != "C01234567" {
-		t.Errorf("auto_deploy_approver_group = %q", apps[0].AutoDeployApproverGroup)
 	}
 }
 
@@ -293,7 +294,7 @@ func TestParseRepoConfig_V2_NoRepoNaming_RequiresFields(t *testing.T) {
 	}
 }
 
-func TestParseRepoConfig_V1_EnforcedNaming_Rejected(t *testing.T) {
+func TestParseRepoConfig_V1_Rejected(t *testing.T) {
 	data := []byte(`{
 		"apiVersion": "deploy-bot/v1",
 		"apps": [
@@ -301,19 +302,18 @@ func TestParseRepoConfig_V1_EnforcedNaming_Rejected(t *testing.T) {
 		]
 	}`)
 
-	rd := config.RepoDiscoveryConfig{EnforceRepoNaming: true}
-	apps, errs := parseRepoConfig(data, "org/svc", rd)
+	apps, errs := parseRepoConfig(data, "org/svc", config.RepoDiscoveryConfig{})
 	if len(errs) != 1 {
-		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+		t.Fatalf("expected 1 parse error rejecting v1, got %d: %v", len(errs), errs)
 	}
 	if len(apps) != 0 {
 		t.Fatalf("expected 0 apps, got %d", len(apps))
 	}
 }
 
-func TestParseRepoConfig_V1_ExemptRepo_Accepted(t *testing.T) {
+func TestParseRepoConfig_V2_ExemptRepo_Accepted(t *testing.T) {
 	data := []byte(`{
-		"apiVersion": "deploy-bot/v1",
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{"app": "legacy", "environment": "dev", "kustomize_path": "custom/path", "ecr_repo": "r"}
 		]

@@ -161,7 +161,7 @@ func TestConcurrentLockContention(t *testing.T) {
 // distinct apps and verifies all n PRs are created and complete without
 // interfering with each other.
 func TestConcurrentDifferentApps(t *testing.T) {
-	apps := []string{"nginx-06", "nginx-07", "nginx-08", "nginx-09", "nginx-10"}
+	apps := []string{"nginx-06-dev", "nginx-07-dev", "nginx-08-dev", "nginx-09-dev", "nginx-10-dev"}
 
 	// Pick a non-current tag per app independently before firing concurrent events.
 	tagByApp := make(map[string]string, len(apps))

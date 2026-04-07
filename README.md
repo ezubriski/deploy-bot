@@ -135,7 +135,7 @@ Start with the quickstart. Move to the production guide when you're ready to har
 
 ## Commands
 
-App names include the environment suffix (e.g. `myapp-dev`, `myapp-prod`). Use `apps` to list configured apps.
+App names are composed from the base name and environment (e.g. `myapp-dev`, `myapp-prod`). Use `apps` to list configured apps.
 
 ### Slash commands
 
@@ -221,8 +221,7 @@ config.json
 
   ✓ github.org
   ✓ github.repo
-  ✓ github.deployer_team
-  ✓ github.approver_team
+  ✓ authorization (at least one entry)
   ✓ slack.deploy_channel
   ✓ deployment.stale_duration
   ✓ deployment.lock_ttl
@@ -241,7 +240,7 @@ Config is valid.
 
 ```
 $ deploy-bot-config validate --file .deploy-bot.json
-.deploy-bot.json (deploy-bot/v1)
+.deploy-bot.json (deploy-bot/v2)
 
   ✓ apps[0] (myapp-dev): ok
   ✗ apps[1] (broken): kustomize_path: required

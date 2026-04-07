@@ -36,11 +36,11 @@ import (
 // profilingApps assigns a dedicated app to each cycle so they run without lock
 // contention and produce distinct branch names even when sharing a tag.
 var profilingApps = []string{
-	"nginx-01", // approve cycle 1
-	"nginx-02", // approve cycle 2
-	"nginx-03", // approve cycle 3
-	"nginx-04", // reject cycle
-	"nginx-05", // cancel cycle
+	"nginx-01-dev", // approve cycle 1
+	"nginx-02-dev", // approve cycle 2
+	"nginx-03-dev", // approve cycle 3
+	"nginx-04-dev", // reject cycle
+	"nginx-05-dev", // cancel cycle
 }
 
 func TestProfiling(t *testing.T) {

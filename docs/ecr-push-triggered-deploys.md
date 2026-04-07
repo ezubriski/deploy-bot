@@ -57,7 +57,8 @@ Relevant fields in the event `detail`:
   "deployment": {
     "allow_prod_auto_deploy": false
   },
-  "ecr_events": {
+  "ecr_auto_deploy": {
+    "enabled": true,
     "sqs_queue_url": "https://sqs.us-east-1.amazonaws.com/123456789012/deploy-bot-ecr-events",
     "poll_interval": "30s"
   }
@@ -67,8 +68,9 @@ Relevant fields in the event `detail`:
 | Field | Default | Description |
 |---|---|---|
 | `deployment.allow_prod_auto_deploy` | `false` | If false, `auto_deploy: true` is ignored (with a warning) for apps whose `environment` is `"prod"` or `"production"` |
-| `ecr_events.sqs_queue_url` | `""` (disabled) | SQS queue URL to poll for ECR push events. Feature is disabled if empty |
-| `ecr_events.poll_interval` | `"30s"` | How often to long-poll the SQS queue |
+| `ecr_auto_deploy.enabled` | `false` | Enable ECR push-triggered deploys |
+| `ecr_auto_deploy.sqs_queue_url` | `""` | SQS queue URL to poll for ECR push events |
+| `ecr_auto_deploy.poll_interval` | `"30s"` | How often to long-poll the SQS queue |
 
 ### Per-App (`apps[]`)
 
@@ -76,15 +78,15 @@ Relevant fields in the event `detail`:
 {
   "app": "myapp",
   "environment": "prod",
-  "auto_deploy": false,
-  "auto_deploy_approver_group": "C01234567"
+  "auto_deploy": false
 }
 ```
 
 | Field | Default | Description |
 |---|---|---|
 | `auto_deploy` | `false` | When `true`, matching pushes deploy automatically without human approval. Subject to `allow_prod_auto_deploy` global guard |
-| `auto_deploy_approver_group` | `""` | Slack ID to @mention when requesting approval for an ECR-triggered deploy. Use a channel ID (`C...`) to post there, or a user group ID (`S...`) to mention the group in `deploy_channel`. Falls back to posting to `deploy_channel` without a mention if unset |
+
+All ECR-triggered deploy notifications are posted to `deploy_channel`.
 
 ## Behavior
 
@@ -119,7 +121,7 @@ When the worker processes an ECR push event:
 
 ### Approval-Required Path (default)
 
-Slack message posted to `auto_deploy_approver_group` (or `deploy_channel`):
+Slack message posted to `deploy_channel`:
 
 > New image `myapp:v1.2.3` detected in ECR. Deploy PR #456 is ready for review. [Approve] [Reject]
 

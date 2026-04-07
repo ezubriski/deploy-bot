@@ -16,13 +16,61 @@ import (
 )
 
 type Config struct {
-	GitHub        GitHubConfig        `json:"github"`
-	Slack         SlackConfig         `json:"slack"`
-	Deployment    DeploymentConfig    `json:"deployment"`
-	AWS           AWSConfig           `json:"aws"`
-	ECREvents     ECREventsConfig     `json:"ecr_events,omitempty"`
-	RepoDiscovery RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
-	Apps          []AppConfig         `json:"apps"`
+	GitHub        GitHubConfig         `json:"github"`
+	Slack         SlackConfig          `json:"slack"`
+	Authorization []AuthorizationEntry `json:"authorization"`
+	// IdentityOverrides maps Slack user IDs to GitHub logins for users whose
+	// GitHub email is private. Takes precedence over the Slack email → GitHub
+	// search lookup.
+	IdentityOverrides map[string]string   `json:"identity_overrides,omitempty"`
+	Deployment        DeploymentConfig    `json:"deployment"`
+	AWS               AWSConfig           `json:"aws"`
+	ECRAutoDeploy     ECRAutoDeployConfig `json:"ecr_auto_deploy,omitempty"`
+	RepoDiscovery     RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
+	Apps              []AppConfig         `json:"apps"`
+}
+
+// AuthorizationEntry defines a single authorization source. A user is
+// authorized if they match ANY entry (OR logic). Value is always an array
+// of strings.
+type AuthorizationEntry struct {
+	Type  string   `json:"type"`
+	Value []string `json:"value"`
+}
+
+// Authorization type constants.
+const (
+	AuthGitHubTeams     = "github_teams"
+	AuthGitHubUsers     = "github_users"
+	AuthSlackUserGroups = "slack_user_groups"
+	AuthSlackEmails     = "slack_emails"
+)
+
+// ParseAuthValues returns the flattened values for each authorization source type.
+func ParseAuthValues(entries []AuthorizationEntry) (gitHubTeams, gitHubUsers, slackUserGroups, slackEmails []string, err error) {
+	for i, e := range entries {
+		switch e.Type {
+		case AuthGitHubTeams:
+			gitHubTeams = append(gitHubTeams, e.Value...)
+		case AuthGitHubUsers:
+			gitHubUsers = append(gitHubUsers, e.Value...)
+		case AuthSlackUserGroups:
+			slackUserGroups = append(slackUserGroups, e.Value...)
+		case AuthSlackEmails:
+			slackEmails = append(slackEmails, e.Value...)
+		default:
+			return nil, nil, nil, nil, fmt.Errorf("authorization[%d]: unknown type %q", i, e.Type)
+		}
+	}
+	return
+}
+
+// ParsedAuthorization holds the flattened authorization sources after parsing.
+type ParsedAuthorization struct {
+	GitHubTeams     []string
+	GitHubUsers     []string
+	SlackUserGroups []string
+	SlackEmails     []string
 }
 
 // RepoDiscoveryConfig holds settings for repo-sourced app discovery.
@@ -38,9 +86,7 @@ type RepoDiscoveryConfig struct {
 	RepoPrefix            string   `json:"repo_prefix,omitempty"`
 	DiscoveredPath        string   `json:"discovered_path,omitempty"`
 	ConfigMapName         string   `json:"configmap_name,omitempty"`
-	ConfigMapNamespace    string   `json:"configmap_namespace,omitempty"`
 	RateLimitFloor        int      `json:"rate_limit_floor,omitempty"`
-	WarnChannel           string   `json:"warn_channel,omitempty"`
 }
 
 // KustomizePathForRepo returns the kustomize_path for a given repo and
@@ -109,15 +155,15 @@ func (r *RepoDiscoveryConfig) RateLimitFloorValue() int {
 	return 500
 }
 
-// ECREventsConfig holds settings for ECR push-triggered deploys.
-// The feature is disabled when SQSQueueURL is empty.
-type ECREventsConfig struct {
+// ECRAutoDeployConfig holds settings for ECR push-triggered deploys.
+type ECRAutoDeployConfig struct {
+	Enabled      bool   `json:"enabled,omitempty"`
 	SQSQueueURL  string `json:"sqs_queue_url,omitempty"`
 	PollInterval string `json:"poll_interval,omitempty"`
 }
 
 // PollIntervalDuration returns the parsed poll interval, defaulting to 30s.
-func (e *ECREventsConfig) PollIntervalDuration() time.Duration {
+func (e *ECRAutoDeployConfig) PollIntervalDuration() time.Duration {
 	if e.PollInterval != "" {
 		if d, err := time.ParseDuration(e.PollInterval); err == nil && d > 0 {
 			return d
@@ -127,13 +173,8 @@ func (e *ECREventsConfig) PollIntervalDuration() time.Duration {
 }
 
 type GitHubConfig struct {
-	Org          string `json:"org"`
-	Repo         string `json:"repo"`
-	DeployerTeam string `json:"deployer_team"`
-	ApproverTeam string `json:"approver_team"`
-	// Users maps Slack user IDs to GitHub logins for users whose GitHub email
-	// is private. Takes precedence over the Slack email → GitHub search lookup.
-	Users map[string]string `json:"users,omitempty"`
+	Org  string `json:"org"`
+	Repo string `json:"repo"`
 	// RateLimitMaxRetries is the maximum number of retries on a GitHub secondary
 	// rate limit (abuse detection). Defaults to 3.
 	RateLimitMaxRetries int `json:"rate_limit_max_retries,omitempty"`
@@ -161,10 +202,6 @@ type SlackConfig struct {
 	DeployChannel   string   `json:"deploy_channel"`
 	AllowedChannels []string `json:"allowed_channels,omitempty"`
 	BufferSize      int      `json:"buffer_size,omitempty"`
-	// ApproverGroup is the default Slack user group (S...) or channel (C...) to
-	// mention when requesting approval. Per-app auto_deploy_approver_group
-	// overrides this.
-	ApproverGroup string `json:"approver_group,omitempty"`
 	// ThreadThreshold controls when deploy notifications are threaded by
 	// environment to avoid channel flooding:
 	//   0 or omitted: default to 4
@@ -243,11 +280,9 @@ func (c *Config) PendingLabel() string {
 }
 
 type AWSConfig struct {
-	ECRRoleARN   string `json:"ecr_role_arn"`
-	ECRRegion    string `json:"ecr_region"`
-	AuditRoleARN string `json:"audit_role_arn"`
-	AuditBucket  string `json:"audit_bucket"`
-	AuditRegion  string `json:"audit_region"`
+	ECRRegion   string `json:"ecr_region"`
+	AuditBucket string `json:"audit_bucket"`
+	AuditRegion string `json:"audit_region"`
 }
 
 type AppConfig struct {
@@ -260,10 +295,6 @@ type AppConfig struct {
 	// automatically without human approval. Subject to the global
 	// AllowProdAutoDeploy guard for production environments.
 	AutoDeploy bool `json:"auto_deploy,omitempty"`
-	// AutoDeployApproverGroup is the Slack ID to notify for ECR-triggered deploys
-	// and no-op notifications. Use a channel ID (C…) to post there directly, or
-	// a user group ID (S…) to @mention the group in the deploy channel.
-	AutoDeployApproverGroup string `json:"auto_deploy_approver_group,omitempty"`
 
 	// SourceRepo is set only for repo-discovered apps (e.g. "org/myapp").
 	// Empty for operator-managed apps. Not serialized to the primary config.
@@ -272,20 +303,17 @@ type AppConfig struct {
 	compiledPattern *regexp.Regexp
 }
 
+// FullName returns the composite app name including the environment suffix
+// (e.g. "nginx-dev"). This is the name used in slash commands, store keys,
+// branch names, and all user-facing messages.
+func (a *AppConfig) FullName() string {
+	return a.App + "-" + a.Environment
+}
+
 // IsProd returns true if the app's environment is "prod" or "production".
 func (a *AppConfig) IsProd() bool {
 	env := strings.ToLower(a.Environment)
 	return env == "prod" || env == "production"
-}
-
-// EffectiveApproverGroup returns the Slack group to mention for approval
-// requests. Per-app auto_deploy_approver_group takes precedence over the
-// global slack.approver_group default.
-func (a *AppConfig) EffectiveApproverGroup(globalDefault string) string {
-	if a.AutoDeployApproverGroup != "" {
-		return a.AutoDeployApproverGroup
-	}
-	return globalDefault
 }
 
 // EffectiveAutoDeploy returns whether this app should auto-deploy, taking the
@@ -505,11 +533,11 @@ func LoadConflicts(primaryPath, discoveredPath string) ([]Conflict, error) {
 	}
 	operatorApps := make(map[string]struct{}, len(primary.Apps))
 	for _, a := range primary.Apps {
-		operatorApps[a.App+"\x00"+a.Environment] = struct{}{}
+		operatorApps[a.FullName()] = struct{}{}
 	}
 	var conflicts []Conflict
 	for _, d := range discovered.Apps {
-		key := d.App + "\x00" + d.Environment
+		key := d.FullName()
 		if _, ok := operatorApps[key]; ok {
 			conflicts = append(conflicts, Conflict{
 				App:        d.App,
@@ -526,12 +554,12 @@ func LoadConflicts(primaryPath, discoveredPath string) ([]Conflict, error) {
 func MergeApps(primary []AppConfig, discovered []DiscoveredAppConfig) []AppConfig {
 	existing := make(map[string]struct{}, len(primary))
 	for _, a := range primary {
-		existing[a.App+"\x00"+a.Environment] = struct{}{}
+		existing[a.FullName()] = struct{}{}
 	}
 	result := make([]AppConfig, len(primary))
 	copy(result, primary)
 	for _, d := range discovered {
-		key := d.App + "\x00" + d.Environment
+		key := d.FullName()
 		if _, ok := existing[key]; ok {
 			continue
 		}
@@ -597,7 +625,7 @@ func LoadSecrets(ctx context.Context, secretName string) (*Secrets, error) {
 
 func (c *Config) AppByName(name string) (*AppConfig, bool) {
 	for i := range c.Apps {
-		if c.Apps[i].App == name {
+		if c.Apps[i].FullName() == name {
 			return &c.Apps[i], true
 		}
 	}

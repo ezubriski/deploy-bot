@@ -12,10 +12,8 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/ecr"
 	"github.com/aws/aws-sdk-go-v2/service/ecr/types"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
@@ -73,10 +71,6 @@ func NewCache(ctx context.Context, cfg *config.Config, rdb *redis.Client, m *met
 
 	clientCfg := baseCfg.Copy()
 	clientCfg.Region = cfg.AWS.ECRRegion
-	if cfg.AWS.ECRRoleARN != "" {
-		stsClient := sts.NewFromConfig(baseCfg)
-		clientCfg.Credentials = stscreds.NewAssumeRoleProvider(stsClient, cfg.AWS.ECRRoleARN)
-	}
 
 	c := &Cache{
 		apps:    make(map[string]*appCache),
@@ -91,7 +85,7 @@ func NewCache(ctx context.Context, cfg *config.Config, rdb *redis.Client, m *met
 		if err != nil {
 			return nil, err
 		}
-		c.apps[app.App] = ac
+		c.apps[app.FullName()] = ac
 	}
 
 	return c, nil
@@ -104,15 +98,15 @@ func (c *Cache) AddApps(apps []config.AppConfig) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, app := range apps {
-		if _, exists := c.apps[app.App]; exists {
+		if _, exists := c.apps[app.FullName()]; exists {
 			continue
 		}
 		ac, err := newAppCache(app)
 		if err != nil {
 			return err
 		}
-		c.apps[app.App] = ac
-		c.log.Info("ecr cache: registered new app", zap.String("app", app.App))
+		c.apps[app.FullName()] = ac
+		c.log.Info("ecr cache: registered new app", zap.String("app", app.FullName()))
 	}
 	return nil
 }
@@ -120,7 +114,7 @@ func (c *Cache) AddApps(apps []config.AppConfig) error {
 func newAppCache(app config.AppConfig) (*appCache, error) {
 	pat, err := regexp.Compile(app.TagPattern)
 	if err != nil {
-		return nil, fmt.Errorf("compile tag pattern for %s: %w", app.App, err)
+		return nil, fmt.Errorf("compile tag pattern for %s: %w", app.FullName(), err)
 	}
 	return &appCache{
 		pattern:    pat,

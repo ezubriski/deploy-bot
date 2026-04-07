@@ -118,10 +118,11 @@ Create `config.json`:
 {
   "github": {
     "org": "your-org",
-    "repo": "your-gitops-repo",
-    "deployer_team": "developers",
-    "approver_team": "platform"
+    "repo": "your-gitops-repo"
   },
+  "authorization": [
+    {"type": "github_teams", "value": ["developers"]}
+  ],
   "slack": {
     "deploy_channel": "C0123456789"
   },
@@ -130,7 +131,7 @@ Create `config.json`:
   },
   "apps": [
     {
-      "app": "myapp-dev",
+      "app": "myapp",
       "environment": "dev",
       "kustomize_path": "apps/myapp/overlays/dev/kustomization.yaml",
       "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp"

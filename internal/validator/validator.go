@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/go-github/v60/github"
 	"github.com/redis/go-redis/v9"
@@ -44,64 +45,76 @@ type Validator struct {
 	slack *slack.Client
 	rdb   *redis.Client
 	cfg   *config.Config
+	auth  config.ParsedAuthorization
 	log   *zap.Logger
 }
 
 func New(httpClient *http.Client, slackClient *slack.Client, rdb *redis.Client, cfg *config.Config, log *zap.Logger) *Validator {
+	ghTeams, ghUsers, slackGroups, slackEmails, _ := config.ParseAuthValues(cfg.Authorization)
 	return &Validator{
 		gh:    github.NewClient(httpClient),
 		slack: slackClient,
 		rdb:   rdb,
 		cfg:   cfg,
-		log:   log,
+		auth: config.ParsedAuthorization{
+			GitHubTeams:     ghTeams,
+			GitHubUsers:     ghUsers,
+			SlackUserGroups: slackGroups,
+			SlackEmails:     slackEmails,
+		},
+		log: log,
 	}
 }
 
 // ResolveIdentity resolves a Slack user ID to their full identity (GitHub login,
 // email, display name). Results are cached in Redis (no expiry) to avoid
-// repeated Slack and GitHub API calls. For users mapped via github.users config,
-// only the GitHub login is available (no Slack lookup needed).
+// repeated Slack and GitHub API calls.
+//
+// Always attempts to resolve email and name from Slack. The GitHub login is
+// taken from `identity_overrides` if set; otherwise resolved via GitHub email
+// search. A partial identity (email/name only) is returned when GitHub
+// resolution fails.
 func (v *Validator) ResolveIdentity(ctx context.Context, slackUserID string) (Identity, error) {
-	if l, ok := v.cfg.GitHub.Users[slackUserID]; ok {
-		return Identity{GitHubLogin: l}, nil
-	}
-
 	// Check Redis cache.
 	key := identityPrefix + slackUserID
 	if data, err := v.rdb.Get(ctx, key).Bytes(); err == nil {
 		var cached cachedIdentity
-		if json.Unmarshal(data, &cached) == nil && cached.GitHubLogin != "" {
+		if json.Unmarshal(data, &cached) == nil && cached.Email != "" {
 			return cached, nil
 		}
 	}
 
-	// Resolve via Slack API.
+	// Resolve email and name via Slack API.
 	info, err := v.slack.GetUserInfoContext(ctx, slackUserID)
 	if err != nil {
 		return Identity{}, fmt.Errorf("get slack user info: %w", err)
 	}
 	email := info.Profile.Email
-	if email == "" {
-		return Identity{}, fmt.Errorf("slack user %s has no email", slackUserID)
-	}
 	name := info.Profile.RealName
-
-	// Resolve via GitHub API.
-	result, _, err := v.gh.Search.Users(ctx, fmt.Sprintf("%s in:email", email), nil)
-	if err != nil {
-		return Identity{Email: email, Name: name}, fmt.Errorf("search github user: %w", err)
-	}
-	if result.GetTotal() == 0 || len(result.Users) == 0 {
-		return Identity{Email: email, Name: name}, fmt.Errorf("no github user found for email %s", email)
+	if email == "" {
+		return Identity{Name: name}, fmt.Errorf("slack user %s has no email", slackUserID)
 	}
 
-	id := Identity{
-		GitHubLogin: result.Users[0].GetLogin(),
-		Email:       email,
-		Name:        name,
+	id := Identity{Email: email, Name: name}
+
+	// Identity override takes precedence over GitHub email search.
+	if login, ok := v.cfg.IdentityOverrides[slackUserID]; ok {
+		id.GitHubLogin = login
+	} else {
+		result, _, err := v.gh.Search.Users(ctx, fmt.Sprintf("%s in:email", email), nil)
+		if err != nil {
+			v.log.Warn("identity: github search failed",
+				zap.String("email", email), zap.Error(err))
+		} else if result.GetTotal() == 0 || len(result.Users) == 0 {
+			v.log.Warn("identity: no github user found for email",
+				zap.String("email", email))
+		} else {
+			id.GitHubLogin = result.Users[0].GetLogin()
+		}
 	}
 
-	// Cache in Redis with no expiry.
+	// Cache the identity. We cache partial identities (email/name without
+	// GitHub login) so we don't keep retrying failed GitHub searches.
 	if data, err := json.Marshal(id); err == nil {
 		v.rdb.Set(ctx, key, data, 0)
 	}
@@ -117,24 +130,78 @@ func (v *Validator) SlackUserToGitHub(ctx context.Context, slackUserID string) (
 	return id.GitHubLogin, err
 }
 
-// IsDeployer checks if a Slack user is a member of the deployer GitHub team.
-func (v *Validator) IsDeployer(ctx context.Context, slackUserID string) (bool, Identity, error) {
-	id, err := v.ResolveIdentity(ctx, slackUserID)
-	if err != nil {
-		return false, id, err
-	}
-	ok, _, err := v.isTeamMember(ctx, id.GitHubLogin, v.cfg.GitHub.DeployerTeam)
-	return ok, id, err
-}
+// IsMember checks if a Slack user is authorized via any configured source.
+// Sources are checked with OR logic: Slack emails, Slack user groups,
+// GitHub users, and GitHub teams.
+func (v *Validator) IsMember(ctx context.Context, slackUserID string) (bool, Identity, error) {
+	auth := v.auth
 
-// IsApprover checks if a Slack user is a member of the approver GitHub team.
-func (v *Validator) IsApprover(ctx context.Context, slackUserID string) (bool, Identity, error) {
-	id, err := v.ResolveIdentity(ctx, slackUserID)
-	if err != nil {
-		return false, id, err
+	// Slack emails: resolve the user's email and compare.
+	if len(auth.SlackEmails) > 0 {
+		info, err := v.slack.GetUserInfoContext(ctx, slackUserID)
+		if err != nil {
+			v.log.Warn("check slack email membership: could not get user info", zap.Error(err))
+		} else if info.Profile.Email != "" {
+			for _, email := range auth.SlackEmails {
+				if strings.EqualFold(email, info.Profile.Email) {
+					id, _ := v.ResolveIdentity(ctx, slackUserID)
+					return true, id, nil
+				}
+			}
+		}
 	}
-	ok, _, err := v.isTeamMember(ctx, id.GitHubLogin, v.cfg.GitHub.ApproverTeam)
-	return ok, id, err
+
+	// Slack user groups: check each group's member list.
+	for _, groupID := range auth.SlackUserGroups {
+		members, err := v.slack.GetUserGroupMembersContext(ctx, groupID)
+		if err != nil {
+			v.log.Warn("check slack user group membership", zap.String("group", groupID), zap.Error(err))
+			continue
+		}
+		for _, m := range members {
+			if m == slackUserID {
+				id, _ := v.ResolveIdentity(ctx, slackUserID)
+				return true, id, nil
+			}
+		}
+	}
+
+	// GitHub sources require identity resolution.
+	if len(auth.GitHubUsers) > 0 || len(auth.GitHubTeams) > 0 {
+		id, err := v.ResolveIdentity(ctx, slackUserID)
+		if err != nil {
+			return false, id, err
+		}
+
+		// Skip GitHub-based checks if we couldn't resolve a GitHub login
+		// (private email, no GitHub account, or no identity_overrides entry).
+		if id.GitHubLogin == "" {
+			return false, id, nil
+		}
+
+		// GitHub users: direct login match.
+		for _, login := range auth.GitHubUsers {
+			if strings.EqualFold(login, id.GitHubLogin) {
+				return true, id, nil
+			}
+		}
+
+		// GitHub teams: check membership in each team.
+		for _, team := range auth.GitHubTeams {
+			ok, _, err := v.isTeamMember(ctx, id.GitHubLogin, team)
+			if err != nil {
+				v.log.Warn("check github team membership", zap.String("team", team), zap.Error(err))
+				continue
+			}
+			if ok {
+				return true, id, nil
+			}
+		}
+		return false, id, nil
+	}
+
+	id, _ := v.ResolveIdentity(ctx, slackUserID)
+	return false, id, nil
 }
 
 func (v *Validator) isTeamMember(ctx context.Context, githubLogin, teamSlug string) (bool, string, error) {

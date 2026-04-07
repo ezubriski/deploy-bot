@@ -18,7 +18,7 @@ func writeTestFile(t *testing.T, content string) string {
 
 func TestRun_Valid(t *testing.T) {
 	path := writeTestFile(t, `{
-		"apiVersion": "deploy-bot/v1",
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{"app": "a", "environment": "dev", "kustomize_path": "p", "ecr_repo": "r"}
 		]
@@ -29,20 +29,21 @@ func TestRun_Valid(t *testing.T) {
 	}
 }
 
-func TestRun_ValidNoVersion(t *testing.T) {
+func TestRun_MissingVersionRejected(t *testing.T) {
 	path := writeTestFile(t, `{
 		"apps": [
 			{"app": "a", "environment": "dev", "kustomize_path": "p", "ecr_repo": "r"}
 		]
 	}`)
 	code := run([]string{"--file", path})
-	if code != 0 {
-		t.Errorf("exit code = %d, want 0", code)
+	if code != 2 {
+		t.Errorf("exit code = %d, want 2 (parse error)", code)
 	}
 }
 
 func TestRun_ValidationErrors(t *testing.T) {
 	path := writeTestFile(t, `{
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{"app": "", "environment": "dev", "kustomize_path": "p", "ecr_repo": "r"}
 		]
@@ -78,6 +79,7 @@ func TestRun_InvalidJSON(t *testing.T) {
 
 func TestRun_JSONFormat(t *testing.T) {
 	path := writeTestFile(t, `{
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{"app": "a", "environment": "dev", "kustomize_path": "p", "ecr_repo": "r"}
 		]
@@ -90,6 +92,7 @@ func TestRun_JSONFormat(t *testing.T) {
 
 func TestRun_JSONFormatWithErrors(t *testing.T) {
 	path := writeTestFile(t, `{
+		"apiVersion": "deploy-bot/v2",
 		"apps": [
 			{"app": "", "environment": "dev", "kustomize_path": "p", "ecr_repo": "r"}
 		]
@@ -109,7 +112,7 @@ func TestRun_JSONFormatParseError(t *testing.T) {
 }
 
 func TestRun_ShortFlag(t *testing.T) {
-	path := writeTestFile(t, `{"apps": [{"app": "a", "environment": "dev", "kustomize_path": "p", "ecr_repo": "r"}]}`)
+	path := writeTestFile(t, `{"apiVersion":"deploy-bot/v2","apps":[{"app":"a","environment":"dev","kustomize_path":"p","ecr_repo":"r"}]}`)
 	code := run([]string{"-f", path})
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0", code)

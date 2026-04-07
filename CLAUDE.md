@@ -60,11 +60,11 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 
 **Config vs Secrets split**: `config.json` (mounted via configMapGenerator, hot-reloaded) holds app definitions, GitHub/Slack config, and AWS settings. Secrets (tokens, Redis addr) come from a JSON file via `SECRETS_PATH` env var or from AWS Secrets Manager via `AWS_SECRET_NAME` env var. Bot and receiver use separate secrets so each component only accesses the credentials it needs. A second `discovered.json` file (optional, from repo scanner) provides repo-sourced app entries that are merged at load time.
 
-**App config**: Each app entry requires an `environment` field (e.g. `"dev"`, `"prod"`). App names include the environment (e.g. `myapp-dev`, `myapp-prod`). This is included in lock keys, branch names, PR titles, and all user-facing messages so deployments across environments are unambiguous.
+**App config**: Each app entry requires an `environment` field (e.g. `"dev"`, `"prod"`). The `app` field is the base name (e.g. `"myapp"`); the bot constructs the composite `app-environment` (e.g. `myapp-dev`, `myapp-prod`) internally via `FullName()`. This composite is used in lock keys, branch names, PR titles, and all user-facing messages so deployments across environments are unambiguous.
 
 **Redis state** (`internal/store`): Pending deploys are stored as `pending:<pr_number>` keys with a TTL equal to `stale_duration`. Per-app deploy locks use `lock:<env>/<app>` keys (SET NX with `lock_ttl` TTL) so the same app in different environments locks independently. The history list (`history`) holds up to 100 `HistoryEntry` records, newest-first, populated by every completion path (approved, rejected, expired, cancelled). User events and ECR events use separate Redis streams (`user:events` and `ecr:events`); the worker drains the user stream with priority before checking the ECR stream. Deploy thread parent timestamps are stored as `thread:<env>` keys with a 10-minute TTL, created atomically (SET NX) to prevent duplicate parent messages from concurrent workers.
 
-**Identity chain** (`internal/validator`): Slack user ID -> email (Slack API) -> GitHub login (GitHub API) -> team membership check. Used to gate deployer and approver actions.
+**Authorization** (`internal/validator`, `internal/approvers`): Users are authorized via OR logic across three configurable sources: direct Slack user IDs, Slack user group membership, and GitHub team membership (Slack user ID -> email -> GitHub login -> team check). The `authorization` config section defines which sources are active. The approvers cache pre-fetches all sources into a single Redis set for fast modal validation; the validator does live checks authoritatively in the worker. For users with private GitHub emails, `identity_overrides` (top-level config field) provides a manual Slack user ID to GitHub login mapping.
 
 **Sweeper** (`internal/sweeper`): Polls Redis every 5 minutes for expired pending deploys, closes their PRs, notifies the requester, releases locks, and pushes history entries.
 
@@ -72,7 +72,7 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 
 **Config hot-reload** (`internal/config`): `config.Watch` polls both the primary config and discovered apps file mtimes every 30s and also responds to SIGHUP. On reload, the ECR cache is updated with any new apps.
 
-**ECR push-triggered deploys** (`internal/ecrpoller`): The receiver polls an SQS queue for EventBridge ECR push events, matches them to all apps sharing the ECR repo (not just the first match), validates tags, checks locks, and enqueues `ECRPushEvent`s to the `ecr:events` Redis stream. The worker handler creates PRs and either auto-merges or requests approval based on `auto_deploy` config.
+**ECR push-triggered deploys** (`internal/ecrpoller`): Controlled by `ecr_auto_deploy` config (with an `enabled` boolean and `sqs_queue_url`). The receiver polls an SQS queue for EventBridge ECR push events, matches them to all apps sharing the ECR repo (not just the first match), validates tags, checks locks, and enqueues `ECRPushEvent`s to the `ecr:events` Redis stream. The worker handler creates PRs and either auto-merges or requests approval based on `auto_deploy` config.
 
 **Repo-sourced app discovery** (`internal/reposcanner`): The receiver scans GitHub repos for `.deploy-bot.json` files, validates entries, detects conflicts with operator config, and writes the discovered apps to a Kubernetes ConfigMap. The bot merges these at load time (operator config always wins on conflicts).
 
@@ -96,7 +96,7 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 | `internal/repoconfig` | Shared `.deploy-bot.json` schema, parsing (with apiVersion), and validation (stdlib-only) |
 | `internal/reposcanner` | Repo-sourced app discovery: scan, validate, conflict detect, ConfigMap write |
 | `internal/sanitize` | Input sanitization for user-provided text in Slack/GitHub and tag/branch name validation |
-| `internal/approvers` | Cached approver team membership lookups with periodic refresh |
+| `internal/approvers` | Cached team membership lookups with periodic refresh |
 | `internal/audit` | Audit log writes (S3 or zap fallback) |
 | `internal/config` | Config struct, file loading, discovered-path merge, hot-reload watcher, `Holder` |
 | `internal/metrics` | Prometheus counters/gauges (pending deploys, deploy events by app/outcome) |

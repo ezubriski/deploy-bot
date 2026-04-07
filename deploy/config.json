@@ -1,10 +1,11 @@
 {
   "github": {
     "org": "myorg",
-    "repo": "gitops-repo",
-    "deployer_team": "deployers",
-    "approver_team": "senior-engineers"
+    "repo": "gitops-repo"
   },
+  "authorization": [
+    {"type": "github_teams", "value": ["deployers"]}
+  ],
   "slack": {
     "deploy_channel": "C01234567"
   },
@@ -19,7 +20,8 @@
     "audit_bucket": "my-audit-logs",
     "audit_region": "us-east-1"
   },
-  "ecr_events": {
+  "ecr_auto_deploy": {
+    "enabled": false,
     "sqs_queue_url": "",
     "poll_interval": "30s"
   },
@@ -31,7 +33,7 @@
   },
   "apps": [
     {
-      "app": "myapp-prod",
+      "app": "myapp",
       "environment": "prod",
       "kustomize_path": "apps/myapp/overlays/prod/kustomization.yaml",
       "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",

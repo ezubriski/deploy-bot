@@ -241,13 +241,13 @@ func logProdAutoDeployGuard(cfg *config.Config, auditLog audit.Logger, log *zap.
 		}
 		if app.IsProd() && !cfg.Deployment.AllowProdAutoDeploy {
 			log.Warn("auto_deploy ignored for prod app (allow_prod_auto_deploy is false)",
-				zap.String("app", app.App),
+				zap.String("app", app.FullName()),
 				zap.String("environment", app.Environment),
 			)
 			continue
 		}
 		if app.IsProd() {
-			prodAutoDeployApps = append(prodAutoDeployApps, app.App)
+			prodAutoDeployApps = append(prodAutoDeployApps, app.FullName())
 		}
 	}
 	if len(prodAutoDeployApps) > 0 {
