@@ -970,10 +970,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#iam-roles" class="md-nav__link">
+  <a href="#iam-credentials" class="md-nav__link">
     <span class="md-ellipsis">
       
-        IAM roles
+        IAM credentials
       
     </span>
   </a>
@@ -1211,10 +1211,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#iam-roles" class="md-nav__link">
+  <a href="#iam-credentials" class="md-nav__link">
     <span class="md-ellipsis">
       
-        IAM roles
+        IAM credentials
       
     </span>
   </a>
@@ -1392,8 +1392,8 @@ gh<span class="w"> </span>label<span class="w"> </span>create<span class="w"> </
 </code></pre></div>
 <h3 id="teams">Teams<a class="headerlink" href="#teams" title="Permanent link">&para;</a></h3>
 <p>Create a GitHub team (e.g. <code>deploy-bot-testers</code>) in your org. Both the
-requester and approver test accounts must be members. Use this team for both
-<code>deployer_team</code> and <code>approver_team</code> in the test config.</p>
+requester and approver test accounts must be members. Use this team for
+a <code>github_team</code> entry in the <code>authorization</code> list in the test config.</p>
 <p>The team members must have Slack accounts whose <strong>email address</strong> matches
 their GitHub account's primary email. The validator resolves
 <code>Slack user ID → email → GitHub login → team membership</code>, so the email
@@ -1423,18 +1423,11 @@ docker<span class="w"> </span>push<span class="w"> </span>&lt;account&gt;.dkr.ec
 <h3 id="s3-bucket">S3 bucket<a class="headerlink" href="#s3-bucket" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>aws<span class="w"> </span>s3api<span class="w"> </span>create-bucket<span class="w"> </span>--bucket<span class="w"> </span>deploy-bot-test-audit<span class="w"> </span>--region<span class="w"> </span>us-east-1
 </code></pre></div>
-<h3 id="iam-roles">IAM roles<a class="headerlink" href="#iam-roles" title="Permanent link">&para;</a></h3>
-<p>Create three roles following the same pattern as production (<code>README.md</code> →
-IAM section), substituting test resource ARNs. Name them something like:</p>
-<ul>
-<li><code>deploy-bot-test</code> (bot role, assumes the two below)</li>
-<li><code>deploy-bot-test-ecr</code></li>
-<li><code>deploy-bot-test-audit</code></li>
-</ul>
-<p>For local development the bot role is not needed — your local AWS credentials
-(via <code>~/.aws/credentials</code> or environment variables) are used directly. The ECR
-and audit roles are still assumed via STS, so your local credentials must have
-<code>sts:AssumeRole</code> permission for those two roles.</p>
+<h3 id="iam-credentials">IAM credentials<a class="headerlink" href="#iam-credentials" title="Permanent link">&para;</a></h3>
+<p>The bot uses ambient IAM credentials for all AWS API calls (ECR, S3, Secrets Manager).
+For local development, your local AWS credentials (via <code>~/.aws/credentials</code> or
+environment variables) are used directly and must have the necessary permissions
+for ECR reads, S3 audit writes, and Secrets Manager reads.</p>
 <h3 id="secrets-manager">Secrets Manager<a class="headerlink" href="#secrets-manager" title="Permanent link">&para;</a></h3>
 <p>Create a secret at the path you will pass as <code>AWS_SECRET_NAME</code>:</p>
 <div class="highlight"><pre><span></span><code>aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<span class="w"> </span><span class="se">\</span>
@@ -1495,7 +1488,7 @@ values.</p>
 </tr>
 <tr>
 <td><code>INTEGRATION_APP</code></td>
-<td>App name to use in tests — must match an entry in <code>config.json</code></td>
+<td>Full app name (<code>app-environment</code>, e.g. <code>nginx-dev</code>) — must match a <code>FullName()</code> in <code>config.json</code></td>
 </tr>
 <tr>
 <td><code>INTEGRATION_TAG</code></td>
@@ -1507,7 +1500,7 @@ values.</p>
 </tr>
 <tr>
 <td><code>INTEGRATION_APPROVER_ID</code></td>
-<td>Slack user ID acting as the approver (must be in approver team)</td>
+<td>Slack user ID acting as the approver (must be in the configured team)</td>
 </tr>
 <tr>
 <td><code>AWS_PROFILE</code> or <code>AWS_REGION</code></td>
@@ -1518,7 +1511,7 @@ values.</p>
 <p>Set these in a <code>.env.integration</code> file (gitignored) and source it before running:</p>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">AWS_SECRET_NAME</span><span class="o">=</span>deploy-bot/test-secrets
 <span class="nb">export</span><span class="w"> </span><span class="nv">AWS_REGION</span><span class="o">=</span>us-east-1
-<span class="nb">export</span><span class="w"> </span><span class="nv">INTEGRATION_APP</span><span class="o">=</span>test-app
+<span class="nb">export</span><span class="w"> </span><span class="nv">INTEGRATION_APP</span><span class="o">=</span>test-app-dev
 <span class="nb">export</span><span class="w"> </span><span class="nv">INTEGRATION_TAG</span><span class="o">=</span>v0.0.1
 <span class="nb">export</span><span class="w"> </span><span class="nv">INTEGRATION_REQUESTER_ID</span><span class="o">=</span>U01234ABCDE
 <span class="nb">export</span><span class="w"> </span><span class="nv">INTEGRATION_APPROVER_ID</span><span class="o">=</span>U09876ZYXWV

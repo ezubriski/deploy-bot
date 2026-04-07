@@ -1242,10 +1242,11 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">&quot;github&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nt">&quot;org&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-org&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-gitops-repo&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;deployer_team&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;developers&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;approver_team&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;platform&quot;</span>
+<span class="w">    </span><span class="nt">&quot;repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-gitops-repo&quot;</span>
 <span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;authorization&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;github_teams&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;developers&quot;</span><span class="p">]}</span>
+<span class="w">  </span><span class="p">],</span>
 <span class="w">  </span><span class="nt">&quot;slack&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nt">&quot;deploy_channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;C0123456789&quot;</span>
 <span class="w">  </span><span class="p">},</span>
@@ -1254,7 +1255,7 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-dev&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dev&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/dev/kustomization.yaml&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span>

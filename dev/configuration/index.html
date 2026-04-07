@@ -554,6 +554,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#identity-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity Overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authorization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#slack" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -587,10 +609,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#ecr-events-ecr-push-triggered-deploys" class="md-nav__link">
+  <a href="#ecr-auto-deploy-ecr-push-triggered-deploys" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ECR Events (ECR push-triggered deploys)
+        ECR Auto Deploy (ECR push-triggered deploys)
       
     </span>
   </a>
@@ -1191,6 +1213,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#identity-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity Overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authorization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authorization
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#slack" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1224,10 +1268,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#ecr-events-ecr-push-triggered-deploys" class="md-nav__link">
+  <a href="#ecr-auto-deploy-ecr-push-triggered-deploys" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ECR Events (ECR push-triggered deploys)
+        ECR Auto Deploy (ECR push-triggered deploys)
       
     </span>
   </a>
@@ -1520,21 +1564,6 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <td>GitOps repository name</td>
 </tr>
 <tr>
-<td><code>github.deployer_team</code></td>
-<td></td>
-<td>GitHub team slug -- members can request deploys</td>
-</tr>
-<tr>
-<td><code>github.approver_team</code></td>
-<td></td>
-<td>GitHub team slug -- members can approve/reject</td>
-</tr>
-<tr>
-<td><code>github.users</code></td>
-<td><code>{}</code></td>
-<td>Optional map of Slack user ID to GitHub login for users with private GitHub emails (e.g. <code>{"U12345": "ghlogin"}</code>)</td>
-</tr>
-<tr>
 <td><code>github.rate_limit_max_retries</code></td>
 <td><code>3</code></td>
 <td>Max retries on GitHub secondary rate limit</td>
@@ -1546,6 +1575,70 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 </tr>
 </tbody>
 </table>
+<h3 id="identity-overrides">Identity Overrides<a class="headerlink" href="#identity-overrides" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>identity_overrides</code></td>
+<td><code>{}</code></td>
+<td>Top-level map of Slack user ID to GitHub login for users with private GitHub emails (e.g. <code>{"U12345": "ghlogin"}</code>). Used by the identity chain when email-based resolution fails</td>
+</tr>
+</tbody>
+</table>
+<h3 id="authorization">Authorization<a class="headerlink" href="#authorization" title="Permanent link">&para;</a></h3>
+<p>A list of typed entries. At least one entry is required. A user is authorized if they match <strong>any</strong> entry (OR logic).</p>
+<p>Each entry has <code>type</code> and <code>value</code> (always an array of strings):</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>github_teams</code></td>
+<td>GitHub team slugs -- members resolved via Slack email → GitHub login → team membership</td>
+</tr>
+<tr>
+<td><code>github_users</code></td>
+<td>GitHub logins -- Slack users whose resolved GitHub login matches are authorized</td>
+</tr>
+<tr>
+<td><code>slack_user_groups</code></td>
+<td>Slack user group names or IDs (<code>S...</code>)</td>
+</tr>
+<tr>
+<td><code>slack_emails</code></td>
+<td>Email addresses resolved to Slack users via the Slack API</td>
+</tr>
+</tbody>
+</table>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">&quot;authorization&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;github_teams&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;deployers&quot;</span><span class="p">]},</span>
+<span class="w">  </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;slack_emails&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;alice@example.com&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;bob@example.com&quot;</span><span class="p">]}</span>
+<span class="p">]</span>
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">GitHub authorization is best-effort</p>
+<p><code>github_teams</code> and <code>github_users</code> rely on matching a Slack user to a GitHub
+user by email address. This requires the GitHub user's email to be <strong>public</strong>
+on their GitHub profile. Users with private GitHub emails will fail to resolve
+and will not be authorized through these sources.</p>
+<p>For users with private GitHub emails, either use <code>identity_overrides</code> to manually
+map Slack user IDs to GitHub logins, or authorize them via <code>slack_emails</code> or
+<code>slack_user_groups</code> instead.</p>
+<p>Slack-based sources (<code>slack_emails</code>, <code>slack_user_groups</code>) work consistently
+as long as the app is granted the <code>users:read.email</code> scope.</p>
+</div>
 <h3 id="slack">Slack<a class="headerlink" href="#slack" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1641,19 +1734,9 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 </thead>
 <tbody>
 <tr>
-<td><code>aws.ecr_role_arn</code></td>
-<td></td>
-<td>Optional role to assume for ECR reads. Omit to use pod identity directly</td>
-</tr>
-<tr>
 <td><code>aws.ecr_region</code></td>
 <td></td>
 <td>Region of app ECR repositories</td>
-</tr>
-<tr>
-<td><code>aws.audit_role_arn</code></td>
-<td></td>
-<td>Optional role to assume for S3 audit writes. Omit to use pod identity directly</td>
 </tr>
 <tr>
 <td><code>aws.audit_region</code></td>
@@ -1667,8 +1750,9 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 </tr>
 </tbody>
 </table>
-<h3 id="ecr-events-ecr-push-triggered-deploys">ECR Events (ECR push-triggered deploys)<a class="headerlink" href="#ecr-events-ecr-push-triggered-deploys" title="Permanent link">&para;</a></h3>
-<p>Disabled by default. When <code>sqs_queue_url</code> is set, the receiver polls an SQS queue for ECR push events from EventBridge and enqueues matching deploys.</p>
+<p>The bot uses ambient IAM credentials (IRSA, instance profile, or environment variables) for all AWS API calls. No role ARNs are configured.</p>
+<h3 id="ecr-auto-deploy-ecr-push-triggered-deploys">ECR Auto Deploy (ECR push-triggered deploys)<a class="headerlink" href="#ecr-auto-deploy-ecr-push-triggered-deploys" title="Permanent link">&para;</a></h3>
+<p>Disabled by default. When <code>enabled</code> is true and <code>sqs_queue_url</code> is set, the receiver polls an SQS queue for ECR push events from EventBridge and enqueues matching deploys.</p>
 <table>
 <thead>
 <tr>
@@ -1679,12 +1763,17 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 </thead>
 <tbody>
 <tr>
-<td><code>ecr_events.sqs_queue_url</code></td>
-<td><code>""</code> (disabled)</td>
+<td><code>ecr_auto_deploy.enabled</code></td>
+<td><code>false</code></td>
+<td>Enable ECR push-triggered deploys</td>
+</tr>
+<tr>
+<td><code>ecr_auto_deploy.sqs_queue_url</code></td>
+<td><code>""</code></td>
 <td>SQS queue URL to poll for ECR push events</td>
 </tr>
 <tr>
-<td><code>ecr_events.poll_interval</code></td>
+<td><code>ecr_auto_deploy.poll_interval</code></td>
 <td><code>"30s"</code></td>
 <td>How often to long-poll the SQS queue</td>
 </tr>
@@ -1733,25 +1822,15 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <td>ConfigMap to write discovered apps to</td>
 </tr>
 <tr>
-<td><code>repo_discovery.configmap_namespace</code></td>
-<td>inferred from pod</td>
-<td>Namespace of the ConfigMap</td>
-</tr>
-<tr>
 <td><code>repo_discovery.rate_limit_floor</code></td>
 <td><code>500</code></td>
 <td>Pause scanning when GitHub rate limit remaining drops below this</td>
-</tr>
-<tr>
-<td><code>repo_discovery.warn_channel</code></td>
-<td>deploy channel</td>
-<td>Slack channel for conflict warnings</td>
 </tr>
 </tbody>
 </table>
 <p>See <a href="../repo-sourced-app-discovery/">repo-sourced-app-discovery.md</a> for the full design.</p>
 <h3 id="apps">Apps<a class="headerlink" href="#apps" title="Permanent link">&para;</a></h3>
-<p>Each entry in the <code>apps[]</code> array defines one deployable application. App names include the environment (e.g. <code>myapp-dev</code>, <code>myapp-prod</code>) and must be unique.</p>
+<p>Each entry in the <code>apps[]</code> array defines one deployable application. The <code>app</code> field is the base name (e.g. <code>"myapp"</code>); the bot constructs the composite <code>app-environment</code> (e.g. <code>myapp-dev</code>, <code>myapp-prod</code>) internally via <code>FullName()</code>. Each <code>(app, environment)</code> pair must be unique.</p>
 <table>
 <thead>
 <tr>
@@ -1764,7 +1843,7 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <tr>
 <td><code>app</code></td>
 <td></td>
-<td>App name (including environment, e.g. <code>myapp-prod</code>). Must be unique across all entries</td>
+<td>Base app name (e.g. <code>myapp</code>). The bot constructs the full name as <code>app-environment</code>. Must be unique per environment</td>
 </tr>
 <tr>
 <td><code>environment</code></td>
@@ -1791,16 +1870,11 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <td><code>false</code></td>
 <td>When true, ECR push events for this app deploy automatically without human approval. Subject to <code>allow_prod_auto_deploy</code></td>
 </tr>
-<tr>
-<td><code>auto_deploy_approver_group</code></td>
-<td></td>
-<td>Slack ID to notify for ECR-triggered deploys. Channel ID (<code>C...</code>) posts there directly; user group ID (<code>S...</code>) mentions the group in deploy channel</td>
-</tr>
 </tbody>
 </table>
 <p>Example:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-prod&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/prod/kustomization.yaml&quot;</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
@@ -1826,12 +1900,12 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <span class="w">  </span><span class="p">]</span>
 <span class="p">}</span>
 </code></pre></div>
-<p><strong>Flexible (v1)</strong> -- all fields specified explicitly. Use without <code>enforce_repo_naming</code>, or for repos listed in <code>exempt_repos</code>:</p>
+<p><strong>Explicit fields</strong> -- all fields specified explicitly. Use without <code>enforce_repo_naming</code>, or for repos listed in <code>exempt_repos</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;apiVersion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot/v1&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;apiVersion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot/v2&quot;</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-dev&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dev&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/dev/kustomization.yaml&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
@@ -1839,7 +1913,7 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <span class="w">      </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
 <span class="w">    </span><span class="p">},</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-prod&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/prod/kustomization.yaml&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
@@ -1856,10 +1930,11 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">&quot;github&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nt">&quot;org&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myorg&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gitops-repo&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;deployer_team&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deployers&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;approver_team&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;senior-engineers&quot;</span>
+<span class="w">    </span><span class="nt">&quot;repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;gitops-repo&quot;</span>
 <span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;authorization&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">&quot;type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;github_teams&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;deployers&quot;</span><span class="p">]}</span>
+<span class="w">  </span><span class="p">],</span>
 <span class="w">  </span><span class="nt">&quot;slack&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nt">&quot;deploy_channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;C01234567&quot;</span>
 <span class="w">  </span><span class="p">},</span>
@@ -1874,7 +1949,8 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <span class="w">    </span><span class="nt">&quot;audit_bucket&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-audit-logs&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;audit_region&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;us-east-1&quot;</span>
 <span class="w">  </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;ecr_events&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;ecr_auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;sqs_queue_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://sqs.us-east-1.amazonaws.com/123456789012/deploy-bot-ecr-events&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;poll_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;30s&quot;</span>
 <span class="w">  </span><span class="p">},</span>
@@ -1886,7 +1962,7 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
-<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-prod&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/prod/kustomization.yaml&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>

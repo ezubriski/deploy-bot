@@ -660,10 +660,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#api-versions" class="md-nav__link">
+  <a href="#api-version" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API versions
+        API version
       
     </span>
   </a>
@@ -1141,10 +1141,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#api-versions" class="md-nav__link">
+  <a href="#api-version" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API versions
+        API version
       
     </span>
   </a>
@@ -1287,9 +1287,9 @@
 <h2 id="naming-modes">Naming modes<a class="headerlink" href="#naming-modes" title="Permanent link">&para;</a></h2>
 <h3 id="flexible-naming-default">Flexible naming (default)<a class="headerlink" href="#flexible-naming-default" title="Permanent link">&para;</a></h3>
 <p>By default, app teams choose their own <code>app</code> name and <code>kustomize_path</code> in their <code>.deploy-bot.json</code>. This works well for small teams but requires coordination to avoid collisions.</p>
-<p><strong>Example <code>.deploy-bot.json</code></strong> (v1 or v2):</p>
+<p><strong>Example <code>.deploy-bot.json</code></strong>:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;apiVersion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot/v1&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;apiVersion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot/v2&quot;</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
 <span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;my-service&quot;</span><span class="p">,</span>
@@ -1444,39 +1444,12 @@
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
-<p>Exempt repos can use <code>apiVersion: deploy-bot/v1</code> and specify any <code>app</code> name and <code>kustomize_path</code>. Non-exempt repos using v1 when enforcement is on are rejected:</p>
-<div class="highlight"><pre><span></span><code>✗ apiVersion: enforce_repo_naming requires apiVersion deploy-bot/v2.
-  Update your config or contact the operator to add this repo to exempt_repos.
-</code></pre></div>
+<p>Exempt repos must specify <code>app</code> and <code>kustomize_path</code> explicitly (no derivation is applied even when <code>enforce_repo_naming</code> is on globally).</p>
 <p><strong>Validating locally as an exempt repo:</strong></p>
 <div class="highlight"><pre><span></span><code>deploy-bot-config<span class="w"> </span>validate<span class="w"> </span>--file<span class="w"> </span>.deploy-bot.json<span class="w"> </span>--repo-naming<span class="w"> </span>--repo<span class="w"> </span>legacy-app<span class="w"> </span>--exempt
 </code></pre></div>
-<h3 id="api-versions">API versions<a class="headerlink" href="#api-versions" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Version</th>
-<th><code>app</code></th>
-<th><code>kustomize_path</code></th>
-<th><code>tag_pattern</code></th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>deploy-bot/v1</code></td>
-<td>Required</td>
-<td>Required</td>
-<td>Optional</td>
-</tr>
-<tr>
-<td><code>deploy-bot/v2</code></td>
-<td>Optional (derived)</td>
-<td>Optional (derived)</td>
-<td>Optional (defaults from operator)</td>
-</tr>
-</tbody>
-</table>
-<p>v2 configs work with or without <code>enforce_repo_naming</code>. When enforcement is off, v2 behaves like v1 (all fields required). When enforcement is on, omitted fields are derived from the repo name and operator template.</p>
+<h3 id="api-version">API version<a class="headerlink" href="#api-version" title="Permanent link">&para;</a></h3>
+<p><code>apiVersion: deploy-bot/v2</code> is required. With <code>enforce_repo_naming</code> enabled and the repo not in <code>exempt_repos</code>, <code>app</code> and <code>kustomize_path</code> may be omitted (derived from the repo name). Otherwise all fields must be specified explicitly.</p>
 <h3 id="validating-locally">Validating locally<a class="headerlink" href="#validating-locally" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Minimal — v2 with enforcement</span>
 deploy-bot-config<span class="w"> </span>validate<span class="w"> </span>--file<span class="w"> </span>.deploy-bot.json<span class="w"> </span><span class="se">\</span>

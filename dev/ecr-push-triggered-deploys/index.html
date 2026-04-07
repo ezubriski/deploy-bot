@@ -1391,7 +1391,8 @@ buffered.</p>
 <span class="w">  </span><span class="nt">&quot;deployment&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nt">&quot;allow_prod_auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
 <span class="w">  </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;ecr_events&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;ecr_auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;sqs_queue_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://sqs.us-east-1.amazonaws.com/123456789012/deploy-bot-ecr-events&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;poll_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;30s&quot;</span>
 <span class="w">  </span><span class="p">}</span>
@@ -1412,12 +1413,17 @@ buffered.</p>
 <td>If false, <code>auto_deploy: true</code> is ignored (with a warning) for apps whose <code>environment</code> is <code>"prod"</code> or <code>"production"</code></td>
 </tr>
 <tr>
-<td><code>ecr_events.sqs_queue_url</code></td>
-<td><code>""</code> (disabled)</td>
-<td>SQS queue URL to poll for ECR push events. Feature is disabled if empty</td>
+<td><code>ecr_auto_deploy.enabled</code></td>
+<td><code>false</code></td>
+<td>Enable ECR push-triggered deploys</td>
 </tr>
 <tr>
-<td><code>ecr_events.poll_interval</code></td>
+<td><code>ecr_auto_deploy.sqs_queue_url</code></td>
+<td><code>""</code></td>
+<td>SQS queue URL to poll for ECR push events</td>
+</tr>
+<tr>
+<td><code>ecr_auto_deploy.poll_interval</code></td>
 <td><code>"30s"</code></td>
 <td>How often to long-poll the SQS queue</td>
 </tr>
@@ -1427,8 +1433,7 @@ buffered.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;auto_deploy_approver_group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;C01234567&quot;</span>
+<span class="w">  </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
 <span class="p">}</span>
 </code></pre></div>
 <table>
@@ -1445,13 +1450,9 @@ buffered.</p>
 <td><code>false</code></td>
 <td>When <code>true</code>, matching pushes deploy automatically without human approval. Subject to <code>allow_prod_auto_deploy</code> global guard</td>
 </tr>
-<tr>
-<td><code>auto_deploy_approver_group</code></td>
-<td><code>""</code></td>
-<td>Slack ID to @mention when requesting approval for an ECR-triggered deploy. Use a channel ID (<code>C...</code>) to post there, or a user group ID (<code>S...</code>) to mention the group in <code>deploy_channel</code>. Falls back to posting to <code>deploy_channel</code> without a mention if unset</td>
-</tr>
 </tbody>
 </table>
+<p>All ECR-triggered deploy notifications are posted to <code>deploy_channel</code>.</p>
 <h2 id="behavior">Behavior<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h2>
 <h3 id="tag-matching">Tag Matching<a class="headerlink" href="#tag-matching" title="Permanent link">&para;</a></h3>
 <p>On each SQS message, the poller:
@@ -1479,7 +1480,7 @@ buffered.</p>
 5. If <code>auto_deploy</code> is true: immediately merges the PR and posts a completion
    notification.</p>
 <h3 id="approval-required-path-default">Approval-Required Path (default)<a class="headerlink" href="#approval-required-path-default" title="Permanent link">&para;</a></h3>
-<p>Slack message posted to <code>auto_deploy_approver_group</code> (or <code>deploy_channel</code>):</p>
+<p>Slack message posted to <code>deploy_channel</code>:</p>
 <blockquote>
 <p>New image <code>myapp:v1.2.3</code> detected in ECR. Deploy PR #456 is ready for review. [Approve] [Reject]</p>
 </blockquote>

@@ -610,10 +610,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#flexible-naming-v1" class="md-nav__link">
+  <a href="#explicit-fields-v2-without-enforcement" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Flexible naming (v1)
+        Explicit fields (v2 without enforcement)
       
     </span>
   </a>
@@ -621,10 +621,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#api-versions" class="md-nav__link">
+  <a href="#api-version" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API versions
+        API version
       
     </span>
   </a>
@@ -1203,10 +1203,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#flexible-naming-v1" class="md-nav__link">
+  <a href="#explicit-fields-v2-without-enforcement" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Flexible naming (v1)
+        Explicit fields (v2 without enforcement)
       
     </span>
   </a>
@@ -1214,10 +1214,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#api-versions" class="md-nav__link">
+  <a href="#api-version" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API versions
+        API version
       
     </span>
   </a>
@@ -1472,8 +1472,7 @@ derived from the repository name (see <a href="../naming-conventions/">naming-co
 <span class="w">    </span><span class="p">{</span>
 <span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dev&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;auto_deploy_approver_group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;C01234567&quot;</span>
+<span class="w">      </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
 <span class="w">    </span><span class="p">},</span>
 <span class="w">    </span><span class="p">{</span>
 <span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
@@ -1482,11 +1481,11 @@ derived from the repository name (see <a href="../naming-conventions/">naming-co
 <span class="w">  </span><span class="p">]</span>
 <span class="p">}</span>
 </code></pre></div>
-<h3 id="flexible-naming-v1">Flexible naming (v1)<a class="headerlink" href="#flexible-naming-v1" title="Permanent link">&para;</a></h3>
-<p>Without <code>enforce_repo_naming</code>, or for repos listed in <code>exempt_repos</code>, teams
-use <code>apiVersion: deploy-bot/v1</code> and specify all fields explicitly:</p>
+<h3 id="explicit-fields-v2-without-enforcement">Explicit fields (v2 without enforcement)<a class="headerlink" href="#explicit-fields-v2-without-enforcement" title="Permanent link">&para;</a></h3>
+<p>Without <code>enforce_repo_naming</code>, or for repos listed in <code>exempt_repos</code>, all
+fields must be specified explicitly:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;apiVersion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot/v1&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;apiVersion&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot/v2&quot;</span><span class="p">,</span>
 <span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
 <span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
@@ -1494,8 +1493,7 @@ use <code>apiVersion: deploy-bot/v1</code> and specify all fields explicitly:</p
 <span class="w">      </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/dev/kustomization.yaml&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789012.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;tag_pattern&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^v\\d+\\.\\d+\\.\\d+$&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;auto_deploy_approver_group&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;C01234567&quot;</span>
+<span class="w">      </span><span class="nt">&quot;auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
 <span class="w">    </span><span class="p">},</span>
 <span class="w">    </span><span class="p">{</span>
 <span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
@@ -1508,35 +1506,10 @@ use <code>apiVersion: deploy-bot/v1</code> and specify all fields explicitly:</p
 <span class="w">  </span><span class="p">]</span>
 <span class="p">}</span>
 </code></pre></div>
-<h3 id="api-versions">API versions<a class="headerlink" href="#api-versions" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Version</th>
-<th><code>app</code></th>
-<th><code>kustomize_path</code></th>
-<th><code>tag_pattern</code></th>
-<th>When to use</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>deploy-bot/v2</code></td>
-<td>Optional (derived from repo name)</td>
-<td>Optional (derived from template)</td>
-<td>Optional (falls back to operator default)</td>
-<td>Recommended. Use with <code>enforce_repo_naming</code></td>
-</tr>
-<tr>
-<td><code>deploy-bot/v1</code></td>
-<td>Required</td>
-<td>Required</td>
-<td>Optional</td>
-<td>Flexible naming, or exempt repos during migration</td>
-</tr>
-</tbody>
-</table>
-<p>If <code>apiVersion</code> is omitted, it defaults to <code>v1</code>.</p>
+<h3 id="api-version">API version<a class="headerlink" href="#api-version" title="Permanent link">&para;</a></h3>
+<p><code>apiVersion: deploy-bot/v2</code> is required. With <code>enforce_repo_naming</code> and the
+repo not in <code>exempt_repos</code>, <code>app</code> and <code>kustomize_path</code> may be omitted (the
+scanner derives them from the repo name). Otherwise all fields are required.</p>
 <p>The collector validates each entry against the same schema rules as the
 primary config (e.g. <code>environment</code> is required, <code>tag_pattern</code> compiles as
 a regex).</p>
@@ -1547,7 +1520,7 @@ Action. Running validation in CI catches schema errors and conflict issues
 before they reach the scanner, reducing noise in Slack.</p>
 <h3 id="fields-not-settable-from-repos">Fields NOT settable from repos<a class="headerlink" href="#fields-not-settable-from-repos" title="Permanent link">&para;</a></h3>
 <p>Repo-sourced configs can only set per-app fields. They cannot modify global
-settings (<code>github</code>, <code>slack</code>, <code>deployment</code>, <code>aws</code>, <code>ecr_events</code>). Any
+settings (<code>github</code>, <code>slack</code>, <code>deployment</code>, <code>aws</code>, <code>ecr_auto_deploy</code>). Any
 unrecognised top-level keys are ignored with a warning.</p>
 <h2 id="precedence">Precedence<a class="headerlink" href="#precedence" title="Permanent link">&para;</a></h2>
 <p><strong>Operator config always wins.</strong> If the operator's <code>config.json</code> defines an
@@ -1599,7 +1572,7 @@ reloads -- effectively removing those apps.</p>
 <p>When the collector detects a conflict (repo-sourced app collides on
 <code>(app, environment)</code> with operator config), it warns via two channels:</p>
 <h3 id="slack">Slack<a class="headerlink" href="#slack" title="Permanent link">&para;</a></h3>
-<p>Posts to the configured <code>warn_channel</code> (defaults to <code>deploy_channel</code>):</p>
+<p>Posts to the deploy channel:</p>
 <blockquote>
 <p>App <code>myapp</code> (<code>prod</code>) is defined in both operator config and repo
 <code>my-org/myapp</code>. Remove it from operator config for the repo-sourced
@@ -1669,9 +1642,7 @@ pairs already present in the primary. This merge happens on every reload.</p>
 <span class="w">    </span><span class="nt">&quot;repo_prefix&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;discovered_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;/etc/deploy-bot/discovered.json&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;configmap_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot-discovered&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;configmap_namespace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy-bot&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;rate_limit_floor&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">500</span><span class="p">,</span>
-<span class="w">    </span><span class="nt">&quot;warn_channel&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">&quot;rate_limit_floor&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">500</span>
 <span class="w">  </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -1715,19 +1686,9 @@ pairs already present in the primary. This merge happens on every reload.</p>
 <td>ConfigMap to write discovered apps to</td>
 </tr>
 <tr>
-<td><code>configmap_namespace</code></td>
-<td><code>""</code> (inferred from pod)</td>
-<td>Namespace of the ConfigMap</td>
-</tr>
-<tr>
 <td><code>rate_limit_floor</code></td>
 <td><code>500</code></td>
 <td>Pause scanning when remaining rate limit drops below this</td>
-</tr>
-<tr>
-<td><code>warn_channel</code></td>
-<td><code>""</code> (uses <code>deploy_channel</code>)</td>
-<td>Slack channel for conflict warnings</td>
 </tr>
 </tbody>
 </table>

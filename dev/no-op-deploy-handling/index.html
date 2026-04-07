@@ -810,17 +810,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#slack-mention-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Slack mention format
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1002,17 +991,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#slack-mention-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Slack mention format
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1073,31 +1051,12 @@ the kustomization file, it short-circuits the deploy:</p>
 <li><strong>An audit log entry is written</strong> with <code>event_type: "noop"</code>.</li>
 </ol>
 <h3 id="slack-notifications">Slack notifications<a class="headerlink" href="#slack-notifications" title="Permanent link">&para;</a></h3>
-<p><strong>ECR-triggered no-op</strong> -- posted to the deploy channel, mentioning the
-<code>auto_deploy_approver_group</code> if one is configured:</p>
-<blockquote>
-<p>&lt;!subteam^S01234567&gt; <code>myapp</code> (<code>prod</code>) is already running <code>v1.2.3</code> -- no changes to deploy. No PR created.</p>
-</blockquote>
-<p>Without a group configured:</p>
+<p><strong>ECR-triggered no-op</strong> -- posted to the deploy channel:</p>
 <blockquote>
 <p><code>myapp</code> (<code>prod</code>) is already running <code>v1.2.3</code> -- no changes to deploy. No PR created.</p>
 </blockquote>
-<p>The group mention ensures the people who would have been asked to approve an
-ECR-triggered deploy are still aware the image arrived -- even though no
-action is needed.</p>
-<p><strong>User-initiated no-op</strong> -- posted to the deploy channel (without a group
-mention) and the requester receives a DM with the same message.</p>
-<h3 id="slack-mention-format">Slack mention format<a class="headerlink" href="#slack-mention-format" title="Permanent link">&para;</a></h3>
-<p><code>auto_deploy_approver_group</code> stores a Slack ID directly -- no handle or API
-lookup is needed at notification time:</p>
-<ul>
-<li>Channel ID (<code>C...</code>) -- the bot posts the no-op notice to that channel
-  instead of <code>deploy_channel</code>.</li>
-<li>User group ID (<code>S...</code>) -- the bot posts to <code>deploy_channel</code> with a
-  <code>&lt;!subteam^S...&gt;</code> mention embedded in the message.</li>
-</ul>
-<p>The <code>C</code>/<code>S</code> prefix disambiguates at runtime. No additional Slack scopes are
-required beyond what the bot already holds.</p>
+<p><strong>User-initiated no-op</strong> -- posted to the deploy channel and the requester
+receives a DM with the same message.</p>
 <h2 id="audit-log-entry">Audit Log Entry<a class="headerlink" href="#audit-log-entry" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">&quot;event_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;noop&quot;</span><span class="p">,</span>
