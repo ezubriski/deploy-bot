@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,6 +66,30 @@ func TestUpdateNewTag(t *testing.T) {
 	}
 }
 
+// --- GraphQL test helpers ---
+
+// graphqlReq is the request envelope POSTed to /graphql by the client.
+type graphqlReq struct {
+	Query     string         `json:"query"`
+	Variables map[string]any `json:"variables"`
+}
+
+// decodeGraphQL reads and decodes a GraphQL request body.
+func decodeGraphQL(t *testing.T, r *http.Request) graphqlReq {
+	t.Helper()
+	var req graphqlReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		t.Fatalf("decode graphql request: %v", err)
+	}
+	return req
+}
+
+// writeGraphQL writes a GraphQL response with the given data payload.
+func writeGraphQL(w http.ResponseWriter, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"data": data})
+}
+
 // --- CreateDeployPR ---
 
 func TestCreateDeployPR(t *testing.T) {
@@ -75,88 +100,63 @@ func TestCreateDeployPR(t *testing.T) {
 		tag           = "v2.0.0"
 		baseBranch    = "main"
 		baseSHA       = "deadbeef"
-		fileSHA       = "cafebabe"
 		kustomizePath = "apps/myapp/kustomization.yaml"
 	)
 
 	initialContent := "images:\n  - name: nginx\n    newTag: v1.0.0\n"
 
-	var capturedUpdateContent string
+	var capturedAdditions []map[string]string
 	var capturedPRTitle, capturedPRBody string
 	var labelsCalled bool
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		path := r.URL.Path
-
-		switch {
-		// GetRef — return base branch SHA
-		case r.Method == http.MethodGet && strings.Contains(path, "/git/ref/heads/"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref": "refs/heads/" + baseBranch,
-				"object": map[string]interface{}{
-					"sha":  baseSHA,
-					"type": "commit",
-				},
-			})
-
-		// CreateRef — create new branch
-		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/refs"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref":    "refs/heads/deploy/dev-myapp-v2.0.0",
-				"object": map[string]interface{}{"sha": baseSHA},
-			})
-
-		// GetContents — return initial kustomization file
-		case r.Method == http.MethodGet && strings.Contains(path, "/contents/"):
-			encoded := base64.StdEncoding.EncodeToString([]byte(initialContent))
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"type":     "file",
-				"encoding": "base64",
-				"content":  encoded,
-				"sha":      fileSHA,
-				"name":     "kustomization.yaml",
-				"path":     kustomizePath,
-			})
-
-		// UpdateFile — capture the committed content
-		case r.Method == http.MethodPut && strings.Contains(path, "/contents/"):
-			var body struct {
-				Content string `json:"content"`
-			}
-			json.NewDecoder(r.Body).Decode(&body)
-			decoded, _ := base64.StdEncoding.DecodeString(body.Content)
-			capturedUpdateContent = string(decoded)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"content": map[string]interface{}{"sha": "newsha"},
-				"commit":  map[string]interface{}{"sha": "commitsha"},
-			})
-
-		// CreatePR — capture title/body, return PR #1
-		case r.Method == http.MethodPost && strings.HasSuffix(path, "/pulls"):
-			var body struct {
-				Title string `json:"title"`
-				Body  string `json:"body"`
-			}
-			json.NewDecoder(r.Body).Decode(&body)
-			capturedPRTitle = body.Title
-			capturedPRBody = body.Body
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"number":   1,
-				"html_url": "https://github.com/test-org/test-repo/pull/1",
-				"title":    body.Title,
-			})
-
-		// AddLabels
-		case r.Method == http.MethodPost && strings.Contains(path, "/labels"):
+		// AddLabels still goes through REST.
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/labels") {
 			labelsCalled = true
-			json.NewEncoder(w).Encode([]interface{}{
-				map[string]interface{}{"name": "deploy-bot"},
-			})
-
-		default:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]any{map[string]any{"name": "deploy-bot"}})
+			return
+		}
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/graphql") {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
+			return
+		}
+		req := decodeGraphQL(t, r)
+		switch {
+		case strings.Contains(req.Query, "query DeployState"):
+			writeGraphQL(w, map[string]any{
+				"repository": map[string]any{
+					"id":        "REPOID",
+					"baseRef":   map[string]any{"target": map[string]any{"oid": baseSHA}},
+					"deployRef": nil,
+					"file":      map[string]any{"text": initialContent},
+				},
+			})
+		case strings.Contains(req.Query, "mutation DeployCommit"):
+			additions, _ := req.Variables["additions"].([]any)
+			for _, a := range additions {
+				if m, ok := a.(map[string]any); ok {
+					capturedAdditions = append(capturedAdditions, map[string]string{
+						"path":     fmt.Sprint(m["path"]),
+						"contents": fmt.Sprint(m["contents"]),
+					})
+				}
+			}
+			capturedPRTitle, _ = req.Variables["prTitle"].(string)
+			capturedPRBody, _ = req.Variables["prBody"].(string)
+			writeGraphQL(w, map[string]any{
+				"createRef":            map[string]any{"ref": map[string]any{"name": "deploy/dev-myapp-v2.0.0"}},
+				"createCommitOnBranch": map[string]any{"commit": map[string]any{"oid": "newcommit"}},
+				"createPullRequest": map[string]any{
+					"pullRequest": map[string]any{
+						"number": 1,
+						"url":    "https://github.com/test-org/test-repo/pull/1",
+					},
+				},
+			})
+		default:
+			t.Errorf("unexpected graphql operation: %s", req.Query)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -188,12 +188,24 @@ func TestCreateDeployPR(t *testing.T) {
 		t.Error("prURL is empty")
 	}
 
-	// The kustomize file must be updated with the new tag.
+	// The kustomize file must be updated with the new tag. Decode the
+	// base64 contents from the captured GraphQL FileAddition.
+	if len(capturedAdditions) != 1 {
+		t.Fatalf("expected 1 file addition, got %d", len(capturedAdditions))
+	}
+	decoded, err := base64.StdEncoding.DecodeString(capturedAdditions[0]["contents"])
+	if err != nil {
+		t.Fatalf("decode addition contents: %v", err)
+	}
+	capturedUpdateContent := string(decoded)
 	if !strings.Contains(capturedUpdateContent, "newTag: "+tag) {
 		t.Errorf("committed content missing newTag: %s\ngot: %q", tag, capturedUpdateContent)
 	}
 	if strings.Contains(capturedUpdateContent, "newTag: v1.0.0") {
 		t.Errorf("committed content still contains old tag v1.0.0: %q", capturedUpdateContent)
+	}
+	if got := capturedAdditions[0]["path"]; got != kustomizePath {
+		t.Errorf("addition path = %q, want %q", got, kustomizePath)
 	}
 
 	// PR title follows the conventional commit format.
@@ -226,43 +238,32 @@ func TestCreateDeployPR_BranchNameSanitized(t *testing.T) {
 	var createdBranch string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		path := r.URL.Path
-
+		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/labels") {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode([]any{})
+			return
+		}
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/graphql") {
+			http.NotFound(w, r)
+			return
+		}
+		req := decodeGraphQL(t, r)
 		switch {
-		case r.Method == http.MethodGet && strings.Contains(path, "/git/ref/heads/"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref":    "refs/heads/main",
-				"object": map[string]interface{}{"sha": "abc", "type": "commit"},
+		case strings.Contains(req.Query, "query DeployState"):
+			writeGraphQL(w, map[string]any{
+				"repository": map[string]any{
+					"id":      "REPOID",
+					"baseRef": map[string]any{"target": map[string]any{"oid": "abc"}},
+					"file":    map[string]any{"text": "newTag: v1.0.0\n"},
+				},
 			})
-		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/refs"):
-			var body struct {
-				Ref string `json:"ref"`
-			}
-			json.NewDecoder(r.Body).Decode(&body)
-			createdBranch = strings.TrimPrefix(body.Ref, "refs/heads/")
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref":    body.Ref,
-				"object": map[string]interface{}{"sha": "abc"},
+		case strings.Contains(req.Query, "mutation DeployCommit"):
+			createdBranch, _ = req.Variables["headBranch"].(string)
+			writeGraphQL(w, map[string]any{
+				"createPullRequest": map[string]any{
+					"pullRequest": map[string]any{"number": 1, "url": "https://example/pr/1"},
+				},
 			})
-		case r.Method == http.MethodGet && strings.Contains(path, "/contents/"):
-			encoded := base64.StdEncoding.EncodeToString([]byte("newTag: v1.0.0\n"))
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"type": "file", "encoding": "base64",
-				"content": encoded, "sha": "sha1",
-			})
-		case r.Method == http.MethodPut && strings.Contains(path, "/contents/"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"content": map[string]interface{}{"sha": "s"},
-				"commit":  map[string]interface{}{"sha": "c"},
-			})
-		case r.Method == http.MethodPost && strings.HasSuffix(path, "/pulls"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"number":   1,
-				"html_url": "https://github.com/test-org/test-repo/pull/1",
-			})
-		default:
-			json.NewEncoder(w).Encode(map[string]interface{}{})
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -297,7 +298,8 @@ func TestCreateDeployPR_BranchNameSanitized(t *testing.T) {
 
 // TestCreateDeployPR_NoChange verifies that CreateDeployPR returns ErrNoChange
 // (and deletes the created branch) when the kustomization file already contains
-// the requested tag.
+// the requested tag. With the GraphQL implementation no branch is ever
+// created (no orphan to clean up).
 func TestCreateDeployPR_NoChange(t *testing.T) {
 	const (
 		org           = "test-org"
@@ -309,35 +311,27 @@ func TestCreateDeployPR_NoChange(t *testing.T) {
 	// Content already has the tag we're deploying.
 	alreadyCurrent := "images:\n  - name: nginx\n    newTag: " + currentTag + "\n"
 
-	var branchCreated, branchDeleted bool
+	var mutationCalled bool
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		path := r.URL.Path
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(path, "/git/ref/heads/"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref":    "refs/heads/main",
-				"object": map[string]interface{}{"sha": "abc", "type": "commit"},
-			})
-		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/refs"):
-			branchCreated = true
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref":    "refs/heads/deploy/dev-myapp-v2.0.0",
-				"object": map[string]interface{}{"sha": "abc"},
-			})
-		case r.Method == http.MethodGet && strings.Contains(path, "/contents/"):
-			encoded := base64.StdEncoding.EncodeToString([]byte(alreadyCurrent))
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"type": "file", "encoding": "base64",
-				"content": encoded, "sha": "sha1",
-			})
-		case r.Method == http.MethodDelete && strings.Contains(path, "/git/refs/"):
-			branchDeleted = true
-			w.WriteHeader(http.StatusNoContent)
-		default:
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/graphql") {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
+			return
+		}
+		req := decodeGraphQL(t, r)
+		switch {
+		case strings.Contains(req.Query, "query DeployState"):
+			writeGraphQL(w, map[string]any{
+				"repository": map[string]any{
+					"id":      "REPOID",
+					"baseRef": map[string]any{"target": map[string]any{"oid": "abc"}},
+					"file":    map[string]any{"text": alreadyCurrent},
+				},
+			})
+		case strings.Contains(req.Query, "mutation"):
+			mutationCalled = true
+			t.Errorf("unexpected mutation in no-op path: %s", req.Query)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -351,11 +345,8 @@ func TestCreateDeployPR_NoChange(t *testing.T) {
 	if !errors.Is(err, ErrNoChange) {
 		t.Errorf("expected ErrNoChange, got %v", err)
 	}
-	if !branchCreated {
-		t.Error("expected branch to be created before no-op detection")
-	}
-	if !branchDeleted {
-		t.Error("expected created branch to be deleted on no-op")
+	if mutationCalled {
+		t.Error("no mutation should fire when tag is already current")
 	}
 }
 
@@ -444,88 +435,62 @@ func TestMergePR_409ReturnsErrHeadModified(t *testing.T) {
 	}
 }
 
-// TestRebaseDeployBranch_Success verifies that RebaseDeployBranch calls the
-// full Git Data API sequence and force-updates the deploy branch ref.
+// TestRebaseDeployBranch_Success verifies that RebaseDeployBranch issues the
+// expected GraphQL query and the rebase mutation (updateRef force +
+// createCommitOnBranch) and writes the new tag into the file addition.
 func TestRebaseDeployBranch_Success(t *testing.T) {
 	const (
 		org           = "test-org"
 		repo          = "test-repo"
 		kustomizePath = "apps/myapp/kustomization.yaml"
-		headSHA       = "headsha"
-		treeSHA       = "treesha"
-		blobSHA       = "blobsha"
-		newTreeSHA    = "newtreesha"
-		newCommitSHA  = "newcommitsha"
+		baseSHA       = "headsha"
+		deployRefID   = "DEPLOYREFID"
 	)
 
 	currentContent := "newTag: v1.0.0\n"
 	targetTag := "v2.0.0"
 
 	var (
-		blobCreated   bool
-		treeCreated   bool
-		commitCreated bool
-		refUpdated    bool
-		forceUpdate   bool
+		mutationCalled  bool
+		capturedRefID   string
+		capturedBaseSHA string
+		capturedFile    string
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		path := r.URL.Path
-		switch {
-		// GetRef — base branch HEAD
-		case r.Method == http.MethodGet && strings.Contains(path, "/git/ref/heads/"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref":    "refs/heads/main",
-				"object": map[string]interface{}{"sha": headSHA, "type": "commit"},
-			})
-
-		// GetContents — current file at base branch
-		case r.Method == http.MethodGet && strings.Contains(path, "/contents/"):
-			encoded := base64.StdEncoding.EncodeToString([]byte(currentContent))
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"type": "file", "encoding": "base64",
-				"content": encoded, "sha": "filesha",
-			})
-
-		// CreateBlob
-		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/blobs"):
-			blobCreated = true
-			json.NewEncoder(w).Encode(map[string]interface{}{"sha": blobSHA})
-
-		// GetCommit
-		case r.Method == http.MethodGet && strings.Contains(path, "/git/commits/"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"sha":  headSHA,
-				"tree": map[string]interface{}{"sha": treeSHA},
-			})
-
-		// CreateTree
-		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/trees"):
-			treeCreated = true
-			json.NewEncoder(w).Encode(map[string]interface{}{"sha": newTreeSHA})
-
-		// CreateCommit
-		case r.Method == http.MethodPost && strings.HasSuffix(path, "/git/commits"):
-			commitCreated = true
-			json.NewEncoder(w).Encode(map[string]interface{}{"sha": newCommitSHA})
-
-		// UpdateRef (PATCH)
-		case r.Method == http.MethodPatch && strings.Contains(path, "/git/refs/"):
-			refUpdated = true
-			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
-			if b, ok := body["force"].(bool); ok && b {
-				forceUpdate = true
-			}
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref":    "refs/heads/deploy/dev-myapp-v2.0.0",
-				"object": map[string]interface{}{"sha": newCommitSHA},
-			})
-
-		default:
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/graphql") {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
+			return
+		}
+		req := decodeGraphQL(t, r)
+		switch {
+		case strings.Contains(req.Query, "query DeployState"):
+			writeGraphQL(w, map[string]any{
+				"repository": map[string]any{
+					"id":        "REPOID",
+					"baseRef":   map[string]any{"target": map[string]any{"oid": baseSHA}},
+					"deployRef": map[string]any{"id": deployRefID},
+					"file":      map[string]any{"text": currentContent},
+				},
+			})
+		case strings.Contains(req.Query, "mutation Rebase"):
+			mutationCalled = true
+			capturedRefID, _ = req.Variables["refId"].(string)
+			capturedBaseSHA, _ = req.Variables["baseSHA"].(string)
+			additions, _ := req.Variables["additions"].([]any)
+			if len(additions) == 1 {
+				if m, ok := additions[0].(map[string]any); ok {
+					decoded, _ := base64.StdEncoding.DecodeString(fmt.Sprint(m["contents"]))
+					capturedFile = string(decoded)
+				}
+			}
+			writeGraphQL(w, map[string]any{
+				"updateRef":            map[string]any{"ref": map[string]any{"name": "deploy/dev-myapp-v2.0.0"}},
+				"createCommitOnBranch": map[string]any{"commit": map[string]any{"oid": "newcommit"}},
+			})
+		default:
+			t.Errorf("unexpected graphql operation: %s", req.Query)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -539,48 +504,49 @@ func TestRebaseDeployBranch_Success(t *testing.T) {
 		t.Fatalf("RebaseDeployBranch: %v", err)
 	}
 
-	if !blobCreated {
-		t.Error("expected CreateBlob to be called")
+	if !mutationCalled {
+		t.Error("expected rebase mutation to be called")
 	}
-	if !treeCreated {
-		t.Error("expected CreateTree to be called")
+	if capturedRefID != deployRefID {
+		t.Errorf("refId = %q, want %q", capturedRefID, deployRefID)
 	}
-	if !commitCreated {
-		t.Error("expected CreateCommit to be called")
+	if capturedBaseSHA != baseSHA {
+		t.Errorf("baseSHA = %q, want %q", capturedBaseSHA, baseSHA)
 	}
-	if !refUpdated {
-		t.Error("expected UpdateRef to be called")
-	}
-	if !forceUpdate {
-		t.Error("expected force=true on UpdateRef")
+	if !strings.Contains(capturedFile, "newTag: "+targetTag) {
+		t.Errorf("addition contents missing new tag: %q", capturedFile)
 	}
 }
 
 // TestRebaseDeployBranch_AlreadyCurrent verifies that RebaseDeployBranch returns
-// ErrNoChange when the target tag is already on the base branch.
+// ErrNoChange when the target tag is already on the base branch — and that
+// the rebase mutation is NOT called in that case.
 func TestRebaseDeployBranch_AlreadyCurrent(t *testing.T) {
 	const currentTag = "v2.0.0"
 	alreadyCurrent := "newTag: " + currentTag + "\n"
 
+	var mutationCalled bool
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		path := r.URL.Path
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(path, "/git/ref/heads/"):
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"ref":    "refs/heads/main",
-				"object": map[string]interface{}{"sha": "abc", "type": "commit"},
-			})
-		case r.Method == http.MethodGet && strings.Contains(path, "/contents/"):
-			encoded := base64.StdEncoding.EncodeToString([]byte(alreadyCurrent))
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"type": "file", "encoding": "base64",
-				"content": encoded, "sha": "sha1",
-			})
-		default:
-			// No blob/tree/commit/ref calls should happen.
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/graphql") {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
+			return
+		}
+		req := decodeGraphQL(t, r)
+		switch {
+		case strings.Contains(req.Query, "query DeployState"):
+			writeGraphQL(w, map[string]any{
+				"repository": map[string]any{
+					"id":        "REPOID",
+					"baseRef":   map[string]any{"target": map[string]any{"oid": "abc"}},
+					"deployRef": map[string]any{"id": "DEPLOYREFID"},
+					"file":      map[string]any{"text": alreadyCurrent},
+				},
+			})
+		case strings.Contains(req.Query, "mutation"):
+			mutationCalled = true
+			t.Errorf("unexpected mutation in no-op rebase path: %s", req.Query)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -592,6 +558,9 @@ func TestRebaseDeployBranch_AlreadyCurrent(t *testing.T) {
 	})
 	if !errors.Is(err, ErrNoChange) {
 		t.Errorf("expected ErrNoChange, got %v", err)
+	}
+	if mutationCalled {
+		t.Error("no mutation should fire when tag is already current")
 	}
 }
 
