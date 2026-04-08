@@ -5,12 +5,6 @@ release; they're tracked here so they don't get lost.
 
 ## Follow-up patches
 
-- [ ] **Instrument external I/O.** Add per-system counters and latency
-  histograms for GitHub, Slack, AWS, and Redis API calls. The bot is almost
-  entirely I/O-bound on GitHub; today we have no visibility into call counts
-  or latencies per operation. Useful for capacity planning and for spotting
-  regressions when the GitHub client library is updated.
-
 - [ ] **Investigate `TestMultiWorker_NoDoubleDelivery` flake.** Test passes on
   retry but intermittently times out waiting for a PR to appear in Redis when
   run back-to-back with `TestMultiWorker_LockContention`. Likely test

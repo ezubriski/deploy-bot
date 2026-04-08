@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/observability"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
@@ -55,6 +56,7 @@ func New(ctx context.Context, rdb *redis.Client, buf bufferAdder, st *store.Stor
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
+	observability.InstrumentAWSConfig(&awsCfg)
 	sqsClient := sqs.NewFromConfig(awsCfg)
 
 	return &Poller{

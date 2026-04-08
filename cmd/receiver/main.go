@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -22,6 +24,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/ecrpoller"
 	"github.com/ezubriski/deploy-bot/internal/health"
+	"github.com/ezubriski/deploy-bot/internal/observability"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/reposcanner"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
@@ -70,9 +73,20 @@ func main() {
 		log.Fatal("slack_app_token is required for the receiver (Socket Mode)")
 	}
 
+	obsProvider, err := observability.Setup("deploy-bot-receiver", prometheus.DefaultRegisterer)
+	if err != nil {
+		log.Fatal("init observability", zap.Error(err))
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = obsProvider.Shutdown(shutdownCtx)
+	}()
+
 	hh := &health.Handler{}
 	go func() {
 		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
 		mux.HandleFunc("/healthz", hh.Liveness)
 		log.Info("health server listening", zap.String("addr", healthAddr))
 		if err := http.ListenAndServe(healthAddr, mux); err != nil {
@@ -84,6 +98,9 @@ func main() {
 	if err != nil {
 		log.Fatal("init redis store", zap.Error(err))
 	}
+	if err := observability.InstrumentRedis(redisStore.Redis()); err != nil {
+		log.Warn("instrument redis", zap.Error(err))
+	}
 	log.Info("waiting for redis", zap.String("addr", secrets.RedisAddr), zap.Bool("iam_auth", secrets.RedisIAMAuth))
 	if err := redisStore.WaitForRedis(ctx, time.Minute); err != nil {
 		log.Fatal("redis not available", zap.Error(err))
@@ -94,6 +111,7 @@ func main() {
 
 	slackClient := slack.New(secrets.SlackBotToken,
 		slack.OptionAppLevelToken(secrets.SlackAppToken),
+		slack.OptionHTTPClient(observability.HTTPClient(nil)),
 	)
 
 	evtBuffer := buffer.New(cfg.Slack.BufferSize, rdb, queue.StreamKeyUser, log)
