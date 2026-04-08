@@ -40,6 +40,8 @@ make ecr-login      # authenticate Podman to ECR
 
 **Before pushing, always run `make check`.** This runs `gofmt` verification, `golangci-lint`, and unit tests. Do not push code that fails any of these.
 
+**Don't open standalone PRs for trivial doc-only changes.** Things like a new `TODO.md` entry, a small note in a comment, or a one-line `CLAUDE.md` clarification should be folded into whatever branch already has related work — or queued in the working tree until the next non-trivial PR. A separate PR per harmless doc note is more review burden than the change is worth.
+
 To create a release, use `make release BUMP=patch|minor|major`. This triggers the GitHub Actions release workflow. Never create tags locally.
 
 Unit tests use `miniredis` -- no real Redis needed.
