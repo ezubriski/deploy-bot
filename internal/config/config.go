@@ -28,6 +28,16 @@ type Config struct {
 	ECRAutoDeploy     ECRAutoDeployConfig `json:"ecr_auto_deploy,omitempty"`
 	RepoDiscovery     RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
 	Apps              []AppConfig         `json:"apps"`
+	// LogLevel sets the minimum severity emitted by zap. Valid values are
+	// "debug", "info", "warn", "error". Defaults to "info" when empty. The
+	// LOG_LEVEL environment variable, if set on the bot/receiver process,
+	// overrides this field.
+	LogLevel string `json:"log_level,omitempty"`
+	// LogFormat selects the zap encoder. Valid values are "json"
+	// (machine-readable, default) and "console" (human-readable, useful
+	// for local development). The LOG_FORMAT environment variable
+	// overrides this field.
+	LogFormat string `json:"log_format,omitempty"`
 }
 
 // AuthorizationEntry defines a single authorization source. A user is
@@ -449,6 +459,26 @@ func Load(path string) (*Config, error) {
 	if cfg.Deployment.MergeMethod == "" {
 		cfg.Deployment.MergeMethod = "squash"
 	}
+	if cfg.Deployment.StaleDuration != "" {
+		if _, err := time.ParseDuration(cfg.Deployment.StaleDuration); err != nil {
+			return nil, fmt.Errorf("invalid deployment.stale_duration %q: %w", cfg.Deployment.StaleDuration, err)
+		}
+	}
+	if cfg.Deployment.LockTTL != "" {
+		if _, err := time.ParseDuration(cfg.Deployment.LockTTL); err != nil {
+			return nil, fmt.Errorf("invalid deployment.lock_ttl %q: %w", cfg.Deployment.LockTTL, err)
+		}
+	}
+	if cfg.LogLevel != "" {
+		if _, err := ParseLogLevel(cfg.LogLevel); err != nil {
+			return nil, fmt.Errorf("invalid log_level %q: %w", cfg.LogLevel, err)
+		}
+	}
+	if cfg.LogFormat != "" {
+		if _, err := ParseLogFormat(cfg.LogFormat); err != nil {
+			return nil, fmt.Errorf("invalid log_format %q: %w", cfg.LogFormat, err)
+		}
+	}
 	kpaths := map[string]string{} // kustomize_path -> app name
 	for _, app := range cfg.Apps {
 		if app.Environment == "" {
@@ -571,18 +601,33 @@ func MergeApps(primary []AppConfig, discovered []DiscoveredAppConfig) []AppConfi
 	return result
 }
 
-func (c *Config) StaleDuration() (time.Duration, error) {
+// StaleDuration returns the parsed stale duration. The string form is
+// validated at Load time, so this accessor is infallible — it returns the
+// default if Deployment.StaleDuration is empty and the parsed value
+// otherwise. A parse error here is a programming bug, not a runtime
+// condition, so we panic.
+func (c *Config) StaleDuration() time.Duration {
 	if c.Deployment.StaleDuration == "" {
-		return 2 * time.Hour, nil
+		return 2 * time.Hour
 	}
-	return time.ParseDuration(c.Deployment.StaleDuration)
+	d, err := time.ParseDuration(c.Deployment.StaleDuration)
+	if err != nil {
+		panic(fmt.Sprintf("config: stale_duration %q invalid post-Load: %v", c.Deployment.StaleDuration, err))
+	}
+	return d
 }
 
-func (c *Config) LockTTL() (time.Duration, error) {
+// LockTTL is the parsed deploy lock TTL. See StaleDuration for the
+// validate-at-load contract.
+func (c *Config) LockTTL() time.Duration {
 	if c.Deployment.LockTTL == "" {
-		return 5 * time.Minute, nil
+		return 5 * time.Minute
 	}
-	return time.ParseDuration(c.Deployment.LockTTL)
+	d, err := time.ParseDuration(c.Deployment.LockTTL)
+	if err != nil {
+		panic(fmt.Sprintf("config: lock_ttl %q invalid post-Load: %v", c.Deployment.LockTTL, err))
+	}
+	return d
 }
 
 // LoadSecretsFromFile reads and parses bot secrets from a JSON file on disk.

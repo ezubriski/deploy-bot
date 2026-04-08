@@ -207,6 +207,8 @@ Example:
 | `deployment.label` | `"deploy-bot"` | GitHub label applied to every deploy PR. Used to rediscover open PRs after a Redis flush |
 | `deployment.reconcile_interval` | disabled | If set (e.g. `"1h"`), periodically reconcile open labeled PRs against Redis state. Startup reconciliation always runs regardless |
 | `deployment.allow_prod_auto_deploy` | `false` | If false, `auto_deploy: true` is ignored for apps whose environment is `prod` or `production` |
+| `log_level` (top-level) | `"info"` | Minimum severity emitted by zap. One of `debug`, `info`, `warn`, `error`. The `LOG_LEVEL` environment variable, if set on the bot or receiver process, overrides this field. Set to `debug` to investigate fire-and-forget cleanup failures (which log at `warn`) or unrecoverable orphan-state failures (which log at `error`); set to `error` in noisy environments to see only the actionable subset. |
+| `log_format` (top-level) | `"json"` | Zap encoder. One of `json` (machine-readable, default — what shipping log infrastructure expects) or `console` (human-readable with colorized levels and short caller, useful for `./bin/bot` runs in a terminal). The `LOG_FORMAT` environment variable overrides this field. |
 
 ### AWS
 

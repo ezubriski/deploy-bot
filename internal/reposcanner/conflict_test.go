@@ -36,7 +36,7 @@ func (c *captureSlack) OpenViewContext(_ context.Context, _ string, _ slackPkg.M
 }
 
 func newTestTracker() *conflictTracker {
-	ct := newConflictTracker()
+	ct := newConflictTracker(nil)
 	// Use a fixed clock for deterministic tests.
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	ct.nowFunc = func() time.Time { return now }

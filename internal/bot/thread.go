@@ -66,7 +66,11 @@ func (b *Bot) getThreadTS(ctx context.Context, env string) string {
 		// Another worker is creating the thread — poll briefly for the real TS.
 		for i := 0; i < 5; i++ {
 			time.Sleep(200 * time.Millisecond)
-			ts, _ := b.store.GetThreadTS(ctx, env)
+			ts, err := b.store.GetThreadTS(ctx, env)
+			if err != nil {
+				b.log.Warn("thread: poll thread ts", zap.String("env", env), zap.Error(err))
+				continue
+			}
 			if ts != "" && ts != "pending" {
 				return ts
 			}
@@ -85,12 +89,12 @@ func (b *Bot) getThreadTS(ctx context.Context, env string) string {
 	if err != nil {
 		b.log.Error("thread: post parent message", zap.String("env", env), zap.Error(err))
 		// Release the slot so another worker can try.
-		b.store.DeleteThreadTS(ctx, env)
+		b.warnIfErr("thread: release slot", b.store.DeleteThreadTS(ctx, env), zap.String("env", env))
 		return ""
 	}
 
 	// Update the placeholder with the real timestamp.
-	_ = b.store.UpdateThreadTS(ctx, env, parentTS, threadTTL)
+	b.warnIfErr("thread: update thread ts", b.store.UpdateThreadTS(ctx, env, parentTS, threadTTL), zap.String("env", env))
 
 	return parentTS
 }

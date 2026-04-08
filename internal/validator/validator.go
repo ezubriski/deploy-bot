@@ -50,7 +50,14 @@ type Validator struct {
 }
 
 func New(httpClient *http.Client, slackClient *slack.Client, rdb *redis.Client, cfg *config.Config, log *zap.Logger) *Validator {
-	ghTeams, ghUsers, slackGroups, slackEmails, _ := config.ParseAuthValues(cfg.Authorization)
+	ghTeams, ghUsers, slackGroups, slackEmails, err := config.ParseAuthValues(cfg.Authorization)
+	if err != nil {
+		// ParseAuthValues errors here are configuration mistakes; the receiver
+		// validates the same config at startup and exits on error, so this
+		// branch is reachable only in tests or partial configs. Log loudly
+		// instead of dropping silently.
+		log.Error("validator: parse authorization config", zap.Error(err))
+	}
 	return &Validator{
 		gh:    github.NewClient(httpClient),
 		slack: slackClient,
@@ -144,7 +151,10 @@ func (v *Validator) IsMember(ctx context.Context, slackUserID string) (bool, Ide
 		} else if info.Profile.Email != "" {
 			for _, email := range auth.SlackEmails {
 				if strings.EqualFold(email, info.Profile.Email) {
-					id, _ := v.ResolveIdentity(ctx, slackUserID)
+					id, err := v.ResolveIdentity(ctx, slackUserID)
+					if err != nil {
+						v.log.Warn("resolve identity for matched member", zap.String("slack_user", slackUserID), zap.Error(err))
+					}
 					return true, id, nil
 				}
 			}
@@ -160,7 +170,10 @@ func (v *Validator) IsMember(ctx context.Context, slackUserID string) (bool, Ide
 		}
 		for _, m := range members {
 			if m == slackUserID {
-				id, _ := v.ResolveIdentity(ctx, slackUserID)
+				id, err := v.ResolveIdentity(ctx, slackUserID)
+				if err != nil {
+					v.log.Warn("resolve identity for matched group member", zap.String("slack_user", slackUserID), zap.String("group", groupID), zap.Error(err))
+				}
 				return true, id, nil
 			}
 		}
@@ -200,7 +213,10 @@ func (v *Validator) IsMember(ctx context.Context, slackUserID string) (bool, Ide
 		return false, id, nil
 	}
 
-	id, _ := v.ResolveIdentity(ctx, slackUserID)
+	id, err := v.ResolveIdentity(ctx, slackUserID)
+	if err != nil {
+		v.log.Warn("resolve identity for non-member fallthrough", zap.String("slack_user", slackUserID), zap.Error(err))
+	}
 	return false, id, nil
 }
 

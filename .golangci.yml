@@ -2,5 +2,24 @@ version: "2"
 
 linters:
   default: standard
-  disable:
-    - errcheck
+  settings:
+    errcheck:
+      # Flag `_ = f()` discards in addition to entirely-unhandled errors.
+      # Silently swallowing an error is rarely the right call — at minimum
+      # log it.
+      check-blank: true
+      exclude-functions:
+        # zap.Logger.Sync returns an error on stdout/stderr that is safe to
+        # drop on shutdown.
+        - (*go.uber.org/zap.Logger).Sync
+        # http.ResponseWriter.Write — conventional to ignore inside HTTP
+        # handlers; the connection is gone if this fails.
+        - (net/http.ResponseWriter).Write
+  exclusions:
+    rules:
+      # Tests are exempt from errcheck. Test setup code routinely ignores
+      # errors that would mask the real assertion if they fired, and forcing
+      # if-err blocks everywhere just churns the test files.
+      - path: _test\.go
+        linters:
+          - errcheck

@@ -133,7 +133,10 @@ type Worker struct {
 }
 
 func NewWorker(rdb *redis.Client, log *zap.Logger) *Worker {
-	consumer, _ := os.Hostname()
+	consumer, err := os.Hostname()
+	if err != nil {
+		log.Warn("queue: get hostname for consumer name, using fallback", zap.Error(err))
+	}
 	if consumer == "" {
 		consumer = "worker"
 	}

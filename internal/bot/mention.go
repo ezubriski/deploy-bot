@@ -135,7 +135,10 @@ func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent
 			msg = fmt.Sprintf("No pending deployments matching *%s*.", strings.TrimSpace(filterDesc))
 
 			if appFilter != "" {
-				all, _ := b.store.GetAll(ctx)
+				all, err := b.store.GetAll(ctx)
+				if err != nil {
+					b.log.Warn("store: list deploys for suggestions", zap.Error(err))
+				}
 				var suggestions []string
 				seen := map[string]struct{}{}
 				for _, d := range all {
@@ -307,14 +310,29 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 
 	var wg sync.WaitGroup
 	wg.Add(8)
-	go func() { defer wg.Done(); _ = b.gh.CommentCancelled(ctx, prNumber, requesterGH) }()
-	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
-	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel()) }()
-	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
-	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
 	go func() {
 		defer wg.Done()
-		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+		b.warnIfErr("github: comment cancelled", b.gh.CommentCancelled(ctx, prNumber, requesterGH), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: remove pending label", b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel()), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+	}()
+	go func() {
+		defer wg.Done()
+		b.errIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		if err := b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventCancelled,
 			Trigger:     audit.TriggerMention,
 			App:         d.App,
@@ -324,11 +342,13 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 			PRURL:       d.PRURL,
 			ActorEmail:  cancellerIdent.Email,
 			ActorName:   cancellerIdent.Name,
-		})
+		}); err != nil {
+			b.log.Error("audit log", zap.Error(err))
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.store.PushHistory(ctx, store.HistoryEntry{
+		if err := b.store.PushHistory(ctx, store.HistoryEntry{
 			EventType:   audit.EventCancelled,
 			App:         d.App,
 			Environment: d.Environment,
@@ -337,7 +357,9 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 			PRURL:       d.PRURL,
 			RequesterID: d.RequesterID,
 			CompletedAt: time.Now(),
-		})
+		}); err != nil {
+			b.log.Warn("store: push history", zap.Error(err))
+		}
 	}()
 	go func() {
 		defer wg.Done()
@@ -441,7 +463,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		return
 	}
 
-	lockTTL, _ := cfg.LockTTL()
+	lockTTL := cfg.LockTTL()
 	acquired, err := b.store.AcquireLock(ctx, env, appName, evt.UserID, lockTTL)
 	if err != nil {
 		b.replyMentionError(ctx, evt, "Could not check deploy lock. Please try again.", "")
@@ -449,7 +471,9 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 	}
 	if !acquired {
 		msg := fmt.Sprintf("A deployment of *%s* (%s) is already in progress.", appName, env)
-		if existing, _ := b.store.GetByEnvApp(ctx, env, appName); existing != nil {
+		if existing, err := b.store.GetByEnvApp(ctx, env, appName); err != nil {
+			b.log.Warn("store: lookup existing deploy", zap.String("env", env), zap.String("app", appName), zap.Error(err))
+		} else if existing != nil {
 			msg = fmt.Sprintf("A deployment of *%s* (%s) is already in progress (<%s|PR #%d>).", appName, env, existing.PRURL, existing.PRNumber)
 		}
 		b.replyMention(ctx, evt, msg)
@@ -459,7 +483,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 	baseBranch, err := b.gh.GetDefaultBranch(ctx)
 	if err != nil {
 		b.log.Error("mention deploy: get default branch", zap.Error(err))
-		_ = b.store.ReleaseLock(ctx, env, appName)
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appName), zap.String("env", env), zap.String("app", appName))
 		b.replyMentionError(ctx, evt, "Failed to get default branch from GitHub.", "")
 		return
 	}
@@ -481,7 +505,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		RequesterSlackID: evt.UserID,
 	})
 	if err != nil {
-		_ = b.store.ReleaseLock(ctx, env, appName)
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appName), zap.String("env", env), zap.String("app", appName))
 		if errors.Is(err, githubPkg.ErrNoChange) {
 			b.replyMention(ctx, evt, fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy.", appName, env, tag))
 			return
@@ -490,7 +514,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		return
 	}
 
-	staleDuration, _ := cfg.StaleDuration()
+	staleDuration := cfg.StaleDuration()
 	expiresAt := time.Now().Add(staleDuration)
 
 	d := &store.PendingDeploy{
@@ -511,11 +535,11 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		b.log.Error("mention deploy: store deploy", zap.Error(err))
 	}
 
-	_ = b.gh.AddLabels(ctx, prNumber, []string{cfg.DeployLabel(), cfg.PendingLabel()})
-	_ = b.gh.CommentRequested(ctx, prNumber, requesterGH, appName, tag, reason)
+	b.warnIfErr("github: add labels", b.gh.AddLabels(ctx, prNumber, []string{cfg.DeployLabel(), cfg.PendingLabel()}), zap.Int("pr", prNumber))
+	b.warnIfErr("github: comment requested", b.gh.CommentRequested(ctx, prNumber, requesterGH, appName, tag, reason), zap.Int("pr", prNumber))
 
 	deployChannel := cfg.Slack.DeployChannel
-	_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+	b.postSlack(ctx, deployChannel, "notice",
 		buildApproverMessage(pendingInfo{
 			App:         appName,
 			Environment: env,
@@ -528,7 +552,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		})...,
 	)
 
-	_ = b.auditLog.Log(ctx, audit.AuditEvent{
+	if err := b.auditLog.Log(ctx, audit.AuditEvent{
 		EventType:   audit.EventRequested,
 		Trigger:     audit.TriggerMention,
 		App:         appName,
@@ -539,7 +563,9 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		Reason:      reason,
 		ActorEmail:  requesterIdent.Email,
 		ActorName:   requesterIdent.Name,
-	})
+	}); err != nil {
+		b.log.Error("audit log", zap.Error(err))
+	}
 
 	b.metrics.RecordDeploy(appName, audit.EventRequested)
 	b.updatePendingGauge(ctx)

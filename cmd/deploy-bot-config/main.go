@@ -131,7 +131,9 @@ func validateMainConfig(path, format string) int {
 func printConfigJSON(r configResult) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(r)
+	if err := enc.Encode(r); err != nil {
+		fmt.Fprintf(os.Stderr, "encode config result: %v\n", err)
+	}
 }
 
 func printConfigText(path string, cfg *config.Config, errs []config.ValidationError) {
@@ -310,7 +312,9 @@ func validateRepoConfig(path, format string, opts repoconfig.ValidateOpts) int {
 func printRepoJSON(r repoResult) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(r)
+	if err := enc.Encode(r); err != nil {
+		fmt.Fprintf(os.Stderr, "encode repo result: %v\n", err)
+	}
 }
 
 func printRepoText(file string, cfg *repoconfig.RepoConfigFile, errs []repoconfig.ValidationError, validCount int) {

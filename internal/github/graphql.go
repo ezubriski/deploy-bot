@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 func base64Std(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
@@ -75,7 +77,11 @@ func (c *Client) graphqlDo(ctx context.Context, query string, variables map[stri
 		if err != nil {
 			return fmt.Errorf("graphql request: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if cerr := resp.Body.Close(); cerr != nil {
+				c.log.Warn("graphql: close response body", zap.Error(cerr))
+			}
+		}()
 
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {

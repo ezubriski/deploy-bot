@@ -55,7 +55,7 @@ func NewScanner(httpClient *http.Client, org string, slack slackclient.Poster, c
 		etags:        make(map[string]string),
 		lastContent:  make(map[string][]byte),
 		repoPushedAt: make(map[string]time.Time),
-		conflict:     newConflictTracker(),
+		conflict:     newConflictTracker(log),
 	}
 }
 
