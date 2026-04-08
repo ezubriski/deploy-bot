@@ -220,10 +220,18 @@ func (c *Client) RebaseDeployBranch(ctx context.Context, params CreatePRParams) 
 
 // ClosePR closes a pull request without merging. Returns nil if the PR is
 // already closed or does not exist (422/404 — goal already achieved).
+//
+// On a successful close, ClosePR fires a background goroutine that deletes
+// the head branch. GitHub's "automatically delete head branches" repo setting
+// only fires on merge, so closed-unmerged deploy branches would otherwise
+// accumulate. The deletion runs on context.Background so caller cancellation
+// after the close succeeds does not orphan the branch; failures are logged
+// and not surfaced to the caller (the close itself already succeeded).
 func (c *Client) ClosePR(ctx context.Context, prNumber int) error {
 	state := "closed"
-	return c.retryOnRateLimit(ctx, func() error {
-		_, resp, err := c.gh.PullRequests.Edit(ctx, c.org, c.repo, prNumber, &gh.PullRequest{
+	var headRef string
+	err := c.retryOnRateLimit(ctx, func() error {
+		pr, resp, err := c.gh.PullRequests.Edit(ctx, c.org, c.repo, prNumber, &gh.PullRequest{
 			State: &state,
 		})
 		if err != nil {
@@ -232,8 +240,26 @@ func (c *Client) ClosePR(ctx context.Context, prNumber int) error {
 			}
 			return fmt.Errorf("close PR: %w", err)
 		}
+		if pr != nil && pr.Head != nil && pr.Head.Ref != nil {
+			headRef = *pr.Head.Ref
+		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if headRef != "" {
+		go func(branch string) {
+			if delErr := c.DeleteBranch(context.Background(), branch); delErr != nil {
+				c.log.Warn("github: delete branch after close",
+					zap.Int("pr", prNumber),
+					zap.String("branch", branch),
+					zap.Error(delErr),
+				)
+			}
+		}(headRef)
+	}
+	return nil
 }
 
 // DeleteBranch deletes a git branch from the repository. Returns nil if the
