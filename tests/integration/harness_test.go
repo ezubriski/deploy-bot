@@ -11,6 +11,7 @@ import (
 	"time"
 
 	gh "github.com/google/go-github/v60/github"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
@@ -21,6 +22,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/ecr"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
+	"github.com/ezubriski/deploy-bot/internal/observability"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
@@ -67,6 +69,14 @@ func TestMain(m *testing.M) {
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
 		configPath = "testdata/config.json"
+	}
+
+	// Wire OTEL so OTEL_METRICS_EXPORTER=console etc. work for profiling
+	// runs. Must run before any github/aws/redis clients are constructed so
+	// their transports pick up the meter provider.
+	obsProvider, err := observability.Setup("deploy-bot-integ", prometheus.NewRegistry())
+	if err != nil {
+		fatalf("init observability: %v", err)
 	}
 
 	log, _ := zap.NewDevelopment()
@@ -175,6 +185,12 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 
+	// Shutdown the meter provider before exit so the console exporter
+	// flushes a final batch (the periodic reader otherwise wouldn't fire
+	// during a short test run).
+	if err := obsProvider.Shutdown(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "observability shutdown: %v\n", err)
+	}
 	cancel()
 	os.Exit(code)
 }
