@@ -438,7 +438,6 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		Requester:        requesterGH,
 		Reason:           reason,
 		RequesterSlackID: requesterID,
-		Labels:           []string{cfg.DeployLabel(), cfg.PendingLabel()},
 	})
 	if err != nil {
 		_ = b.store.ReleaseLock(ctx, env, appVal)
@@ -490,7 +489,14 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		// Apply deploy labels in parallel with the comment, slack post, and
+		// audit log so the label REST round trip does not extend the
+		// user-visible deploy latency.
+		_ = b.gh.AddLabels(ctx, prNumber, []string{cfg.DeployLabel(), cfg.PendingLabel()})
+	}()
 	go func() {
 		defer wg.Done()
 		_ = b.gh.CommentRequested(ctx, prNumber, requesterGH, appVal, tag, reason)

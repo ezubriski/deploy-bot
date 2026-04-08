@@ -33,6 +33,7 @@ type githubClient interface {
 	CommentCancelled(ctx context.Context, prNumber int, requester string) error
 	CommentNoOp(ctx context.Context, prNumber int, app, tag string) error
 	CommentAutoDeployFailed(ctx context.Context, prNumber int, reason error) error
+	AddLabels(ctx context.Context, prNumber int, labels []string) error
 	RemoveLabel(ctx context.Context, prNumber int, label string) error
 }
 

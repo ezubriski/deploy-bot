@@ -54,7 +54,6 @@ func TestRebaseDeployBranchAgainstRealGitHub(t *testing.T) {
 		BaseBranch:    env.defaultBranch,
 		Requester:     "rebase integration test",
 		Reason:        "rebase integration test",
-		Labels:        nil,
 	}
 
 	prNumber, _, err := env.ghClient.CreateDeployPR(ctx, params)

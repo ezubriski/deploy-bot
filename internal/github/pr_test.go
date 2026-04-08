@@ -107,18 +107,10 @@ func TestCreateDeployPR(t *testing.T) {
 
 	var capturedAdditions []map[string]string
 	var capturedPRTitle, capturedPRBody string
-	var labelsCalled bool
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// AddLabels still goes through REST.
-		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/labels") {
-			labelsCalled = true
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]any{map[string]any{"name": "deploy-bot"}})
-			return
-		}
 		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/graphql") {
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			t.Errorf("unexpected request: %s %s — CreateDeployPR should only call /graphql now", r.Method, r.URL.Path)
 			http.NotFound(w, r)
 			return
 		}
@@ -175,7 +167,6 @@ func TestCreateDeployPR(t *testing.T) {
 		Requester:        "deployer",
 		Reason:           "release v2",
 		RequesterSlackID: "U123",
-		Labels:           []string{"deploy-bot"},
 	})
 	if err != nil {
 		t.Fatalf("CreateDeployPR: %v", err)
@@ -220,10 +211,6 @@ func TestCreateDeployPR(t *testing.T) {
 	if !strings.Contains(capturedPRBody, "U123") {
 		t.Errorf("PR body missing requester Slack ID U123: %q", capturedPRBody)
 	}
-
-	if !labelsCalled {
-		t.Error("expected labels to be applied to the PR")
-	}
 }
 
 // TestCreateDeployPR_BranchNameSanitized verifies that special characters in
@@ -238,11 +225,6 @@ func TestCreateDeployPR_BranchNameSanitized(t *testing.T) {
 	var createdBranch string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/labels") {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode([]any{})
-			return
-		}
 		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/graphql") {
 			http.NotFound(w, r)
 			return
