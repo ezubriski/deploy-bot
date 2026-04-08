@@ -67,7 +67,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer log.Sync()
-	log.Info("logger initialized", zap.Stringer("log_level", level), zap.String("log_format", string(format)))
+	log.Info("logger initialized", zap.Stringer("log_level", level))
 	var discoveredPath string
 	if primaryCfg.RepoDiscovery.Enabled {
 		discoveredPath = primaryCfg.RepoDiscovery.DiscoveredFilePath()
