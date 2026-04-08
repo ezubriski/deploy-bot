@@ -211,11 +211,11 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+		b.errIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
@@ -241,7 +241,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			ActorEmail:  approverIdent.Email,
 			ActorName:   approverIdent.Name,
 		}); err != nil {
-			b.log.Warn("audit log", zap.Error(err))
+			b.log.Error("audit log", zap.Error(err))
 		}
 	}()
 	go func() {
@@ -299,11 +299,11 @@ func (b *Bot) closeNoOpPR(ctx context.Context, d *store.PendingDeploy, prNumber 
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+		b.errIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
 	}()
 	wg.Wait()
 
@@ -457,7 +457,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 
 	if branchErr != nil {
 		b.log.Error("get default branch", zap.Error(branchErr))
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appVal), zap.String("env", env), zap.String("app", appVal))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appVal), zap.String("env", env), zap.String("app", appVal))
 		return
 	}
 
@@ -473,7 +473,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		RequesterSlackID: requesterID,
 	})
 	if err != nil {
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appVal), zap.String("env", env), zap.String("app", appVal))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appVal), zap.String("env", env), zap.String("app", appVal))
 		if errors.Is(err, githubPkg.ErrNoChange) {
 			noopMsg := fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy. No PR created.", appVal, env, tag)
 			b.postNoOpNotice(ctx, appVal, noopMsg)
@@ -486,7 +486,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 				ActorEmail:  requesterIdent.Email,
 				ActorName:   requesterIdent.Name,
 			}); err != nil {
-				b.log.Warn("audit log", zap.Error(err))
+				b.log.Error("audit log", zap.Error(err))
 			}
 			b.log.Info("deploy no-op: tag already current", zap.String("app", appVal), zap.String("tag", tag))
 			return
@@ -566,7 +566,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 			ActorEmail:  requesterIdent.Email,
 			ActorName:   requesterIdent.Name,
 		}); err != nil {
-			b.log.Warn("audit log", zap.Error(err))
+			b.log.Error("audit log", zap.Error(err))
 		}
 	}()
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
@@ -623,11 +623,11 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+		b.errIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
@@ -654,7 +654,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 			ActorEmail:  rejecterIdent.Email,
 			ActorName:   rejecterIdent.Name,
 		}); err != nil {
-			b.log.Warn("audit log", zap.Error(err))
+			b.log.Error("audit log", zap.Error(err))
 		}
 	}()
 	go func() {

@@ -36,13 +36,6 @@ const (
 )
 
 func main() {
-	log, err := zap.NewProduction()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
-		os.Exit(1)
-	}
-	defer log.Sync()
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
@@ -51,11 +44,25 @@ func main() {
 		configPath = "/etc/deploy-bot/config.json"
 	}
 	// Load primary config first to check if repo discovery is enabled,
-	// then reload with discovered apps merged in.
+	// then reload with discovered apps merged in. We use stderr for any
+	// error reporting until the configured logger is built below.
 	primaryCfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatal("load config", zap.Error(err))
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
 	}
+	level, err := config.ResolvedLogLevel(primaryCfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve log level: %v\n", err)
+		os.Exit(1)
+	}
+	log, err := config.NewLogger(level)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer log.Sync()
+	log.Info("logger initialized", zap.Stringer("level", level))
 	var discoveredPath string
 	if primaryCfg.RepoDiscovery.Enabled {
 		discoveredPath = primaryCfg.RepoDiscovery.DiscoveredFilePath()

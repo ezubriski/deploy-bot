@@ -36,13 +36,6 @@ const healthAddr = ":8080"
 const approverRefreshInterval = 5 * time.Minute
 
 func main() {
-	log, err := zap.NewProduction()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
-		os.Exit(1)
-	}
-	defer log.Sync()
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
@@ -52,8 +45,21 @@ func main() {
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatal("load config", zap.Error(err))
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		os.Exit(1)
 	}
+	level, err := config.ResolvedLogLevel(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve log level: %v\n", err)
+		os.Exit(1)
+	}
+	log, err := config.NewLogger(level)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer log.Sync()
+	log.Info("logger initialized", zap.Stringer("level", level))
 
 	var secrets *config.Secrets
 	if sp := os.Getenv("SECRETS_PATH"); sp != "" {
@@ -206,7 +212,7 @@ func main() {
 						"response_type": "ephemeral",
 						"text":          fmt.Sprintf("The `%s` command is not available in this channel.", cmd.Command),
 					}); err != nil {
-						log.Warn("slack: ack channel-disallowed", zap.Error(err))
+						log.Error("slack: ack channel-disallowed", zap.Error(err))
 					}
 					continue
 				}
@@ -216,7 +222,7 @@ func main() {
 				callback, ok := evt.Data.(slack.InteractionCallback)
 				if !ok {
 					if err := sm.Ack(*evt.Request); err != nil {
-						log.Warn("slack: ack", zap.Error(err))
+						log.Error("slack: ack", zap.Error(err))
 					}
 					continue
 				}
@@ -231,12 +237,12 @@ func main() {
 				eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 				if !ok {
 					if err := sm.Ack(*evt.Request); err != nil {
-						log.Warn("slack: ack", zap.Error(err))
+						log.Error("slack: ack", zap.Error(err))
 					}
 					continue
 				}
 				if err := sm.Ack(*evt.Request); err != nil {
-					log.Warn("slack: ack", zap.Error(err))
+					log.Error("slack: ack", zap.Error(err))
 				}
 				handleEventsAPI(ctx, rdb, evtBuffer, eventsAPIEvent, log)
 
@@ -261,7 +267,7 @@ func enqueueAndAck(ctx context.Context, sm *socketmode.Client, rdb *redis.Client
 		return
 	}
 	if err := sm.Ack(*evt.Request); err != nil {
-		log.Warn("slack: ack", zap.Error(err))
+		log.Error("slack: ack", zap.Error(err))
 	}
 }
 
@@ -310,7 +316,7 @@ func validateAndDispatch(
 			"response_action": "errors",
 			"errors":          errs,
 		}); err != nil {
-			log.Warn("slack: ack modal validation errors", zap.Error(err))
+			log.Error("slack: ack modal validation errors", zap.Error(err))
 		}
 		return
 	}

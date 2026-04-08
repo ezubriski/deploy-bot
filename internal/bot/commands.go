@@ -252,11 +252,11 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+		b.errIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
@@ -271,7 +271,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 			ActorEmail:  cancellerIdent.Email,
 			ActorName:   cancellerIdent.Name,
 		}); err != nil {
-			b.log.Warn("audit log", zap.Error(err))
+			b.log.Error("audit log", zap.Error(err))
 		}
 	}()
 	go func() {

@@ -324,11 +324,11 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+		b.errIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
@@ -343,7 +343,7 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 			ActorEmail:  cancellerIdent.Email,
 			ActorName:   cancellerIdent.Name,
 		}); err != nil {
-			b.log.Warn("audit log", zap.Error(err))
+			b.log.Error("audit log", zap.Error(err))
 		}
 	}()
 	go func() {
@@ -483,7 +483,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 	baseBranch, err := b.gh.GetDefaultBranch(ctx)
 	if err != nil {
 		b.log.Error("mention deploy: get default branch", zap.Error(err))
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appName), zap.String("env", env), zap.String("app", appName))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appName), zap.String("env", env), zap.String("app", appName))
 		b.replyMentionError(ctx, evt, "Failed to get default branch from GitHub.", "")
 		return
 	}
@@ -505,7 +505,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		RequesterSlackID: evt.UserID,
 	})
 	if err != nil {
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appName), zap.String("env", env), zap.String("app", appName))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appName), zap.String("env", env), zap.String("app", appName))
 		if errors.Is(err, githubPkg.ErrNoChange) {
 			b.replyMention(ctx, evt, fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy.", appName, env, tag))
 			return
@@ -564,7 +564,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		ActorEmail:  requesterIdent.Email,
 		ActorName:   requesterIdent.Name,
 	}); err != nil {
-		b.log.Warn("audit log", zap.Error(err))
+		b.log.Error("audit log", zap.Error(err))
 	}
 
 	b.metrics.RecordDeploy(appName, audit.EventRequested)

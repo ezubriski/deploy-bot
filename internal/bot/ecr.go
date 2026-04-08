@@ -63,7 +63,7 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 	baseBranch, err := b.gh.GetDefaultBranch(ctx)
 	if err != nil {
 		b.log.Error("ecr push: get default branch", zap.Error(err))
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
 		return
 	}
 
@@ -77,7 +77,7 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 		Reason:        fmt.Sprintf("ECR push: %s:%s", evt.Repository, evt.Tag),
 	})
 	if err != nil {
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
 		if errors.Is(err, githubPkg.ErrNoChange) {
 			noopMsg := fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy (ECR push). No PR created.", evt.App, env, evt.Tag)
 			b.postNoOpNotice(ctx, evt.App, noopMsg)
@@ -88,7 +88,7 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 				Environment: env,
 				Tag:         evt.Tag,
 			}); err != nil {
-				b.log.Warn("audit log", zap.Error(err))
+				b.log.Error("audit log", zap.Error(err))
 			}
 			b.log.Info("ecr push no-op: tag already current", zap.String("app", evt.App), zap.String("tag", evt.Tag))
 			return
@@ -146,7 +146,7 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 				// Tag already on default branch — close as no-op.
 				b.warnIfErr("github: comment no-op", b.gh.CommentNoOp(ctx, prNumber, evt.App, evt.Tag), zap.Int("pr", prNumber))
 				b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
-				b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
+				b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
 				b.log.Info("ecr auto-deploy: no-op after rebase, tag already current", zap.String("app", evt.App))
 				return
 			}
@@ -181,7 +181,7 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
 	}()
 	go func() {
 		defer wg.Done()
@@ -206,7 +206,7 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 			PRURL:       prURL,
 			AutoDeploy:  true,
 		}); err != nil {
-			b.log.Warn("audit log", zap.Error(err))
+			b.log.Error("audit log", zap.Error(err))
 		}
 	}()
 	go func() {
@@ -294,7 +294,7 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 			PRURL:       prURL,
 			Reason:      reason,
 		}); err != nil {
-			b.log.Warn("audit log", zap.Error(err))
+			b.log.Error("audit log", zap.Error(err))
 		}
 	}()
 	b.metrics.RecordDeploy(evt.App, audit.EventRequested)
@@ -353,7 +353,7 @@ func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEv
 	}()
 	go func() {
 		defer wg.Done()
-		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
+		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
 	}()
 	go func() {
 		defer wg.Done()
@@ -373,7 +373,7 @@ func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEv
 			PRURL:       prURL,
 			Reason:      "merge conflict could not be auto-resolved",
 		}); err != nil {
-			b.log.Warn("audit log", zap.Error(err))
+			b.log.Error("audit log", zap.Error(err))
 		}
 	}()
 	wg.Wait()

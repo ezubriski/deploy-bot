@@ -28,6 +28,11 @@ type Config struct {
 	ECRAutoDeploy     ECRAutoDeployConfig `json:"ecr_auto_deploy,omitempty"`
 	RepoDiscovery     RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
 	Apps              []AppConfig         `json:"apps"`
+	// LogLevel sets the minimum severity emitted by zap. Valid values are
+	// "debug", "info", "warn", "error". Defaults to "info" when empty. The
+	// LOG_LEVEL environment variable, if set on the bot/receiver process,
+	// overrides this field.
+	LogLevel string `json:"log_level,omitempty"`
 }
 
 // AuthorizationEntry defines a single authorization source. A user is
@@ -457,6 +462,11 @@ func Load(path string) (*Config, error) {
 	if cfg.Deployment.LockTTL != "" {
 		if _, err := time.ParseDuration(cfg.Deployment.LockTTL); err != nil {
 			return nil, fmt.Errorf("invalid deployment.lock_ttl %q: %w", cfg.Deployment.LockTTL, err)
+		}
+	}
+	if cfg.LogLevel != "" {
+		if _, err := ParseLogLevel(cfg.LogLevel); err != nil {
+			return nil, fmt.Errorf("invalid log_level %q: %w", cfg.LogLevel, err)
 		}
 	}
 	kpaths := map[string]string{} // kustomize_path -> app name

@@ -193,14 +193,22 @@ type Sweeper struct {
 	log     *zap.Logger
 }
 
-// warnIfErr logs err with op as the message and the supplied fields. No-op
-// when err is nil. Used to surface fire-and-forget cleanup failures from
-// the sweeper without silently dropping them.
+// warnIfErr logs err at Warn for recoverable failures (stale label,
+// missed comment, undelivered notice). No-op when err is nil.
 func (s *Sweeper) warnIfErr(op string, err error, fields ...zap.Field) {
 	if err == nil {
 		return
 	}
 	s.log.Warn(op, append(fields, zap.Error(err))...)
+}
+
+// errIfErr is the Error-level counterpart for failures that leave orphan
+// state or lose audit records. See bot.Bot.errIfErr for the policy.
+func (s *Sweeper) errIfErr(op string, err error, fields ...zap.Field) {
+	if err == nil {
+		return
+	}
+	s.log.Error(op, append(fields, zap.Error(err))...)
 }
 
 func New(
@@ -238,8 +246,8 @@ func (s *Sweeper) RecoverStuck(ctx context.Context) {
 				continue
 			}
 			s.warnIfErr("github: remove pending label", s.gh.RemoveLabel(ctx, d.PRNumber, s.cfg.Load().PendingLabel()), zap.Int("pr", d.PRNumber))
-			s.warnIfErr("store: release lock", s.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
-			s.warnIfErr("store: delete pending", s.store.Delete(ctx, d.PRNumber), zap.Int("pr", d.PRNumber))
+			s.errIfErr("store: release lock", s.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+			s.errIfErr("store: delete pending", s.store.Delete(ctx, d.PRNumber), zap.Int("pr", d.PRNumber))
 			s.log.Info("recovered stuck deploy", zap.Int("pr", d.PRNumber))
 		}
 	}
@@ -282,11 +290,11 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		}()
 		go func() {
 			defer wg.Done()
-			s.warnIfErr("store: release lock", s.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+			s.errIfErr("store: release lock", s.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
 		}()
 		go func() {
 			defer wg.Done()
-			s.warnIfErr("store: delete pending", s.store.Delete(ctx, d.PRNumber), zap.Int("pr", d.PRNumber))
+			s.errIfErr("store: delete pending", s.store.Delete(ctx, d.PRNumber), zap.Int("pr", d.PRNumber))
 		}()
 		go func() {
 			defer wg.Done()
@@ -311,7 +319,7 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 				PRURL:       d.PRURL,
 				Reason:      "stale duration exceeded",
 			}); err != nil {
-				s.log.Warn("audit log", zap.Error(err))
+				s.log.Error("audit log", zap.Error(err))
 			}
 		}()
 		s.metrics.RecordDeploy(d.App, audit.EventExpired)
