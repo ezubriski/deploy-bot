@@ -66,79 +66,41 @@ func NewClient(httpClient *http.Client, org, repo string, log *zap.Logger, retry
 
 // CreateDeployPR creates a branch, commits the kustomize image tag update, and
 // opens a PR. Returns ErrNoChange if the tag is already current in the file.
+//
+// Implementation: one GraphQL query fetches the base branch SHA, the
+// repository node ID, and the current kustomization file in a single round
+// trip; one GraphQL mutation then runs createRef + createCommitOnBranch +
+// createPullRequest sequentially server-side. This collapses what used to
+// be six sequential REST calls into two network requests. AddLabels still
+// goes through the REST API but is the caller's responsibility to schedule
+// off the user-blocking path if desired.
 func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int, string, error) {
 	if !sanitize.TagIsSafe(params.Tag) {
 		return 0, "", fmt.Errorf("tag %q contains unsafe characters", params.Tag)
 	}
 	branch := fmt.Sprintf("deploy/%s-%s-%s", params.Environment, params.App, sanitize.BranchName(params.Tag))
 
-	// Get default branch SHA
-	var ref *gh.Reference
-	if err := c.retryOnRateLimit(ctx, func() error {
-		var err error
-		ref, _, err = c.gh.Git.GetRef(ctx, c.org, c.repo, "refs/heads/"+params.BaseBranch)
-		return err
-	}); err != nil {
-		return 0, "", fmt.Errorf("get base branch ref: %w", err)
-	}
-	baseSHA := ref.Object.GetSHA()
-
-	// Create new branch
-	if err := c.retryOnRateLimit(ctx, func() error {
-		_, _, err := c.gh.Git.CreateRef(ctx, c.org, c.repo, &gh.Reference{
-			Ref:    gh.String("refs/heads/" + branch),
-			Object: &gh.GitObject{SHA: gh.String(baseSHA)},
-		})
-		return err
-	}); err != nil {
-		return 0, "", fmt.Errorf("create branch: %w", err)
-	}
-
-	// Get current file
-	var fileContent *gh.RepositoryContent
-	if err := c.retryOnRateLimit(ctx, func() error {
-		var err error
-		fileContent, _, _, err = c.gh.Repositories.GetContents(ctx, c.org, c.repo, params.KustomizePath, &gh.RepositoryContentGetOptions{
-			Ref: branch,
-		})
-		return err
-	}); err != nil {
-		return 0, "", fmt.Errorf("get kustomization file: %w", err)
-	}
-
-	content, err := fileContent.GetContent()
+	state, err := c.fetchDeployState(ctx, params.BaseBranch, branch, params.KustomizePath)
 	if err != nil {
-		return 0, "", fmt.Errorf("decode kustomization file: %w", err)
+		return 0, "", fmt.Errorf("fetch deploy state: %w", err)
+	}
+	if !state.FileExists {
+		return 0, "", fmt.Errorf("kustomization file %q not found on %s", params.KustomizePath, params.BaseBranch)
 	}
 
-	// Update newTag value
-	updated, err := updateNewTag(content, params.Tag)
+	updated, err := updateNewTag(state.FileContents, params.Tag)
 	if err != nil {
 		return 0, "", fmt.Errorf("update kustomization tag: %w", err)
 	}
 
-	// No-op: tag is already current. Delete the branch we just created and
-	// signal the caller so they can notify without creating a PR.
-	if updated == content {
-		_ = c.retryOnRateLimit(ctx, func() error {
-			_, err := c.gh.Git.DeleteRef(ctx, c.org, c.repo, "refs/heads/"+branch)
-			return err
-		})
+	// No-op: tag is already current on the base branch. Nothing to do — and
+	// because we no longer pre-create the branch, there is no orphan ref to
+	// clean up.
+	if updated == state.FileContents {
 		return 0, "", ErrNoChange
 	}
 
 	commitMsg := fmt.Sprintf("deploy(%s/%s): update image tag to %s", params.Environment, params.App, params.Tag)
-	if err := c.retryOnRateLimit(ctx, func() error {
-		_, _, err := c.gh.Repositories.UpdateFile(ctx, c.org, c.repo, params.KustomizePath, &gh.RepositoryContentFileOptions{
-			Message: gh.String(commitMsg),
-			Content: []byte(updated),
-			SHA:     gh.String(fileContent.GetSHA()),
-			Branch:  gh.String(branch),
-		})
-		return err
-	}); err != nil {
-		return 0, "", fmt.Errorf("update kustomization file: %w", err)
-	}
 
 	// Embed recovery metadata as an HTML comment (not rendered by GitHub).
 	metaJSON, _ := json.Marshal(PRMeta{
@@ -151,28 +113,31 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 		"**Environment:** %s\n**App:** %s\n**Tag:** `%s`\n**Requester:** %s\n**Reason:** %s\n\n<!-- deploy-bot-meta: %s -->",
 		params.Environment, params.App, params.Tag, formatRequester(params.Requester), sanitize.GitHubMarkdown(params.Reason), string(metaJSON),
 	)
+	prTitle := fmt.Sprintf("deploy(%s/%s): %s", params.Environment, params.App, params.Tag)
 
-	var pr *gh.PullRequest
-	if err := c.retryOnRateLimit(ctx, func() error {
-		var err error
-		pr, _, err = c.gh.PullRequests.Create(ctx, c.org, c.repo, &gh.NewPullRequest{
-			Title: gh.String(fmt.Sprintf("deploy(%s/%s): %s", params.Environment, params.App, params.Tag)),
-			Head:  gh.String(branch),
-			Base:  gh.String(params.BaseBranch),
-			Body:  gh.String(prBody),
-		})
-		return err
-	}); err != nil {
-		return 0, "", fmt.Errorf("create PR: %w", err)
+	prNumber, prURL, err := c.createDeployCommitAndPR(
+		ctx,
+		state.RepoID,
+		params.BaseBranch,
+		branch,
+		state.BaseSHA,
+		params.KustomizePath,
+		updated,
+		commitMsg,
+		prTitle,
+		prBody,
+	)
+	if err != nil {
+		return 0, "", fmt.Errorf("create deploy commit and PR: %w", err)
 	}
 
 	if len(params.Labels) > 0 {
-		if err := c.AddLabels(ctx, pr.GetNumber(), params.Labels); err != nil {
+		if err := c.AddLabels(ctx, prNumber, params.Labels); err != nil {
 			_ = err
 		}
 	}
 
-	return pr.GetNumber(), pr.GetHTMLURL(), nil
+	return prNumber, prURL, nil
 }
 
 // MergePR merges a pull request using the configured merge method. Returns
@@ -207,121 +172,46 @@ func (c *Client) MergePR(ctx context.Context, prNumber int, mergeMethod string) 
 }
 
 // RebaseDeployBranch re-applies params.Tag onto the current HEAD of
-// params.BaseBranch and force-updates the deploy branch in place using the
-// Git Data API. Call this after MergePR returns ErrMergeConflict, then retry
-// MergePR. Returns ErrNoChange if the tag is already current on the base
-// branch (the deploy happened through another means).
+// params.BaseBranch and force-updates the deploy branch in place. Call this
+// after MergePR returns ErrMergeConflict, then retry MergePR. Returns
+// ErrNoChange if the tag is already current on the base branch (the deploy
+// happened through another means).
+//
+// Implementation: one GraphQL query fetches baseSHA + deploy branch ref ID
+// + current file contents, then one GraphQL mutation runs updateRef(force)
+// + createCommitOnBranch sequentially. This replaces the seven sequential
+// REST calls of the old Git Data API path with two network requests.
 func (c *Client) RebaseDeployBranch(ctx context.Context, params CreatePRParams) error {
 	branch := fmt.Sprintf("deploy/%s-%s-%s", params.Environment, params.App, sanitize.BranchName(params.Tag))
 
-	// Step 1: get current default branch HEAD SHA.
-	var baseRef *gh.Reference
-	if err := c.retryOnRateLimit(ctx, func() error {
-		var err error
-		baseRef, _, err = c.gh.Git.GetRef(ctx, c.org, c.repo, "refs/heads/"+params.BaseBranch)
-		return err
-	}); err != nil {
-		return fmt.Errorf("rebase: get base ref: %w", err)
-	}
-	headSHA := baseRef.Object.GetSHA()
-
-	// Step 2: fetch the kustomization file at the current base branch HEAD.
-	var fileContent *gh.RepositoryContent
-	if err := c.retryOnRateLimit(ctx, func() error {
-		var err error
-		fileContent, _, _, err = c.gh.Repositories.GetContents(ctx, c.org, c.repo, params.KustomizePath, &gh.RepositoryContentGetOptions{
-			Ref: params.BaseBranch,
-		})
-		return err
-	}); err != nil {
-		return fmt.Errorf("rebase: get kustomization file: %w", err)
-	}
-
-	content, err := fileContent.GetContent()
+	state, err := c.fetchDeployState(ctx, params.BaseBranch, branch, params.KustomizePath)
 	if err != nil {
-		return fmt.Errorf("rebase: decode kustomization file: %w", err)
+		return fmt.Errorf("rebase: fetch state: %w", err)
+	}
+	if !state.FileExists {
+		return fmt.Errorf("rebase: kustomization file %q not found on %s", params.KustomizePath, params.BaseBranch)
+	}
+	if state.DeployRefID == "" {
+		return fmt.Errorf("rebase: deploy branch %q does not exist", branch)
 	}
 
-	// Step 3: apply the tag update.
-	updated, err := updateNewTag(content, params.Tag)
+	updated, err := updateNewTag(state.FileContents, params.Tag)
 	if err != nil {
 		return fmt.Errorf("rebase: update kustomization tag: %w", err)
 	}
-	if updated == content {
+	if updated == state.FileContents {
 		// Tag is already on the base branch — the deploy already happened.
 		return ErrNoChange
 	}
 
-	// Step 4: create a new blob with the updated content.
-	var blob *gh.Blob
-	if err := c.retryOnRateLimit(ctx, func() error {
-		var err error
-		blob, _, err = c.gh.Git.CreateBlob(ctx, c.org, c.repo, &gh.Blob{
-			Content:  gh.String(updated),
-			Encoding: gh.String("utf-8"),
-		})
-		return err
-	}); err != nil {
-		return fmt.Errorf("rebase: create blob: %w", err)
-	}
-
-	// Step 5: get the tree SHA from the current HEAD commit.
-	var headCommit *gh.Commit
-	if err := c.retryOnRateLimit(ctx, func() error {
-		var err error
-		headCommit, _, err = c.gh.Git.GetCommit(ctx, c.org, c.repo, headSHA)
-		return err
-	}); err != nil {
-		return fmt.Errorf("rebase: get head commit: %w", err)
-	}
-
-	// Step 6: create a new tree with the updated blob substituted in.
-	var tree *gh.Tree
-	if err := c.retryOnRateLimit(ctx, func() error {
-		var err error
-		tree, _, err = c.gh.Git.CreateTree(ctx, c.org, c.repo, headCommit.Tree.GetSHA(), []*gh.TreeEntry{
-			{
-				Path: gh.String(params.KustomizePath),
-				Mode: gh.String("100644"),
-				Type: gh.String("blob"),
-				SHA:  gh.String(blob.GetSHA()),
-			},
-		})
-		return err
-	}); err != nil {
-		return fmt.Errorf("rebase: create tree: %w", err)
-	}
-
-	// Step 7: create a commit whose parent is the current HEAD.
 	commitMsg := fmt.Sprintf("deploy(%s/%s): update image tag to %s", params.Environment, params.App, params.Tag)
-	var newCommit *gh.Commit
-	if err := c.retryOnRateLimit(ctx, func() error {
-		var err error
-		newCommit, _, err = c.gh.Git.CreateCommit(ctx, c.org, c.repo, &gh.Commit{
-			Message: gh.String(commitMsg),
-			Tree:    &gh.Tree{SHA: gh.String(tree.GetSHA())},
-			Parents: []*gh.Commit{{SHA: gh.String(headSHA)}},
-		}, nil)
-		return err
-	}); err != nil {
-		return fmt.Errorf("rebase: create commit: %w", err)
-	}
-
-	// Step 8: force-update the deploy branch ref to the new commit.
-	if err := c.retryOnRateLimit(ctx, func() error {
-		_, _, err := c.gh.Git.UpdateRef(ctx, c.org, c.repo, &gh.Reference{
-			Ref:    gh.String("refs/heads/" + branch),
-			Object: &gh.GitObject{SHA: gh.String(newCommit.GetSHA())},
-		}, true)
-		return err
-	}); err != nil {
-		return fmt.Errorf("rebase: update branch ref: %w", err)
+	if err := c.rebaseAndCommit(ctx, state.DeployRefID, branch, state.BaseSHA, params.KustomizePath, updated, commitMsg); err != nil {
+		return fmt.Errorf("rebase: %w", err)
 	}
 
 	c.log.Info("rebased deploy branch",
 		zap.String("branch", branch),
-		zap.String("base_sha", headSHA),
-		zap.String("new_commit", newCommit.GetSHA()),
+		zap.String("base_sha", state.BaseSHA),
 	)
 	return nil
 }
