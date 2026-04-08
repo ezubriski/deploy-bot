@@ -1721,6 +1721,16 @@ as long as the app is granted the <code>users:read.email</code> scope.</p>
 <td><code>false</code></td>
 <td>If false, <code>auto_deploy: true</code> is ignored for apps whose environment is <code>prod</code> or <code>production</code></td>
 </tr>
+<tr>
+<td><code>log_level</code> (top-level)</td>
+<td><code>"info"</code></td>
+<td>Minimum severity emitted by zap. One of <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code>. The <code>LOG_LEVEL</code> environment variable, if set on the bot or receiver process, overrides this field. Set to <code>debug</code> to investigate fire-and-forget cleanup failures (which log at <code>warn</code>) or unrecoverable orphan-state failures (which log at <code>error</code>); set to <code>error</code> in noisy environments to see only the actionable subset.</td>
+</tr>
+<tr>
+<td><code>log_format</code> (top-level)</td>
+<td><code>"json"</code></td>
+<td>Zap encoder. One of <code>json</code> (machine-readable, default — what shipping log infrastructure expects) or <code>console</code> (human-readable with colorized levels and short caller, useful for <code>./bin/bot</code> runs in a terminal). The <code>LOG_FORMAT</code> environment variable overrides this field.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="aws">AWS<a class="headerlink" href="#aws" title="Permanent link">&para;</a></h3>
