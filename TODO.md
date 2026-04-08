@@ -5,6 +5,19 @@ release; they're tracked here so they don't get lost.
 
 ## Follow-up patches
 
+- [ ] **CI-integrated perf snapshot.** Run a perf-snapshot job (capture
+  per-host call counts and durations from `OTEL_METRICS_EXPORTER=console`
+  on a known integration test such as `TestDeployAndApprove`) on every PR
+  via GitHub Actions and post a comment with the delta vs `main`. Would
+  catch GitHub/AWS call-count regressions in review instead of after
+  merge. Use **GitHub Actions secrets**, not AWS Secrets Manager, for the
+  integration creds — the integ harness already accepts a `SECRETS_PATH`
+  alternative to `AWS_SECRET_NAME`, so the workflow can write a JSON file
+  from one Actions secret and point `SECRETS_PATH` at it. Note that this
+  creates real PRs against the test gitops repo on every CI run; budget
+  for the resulting churn (or scope the job to a label like `perf-check`
+  so it only runs on demand).
+
 - [ ] **Investigate `TestMultiWorker_NoDoubleDelivery` flake.** Test passes on
   retry but intermittently times out waiting for a PR to appear in Redis when
   run back-to-back with `TestMultiWorker_LockContention`. Likely test
