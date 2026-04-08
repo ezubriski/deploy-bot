@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	gh "github.com/google/go-github/v60/github"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
@@ -40,6 +41,7 @@ type testEnv struct {
 	cancel            context.CancelFunc
 	store             *store.Store
 	ghClient          *githubpkg.Client
+	ghRaw             *gh.Client // bare go-github client for tests that need to commit directly
 	bot               *bot.Bot
 	requesterID       string
 	requesterUsername string
@@ -96,6 +98,7 @@ func TestMain(m *testing.M) {
 	}
 	maxRetries, retryWait := cfg.GitHub.RateLimitConfig()
 	ghClient := githubpkg.NewClient(ghHTTP, cfg.GitHub.Org, cfg.GitHub.Repo, log, githubpkg.RetryConfig{MaxRetries: maxRetries, RetryWait: retryWait})
+	ghRaw := gh.NewClient(ghHTTP)
 
 	defaultBranch, err := ghClient.GetDefaultBranch(ctx)
 	if err != nil {
@@ -155,6 +158,7 @@ func TestMain(m *testing.M) {
 		cancel:            cancel,
 		store:             redisStore,
 		ghClient:          ghClient,
+		ghRaw:             ghRaw,
 		bot:               b,
 		requesterID:       requesterID,
 		requesterUsername: requesterUsername,
