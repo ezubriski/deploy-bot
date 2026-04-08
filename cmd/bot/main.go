@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
@@ -21,6 +22,7 @@ import (
 	githubPkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/health"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
+	"github.com/ezubriski/deploy-bot/internal/observability"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
@@ -80,6 +82,15 @@ func main() {
 	}
 
 	m := metrics.NewDefault()
+	obsProvider, err := observability.Setup("deploy-bot", prometheus.DefaultRegisterer)
+	if err != nil {
+		log.Fatal("init observability", zap.Error(err))
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = obsProvider.Shutdown(shutdownCtx)
+	}()
 	hh := &health.Handler{}
 	go func() {
 		mux := http.NewServeMux()
@@ -101,6 +112,9 @@ func main() {
 	if err != nil {
 		log.Fatal("init redis store", zap.Error(err))
 	}
+	if err := observability.InstrumentRedis(redisStore.Redis()); err != nil {
+		log.Warn("instrument redis", zap.Error(err))
+	}
 	log.Info("waiting for redis", zap.String("addr", secrets.RedisAddr), zap.Bool("iam_auth", secrets.RedisIAMAuth))
 	if err := redisStore.WaitForRedis(ctx, time.Minute); err != nil {
 		log.Fatal("redis not available", zap.Error(err))
@@ -121,7 +135,9 @@ func main() {
 		}
 	}
 
-	slackOpts := []slack.Option{}
+	slackOpts := []slack.Option{
+		slack.OptionHTTPClient(observability.HTTPClient(nil)),
+	}
 	if secrets.SlackAppToken != "" {
 		slackOpts = append(slackOpts, slack.OptionAppLevelToken(secrets.SlackAppToken))
 	}

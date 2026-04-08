@@ -19,6 +19,7 @@ import (
 
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
+	"github.com/ezubriski/deploy-bot/internal/observability"
 )
 
 const (
@@ -71,6 +72,7 @@ func NewCache(ctx context.Context, cfg *config.Config, rdb *redis.Client, m *met
 
 	clientCfg := baseCfg.Copy()
 	clientCfg.Region = cfg.AWS.ECRRegion
+	observability.InstrumentAWSConfig(&clientCfg)
 
 	c := &Cache{
 		apps:    make(map[string]*appCache),

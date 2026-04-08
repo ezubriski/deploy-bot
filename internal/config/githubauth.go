@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
+	"github.com/ezubriski/deploy-bot/internal/observability"
 	ghv84 "github.com/google/go-github/v84/github"
 	"golang.org/x/oauth2"
 )
@@ -29,7 +30,9 @@ func (s *Secrets) newAppTransport(opts *ghv84.InstallationTokenOptions) (*ghinst
 
 func (s *Secrets) patClient(token string) *http.Client {
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
-	return oauth2.NewClient(context.Background(), ts)
+	c := oauth2.NewClient(context.Background(), ts)
+	c.Transport = observability.WrapTransport(c.Transport)
+	return c
 }
 
 func ptr(s string) *string { return &s }
@@ -51,7 +54,7 @@ func (s *Secrets) GitHubHTTPClient(gitopsRepo string) (*http.Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &http.Client{Transport: itr}, nil
+		return &http.Client{Transport: observability.WrapTransport(itr)}, nil
 	}
 	return s.patClient(s.GitHubToken), nil
 }
@@ -68,7 +71,7 @@ func (s *Secrets) ValidatorHTTPClient() (*http.Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &http.Client{Transport: itr}, nil
+		return &http.Client{Transport: observability.WrapTransport(itr)}, nil
 	}
 	return s.patClient(s.GitHubToken), nil
 }
@@ -96,7 +99,7 @@ func (s *Secrets) ScannerHTTPClient() (*http.Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &http.Client{Transport: itr}, nil
+		return &http.Client{Transport: observability.WrapTransport(itr)}, nil
 	}
 	return s.patClient(s.GitHubToken), nil
 }

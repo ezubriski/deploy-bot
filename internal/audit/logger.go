@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/observability"
 )
 
 // Event types.
@@ -71,6 +72,7 @@ func NewLogger(ctx context.Context, cfg *config.Config, log *zap.Logger) (Logger
 		}
 		clientCfg := baseCfg.Copy()
 		clientCfg.Region = cfg.AWS.AuditRegion
+		observability.InstrumentAWSConfig(&clientCfg)
 		l.s3 = s3.NewFromConfig(clientCfg)
 		l.bucket = cfg.AWS.AuditBucket
 	} else {
