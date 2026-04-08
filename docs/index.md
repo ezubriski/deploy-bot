@@ -12,6 +12,7 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 - **Simple app configuration.** Define apps in `config.json` and the bot picks them up on the next hot-reload. For self-service, optional [repo-sourced discovery](repo-sourced-app-discovery.md) lets app teams drop a `.deploy-bot.json` in their repo.
 - **Convention over configuration.** With [enforced naming conventions](naming-conventions.md), app names and kustomize paths are derived from repository names. Onboarding a new app takes two lines of JSON.
 - **Built for resilience.** Redis Streams consumer groups, in-memory buffer with backpressure, sweeper for expired deploys, automatic rebase on merge conflicts, GitHub reconciliation after data loss.
+- **OpenTelemetry instrumented.** GitHub, Slack, AWS, and Redis I/O is observed via OTEL contrib libraries; metrics export to Prometheus by default, with standard OTEL env vars for routing to a collector. See [observability](observability.md).
 - **Horizontal scaling.** Receiver and worker scale independently. Consumer groups ensure each event processes once.
 
 ## Architecture

@@ -1,14 +1,16 @@
-// Package observability sets up the OpenTelemetry MeterProvider used by
-// deploy-bot for HTTP and Redis instrumentation.
+// Package observability sets up the OpenTelemetry MeterProvider and
+// TracerProvider used by deploy-bot for HTTP and Redis instrumentation.
 //
-// Setup installs the MeterProvider as the OTEL global. After that, any code
-// in the program can call the package-level helpers (WrapTransport,
-// HTTPClient, InstrumentAWSConfig, InstrumentRedis) to opt in to
-// instrumentation without plumbing a *Provider through every constructor.
+// Setup installs the providers as OTEL globals. After that, any code in the
+// program can call the package-level helpers (WrapTransport, HTTPClient,
+// InstrumentAWSConfig, InstrumentRedis) to opt in to instrumentation without
+// plumbing a *Provider through every constructor.
 //
-// The Prometheus exporter writes into the registerer passed to Setup
-// (normally prometheus.DefaultRegisterer), so /metrics continues to expose
-// existing client_golang metrics and OTEL metrics from one endpoint.
+// The Prometheus exporter is always wired in for metrics so /metrics
+// continues to expose existing client_golang counters and OTEL metrics from
+// one endpoint. Operators can additionally route signals to OTLP, stdout,
+// etc. by setting the standard OTEL environment variables — see
+// docs/observability.md.
 //
 // This package does not "auto-instrument" anything in the Java/JS sense — Go
 // has no runtime hooks for that. It provides one-liners to wire
@@ -20,33 +22,46 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/prometheus/client_golang/prometheus"
 	redisotel "github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 )
 
-// Provider owns the MeterProvider so the caller can shut it down on exit.
-// All instrumentation helpers in this package read from the OTEL global
-// rather than this struct.
+// Provider owns the MeterProvider and TracerProvider so the caller can
+// shut them down on exit. All instrumentation helpers in this package read
+// from the OTEL globals rather than this struct.
 type Provider struct {
 	mp *sdkmetric.MeterProvider
+	tp *sdktrace.TracerProvider
 }
 
-// Setup initializes a MeterProvider, installs it as the OTEL global, and
-// registers a Prometheus exporter against reg. serviceName is recorded as
-// the service.name resource attribute.
+// Setup initializes the MeterProvider and (if a traces exporter is
+// configured) the TracerProvider, installs them as OTEL globals, and wires
+// the Prometheus metrics exporter against reg.
+//
+// Additional metric and trace exporters are configured from the standard
+// OTEL_METRICS_EXPORTER / OTEL_TRACES_EXPORTER environment variables via
+// the autoexport package, so operators can route telemetry to OTLP, stdout,
+// etc. without code changes. When unset, only the Prometheus metrics
+// exporter is active and no tracer provider is installed.
 func Setup(serviceName string, reg prometheus.Registerer) (*Provider, error) {
-	exporter, err := otelprom.New(otelprom.WithRegisterer(reg))
+	ctx := context.Background()
+
+	promExporter, err := otelprom.New(otelprom.WithRegisterer(reg))
 	if err != nil {
 		return nil, fmt.Errorf("create prometheus exporter: %w", err)
 	}
@@ -59,25 +74,72 @@ func Setup(serviceName string, reg prometheus.Registerer) (*Provider, error) {
 		return nil, fmt.Errorf("build resource: %w", err)
 	}
 
-	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(exporter),
+	meterOpts := []sdkmetric.Option{
+		sdkmetric.WithReader(promExporter),
 		sdkmetric.WithResource(res),
-	)
+	}
+
+	// Honor OTEL_METRICS_EXPORTER if set. We don't call autoexport when the
+	// var is unset because its default is "otlp", which would silently push
+	// to localhost:4318 — surprising for an operator who hasn't opted in.
+	if exporters := os.Getenv("OTEL_METRICS_EXPORTER"); exporters != "" {
+		reader, err := autoexport.NewMetricReader(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("autoexport metric reader: %w", err)
+		}
+		if !autoexport.IsNoneMetricReader(reader) {
+			meterOpts = append(meterOpts, sdkmetric.WithReader(reader))
+		}
+	}
+
+	mp := sdkmetric.NewMeterProvider(meterOpts...)
 	otel.SetMeterProvider(mp)
-	return &Provider{mp: mp}, nil
+
+	p := &Provider{mp: mp}
+
+	// Tracer provider is only installed if the operator opted in via
+	// OTEL_TRACES_EXPORTER. No traces are emitted by default.
+	if exporters := os.Getenv("OTEL_TRACES_EXPORTER"); exporters != "" {
+		spanExporter, err := autoexport.NewSpanExporter(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("autoexport span exporter: %w", err)
+		}
+		if !autoexport.IsNoneSpanExporter(spanExporter) {
+			tp := sdktrace.NewTracerProvider(
+				sdktrace.WithBatcher(spanExporter),
+				sdktrace.WithResource(res),
+			)
+			otel.SetTracerProvider(tp)
+			p.tp = tp
+		}
+	}
+
+	return p, nil
 }
 
-// Shutdown flushes and stops the MeterProvider. Safe on a nil receiver.
+// Shutdown flushes and stops the MeterProvider and TracerProvider. Safe on
+// a nil receiver.
 func (p *Provider) Shutdown(ctx context.Context) error {
 	if p == nil {
 		return nil
 	}
-	return p.mp.Shutdown(ctx)
+	var errs []error
+	if p.mp != nil {
+		if err := p.mp.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("meter provider shutdown: %w", err))
+		}
+	}
+	if p.tp != nil {
+		if err := p.tp.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("tracer provider shutdown: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // WrapTransport wraps an existing RoundTripper with otelhttp instrumentation.
-// Reads the meter provider from the OTEL global, so Setup must have been
-// called first for metrics to flow.
+// Reads the meter and tracer providers from the OTEL globals, so Setup must
+// have been called first for telemetry to flow.
 func WrapTransport(rt http.RoundTripper) http.RoundTripper {
 	if rt == nil {
 		rt = http.DefaultTransport
