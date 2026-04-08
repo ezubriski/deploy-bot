@@ -6,11 +6,14 @@ on:
       - main
 
 jobs:
-  lint-test-build:
-    runs-on: ${{ github.actor == 'dependabot[bot]' && 'self-hosted' || 'ubuntu-latest' }}
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.filter.outputs.docs }}
     steps:
-      - name: Check for code changes
-        id: filter
+      - uses: actions/checkout@v6
+      - id: filter
         uses: dorny/paths-filter@v4
         with:
           filters: |
@@ -22,60 +25,68 @@ jobs:
               - "Dockerfile"
               - ".golangci.yml"
               - ".github/workflows/pr.yml"
+            docs:
+              - "docs/**/*.md"
+              - "mkdocs.yml"
+              - "requirements-docs.txt"
 
-      - name: Checkout
-        if: steps.filter.outputs.code == 'true'
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        if: steps.filter.outputs.code == 'true'
-        uses: actions/setup-go@v6
+  fmt:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ github.actor == 'dependabot[bot]' && 'self-hosted' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - run: make fmt-check
 
-      - name: Install golangci-lint
-        if: steps.filter.outputs.code == 'true'
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+  lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ github.actor == 'dependabot[bot]' && 'self-hosted' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+      - run: make lint
 
-      - name: Check
-        if: steps.filter.outputs.code == 'true'
-        run: make check
+  test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ github.actor == 'dependabot[bot]' && 'self-hosted' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make test
 
-      - name: Build
-        if: steps.filter.outputs.code == 'true'
-        env:
+  build:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ github.actor == 'dependabot[bot]' && 'self-hosted' || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - env:
           CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: amd64
         run: make build
 
   docs:
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check for docs changes
-        id: filter
-        uses: dorny/paths-filter@v4
-        with:
-          filters: |
-            docs:
-              - "docs/**/*.md"
-              - "mkdocs.yml"
-              - "requirements-docs.txt"
-
-      - name: Checkout
-        if: steps.filter.outputs.docs == 'true'
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        if: steps.filter.outputs.docs == 'true'
-        uses: actions/setup-python@v6
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        if: steps.filter.outputs.docs == 'true'
-        run: pip install -r requirements-docs.txt
-
-      - name: Build docs
-        if: steps.filter.outputs.docs == 'true'
-        run: mkdocs build --strict
+      - run: pip install -r requirements-docs.txt
+      - run: mkdocs build --strict
