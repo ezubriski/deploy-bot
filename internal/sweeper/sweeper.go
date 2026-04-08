@@ -37,15 +37,31 @@ func (s *Sweeper) ReconstructHistory(ctx context.Context) {
 	cfg := s.cfg.Load()
 	s.log.Info("reconstruct history: history empty, fetching from GitHub")
 
-	var all []github.DeployCommit
-	for _, app := range cfg.Apps {
-		commits, err := s.gh.ListDeployCommits(ctx, app.KustomizePath, store.HistoryMaxLen)
-		if err != nil {
-			s.log.Warn("reconstruct history: list commits",
-				zap.String("app", app.App), zap.Error(err))
-			continue
+	var (
+		mu  sync.Mutex
+		all []github.DeployCommit
+	)
+	{
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 5)
+		for _, app := range cfg.Apps {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(app config.AppConfig) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				commits, err := s.gh.ListDeployCommits(ctx, app.KustomizePath, store.HistoryMaxLen)
+				if err != nil {
+					s.log.Warn("reconstruct history: list commits",
+						zap.String("app", app.App), zap.Error(err))
+					return
+				}
+				mu.Lock()
+				all = append(all, commits...)
+				mu.Unlock()
+			}(app)
 		}
-		all = append(all, commits...)
+		wg.Wait()
 	}
 
 	if len(all) == 0 {
@@ -62,19 +78,41 @@ func (s *Sweeper) ReconstructHistory(ctx context.Context) {
 		all = all[len(all)-store.HistoryMaxLen:]
 	}
 
-	pushed := 0
-	for _, c := range all {
-		prNumber, prURL, err := s.gh.PRForCommit(ctx, c.SHA)
-		if err != nil {
-			s.log.Warn("reconstruct history: lookup PR for commit",
-				zap.String("sha", c.SHA), zap.Error(err))
+	// Resolve PR info for each commit in parallel; preserve order so the
+	// subsequent LPUSH leaves history newest-first.
+	type prInfo struct {
+		number int
+		url    string
+	}
+	prInfos := make([]prInfo, len(all))
+	{
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 5)
+		for i, c := range all {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(i int, sha string) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				prNumber, prURL, err := s.gh.PRForCommit(ctx, sha)
+				if err != nil {
+					s.log.Warn("reconstruct history: lookup PR for commit",
+						zap.String("sha", sha), zap.Error(err))
+				}
+				prInfos[i] = prInfo{number: prNumber, url: prURL}
+			}(i, c.SHA)
 		}
+		wg.Wait()
+	}
+
+	pushed := 0
+	for i, c := range all {
 		entry := store.HistoryEntry{
 			EventType:   audit.EventApproved,
 			App:         c.App,
 			Tag:         c.Tag,
-			PRNumber:    prNumber,
-			PRURL:       prURL,
+			PRNumber:    prInfos[i].number,
+			PRURL:       prInfos[i].url,
 			CompletedAt: c.CommittedAt,
 		}
 		if err := s.store.PushHistory(ctx, entry); err != nil {

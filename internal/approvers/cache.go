@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v60/github"
@@ -68,73 +69,98 @@ func (c *Cache) IsMember(slackUserID string) bool {
 // Slack user ID set in Redis. Errors from individual sources are logged
 // but do not prevent other sources from being collected.
 func (c *Cache) Refresh(ctx context.Context) error {
-	seen := map[string]struct{}{}
-	var ids []string
+	var (
+		mu   sync.Mutex
+		seen = map[string]struct{}{}
+		ids  []string
+	)
 
 	addID := func(id string) {
+		mu.Lock()
+		defer mu.Unlock()
 		if _, ok := seen[id]; !ok {
 			seen[id] = struct{}{}
 			ids = append(ids, id)
 		}
 	}
 
+	var wg sync.WaitGroup
+
 	// Source 1: Slack emails (resolved to Slack user IDs).
-	for _, email := range c.auth.SlackEmails {
-		slackUser, err := c.slack.GetUserByEmailContext(ctx, email)
-		if err != nil {
-			c.log.Warn("team cache: could not resolve slack email",
-				zap.String("email", email), zap.Error(err))
-			continue
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for _, email := range c.auth.SlackEmails {
+			slackUser, err := c.slack.GetUserByEmailContext(ctx, email)
+			if err != nil {
+				c.log.Warn("team cache: could not resolve slack email",
+					zap.String("email", email), zap.Error(err))
+				continue
+			}
+			addID(slackUser.ID)
 		}
-		addID(slackUser.ID)
-	}
+	}()
 
 	// Source 2: Slack user group members.
-	for _, groupID := range c.auth.SlackUserGroups {
-		members, err := c.slack.GetUserGroupMembersContext(ctx, groupID)
-		if err != nil {
-			c.log.Warn("team cache: could not fetch slack user group members",
-				zap.String("group", groupID), zap.Error(err))
-			continue
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for _, groupID := range c.auth.SlackUserGroups {
+			members, err := c.slack.GetUserGroupMembersContext(ctx, groupID)
+			if err != nil {
+				c.log.Warn("team cache: could not fetch slack user group members",
+					zap.String("group", groupID), zap.Error(err))
+				continue
+			}
+			for _, m := range members {
+				addID(m)
+			}
 		}
-		for _, m := range members {
-			addID(m)
-		}
-	}
+	}()
 
 	// Source 3: GitHub users (resolved to Slack IDs).
 	if c.gh != nil {
-		for _, login := range c.auth.GitHubUsers {
-			slackID, email, err := c.resolveSlackID(ctx, login)
-			if err != nil {
-				c.log.Warn("team cache: could not resolve github user",
-					zap.String("login", login), zap.String("email", email), zap.Error(err))
-				continue
-			}
-			addID(slackID)
-		}
-	}
-
-	// Source 4: GitHub team members (resolved to Slack IDs).
-	if c.gh != nil {
-		for _, team := range c.auth.GitHubTeams {
-			ghMembers, err := c.fetchTeamMembers(ctx, team)
-			if err != nil {
-				c.log.Warn("team cache: could not fetch github team members",
-					zap.String("team", team), zap.Error(err))
-				continue
-			}
-			for _, login := range ghMembers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for _, login := range c.auth.GitHubUsers {
 				slackID, email, err := c.resolveSlackID(ctx, login)
 				if err != nil {
-					c.log.Warn("team cache: could not resolve team member",
-						zap.String("email", email), zap.Error(err))
+					c.log.Warn("team cache: could not resolve github user",
+						zap.String("login", login), zap.String("email", email), zap.Error(err))
 					continue
 				}
 				addID(slackID)
 			}
-		}
+		}()
 	}
+
+	// Source 4: GitHub team members (resolved to Slack IDs).
+	if c.gh != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for _, team := range c.auth.GitHubTeams {
+				ghMembers, err := c.fetchTeamMembers(ctx, team)
+				if err != nil {
+					c.log.Warn("team cache: could not fetch github team members",
+						zap.String("team", team), zap.Error(err))
+					continue
+				}
+				for _, login := range ghMembers {
+					slackID, email, err := c.resolveSlackID(ctx, login)
+					if err != nil {
+						c.log.Warn("team cache: could not resolve team member",
+							zap.String("email", email), zap.Error(err))
+						continue
+					}
+					addID(slackID)
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
 
 	if len(ids) > 0 {
 		pipe := c.rdb.Pipeline()

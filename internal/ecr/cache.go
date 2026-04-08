@@ -225,11 +225,20 @@ func (c *Cache) StartRefresh(ctx context.Context) {
 				}
 				c.mu.RUnlock()
 
+				var wg sync.WaitGroup
+				sem := make(chan struct{}, 5)
 				for name, ac := range apps {
-					if err := c.refresh(ctx, name, ac); err != nil {
-						c.log.Warn("ecr cache refresh failed", zap.String("app", name), zap.Error(err))
-					}
+					wg.Add(1)
+					sem <- struct{}{}
+					go func(name string, ac *appCache) {
+						defer wg.Done()
+						defer func() { <-sem }()
+						if err := c.refresh(ctx, name, ac); err != nil {
+							c.log.Warn("ecr cache refresh failed", zap.String("app", name), zap.Error(err))
+						}
+					}(name, ac)
 				}
+				wg.Wait()
 			}
 		}
 	}()
