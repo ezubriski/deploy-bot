@@ -11,13 +11,16 @@ INTEG_RUN       ?=  # empty = run all; set to -run TestFoo to filter
 
 .DEFAULT_GOAL := build
 
-.PHONY: build bot receiver deploy-bot-config test test-unit test-pkg test-integ test-integ-single \
+.PHONY: build build-linux bot receiver deploy-bot-config test test-unit test-pkg test-integ test-integ-single \
         fmt fmt-check lint check image push ecr-login release \
         docs-setup docs-serve docs-build docs-deploy clean help
 
 # --- build ---
 
 build: bot receiver deploy-bot-config ## Build all binaries to ./bin
+
+build-linux: ## Build all binaries for linux/amd64 to ./bin (used by image)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(MAKE) build
 
 bot: ## Build cmd/bot -> bin/bot
 	go build -trimpath -o bin/bot ./cmd/bot
@@ -61,7 +64,7 @@ check: fmt-check lint test-unit ## Run fmt check, lint, and unit tests
 
 # --- image ---
 
-image: ## Build container image with Podman (TAG defaults to git short SHA)
+image: build-linux ## Build container image with Podman (TAG defaults to git short SHA)
 	podman build -t $(IMAGE):$(TAG) -t $(IMAGE):latest .
 
 push: image ## Build and push image to ECR

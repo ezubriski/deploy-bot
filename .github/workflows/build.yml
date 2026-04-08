@@ -59,6 +59,14 @@ jobs:
         id: sha
         run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: make build-linux
+
       - name: Build image
         run: podman build -t ${{ env.GHCR_IMAGE }}:${{ steps.sha.outputs.sha }} .
 
