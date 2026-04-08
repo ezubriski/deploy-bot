@@ -53,13 +53,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "resolve log level: %v\n", err)
 		os.Exit(1)
 	}
-	log, err := config.NewLogger(level)
+	format, err := config.ResolvedLogFormat(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "resolve log format: %v\n", err)
+		os.Exit(1)
+	}
+	log, err := config.NewLogger(level, format)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "init logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer log.Sync()
-	log.Info("logger initialized", zap.Stringer("level", level))
+	log.Info("logger initialized", zap.Stringer("log_level", level), zap.String("log_format", string(format)))
 
 	var secrets *config.Secrets
 	if sp := os.Getenv("SECRETS_PATH"); sp != "" {

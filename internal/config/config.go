@@ -33,6 +33,11 @@ type Config struct {
 	// LOG_LEVEL environment variable, if set on the bot/receiver process,
 	// overrides this field.
 	LogLevel string `json:"log_level,omitempty"`
+	// LogFormat selects the zap encoder. Valid values are "json"
+	// (machine-readable, default) and "console" (human-readable, useful
+	// for local development). The LOG_FORMAT environment variable
+	// overrides this field.
+	LogFormat string `json:"log_format,omitempty"`
 }
 
 // AuthorizationEntry defines a single authorization source. A user is
@@ -467,6 +472,11 @@ func Load(path string) (*Config, error) {
 	if cfg.LogLevel != "" {
 		if _, err := ParseLogLevel(cfg.LogLevel); err != nil {
 			return nil, fmt.Errorf("invalid log_level %q: %w", cfg.LogLevel, err)
+		}
+	}
+	if cfg.LogFormat != "" {
+		if _, err := ParseLogFormat(cfg.LogFormat); err != nil {
+			return nil, fmt.Errorf("invalid log_format %q: %w", cfg.LogFormat, err)
 		}
 	}
 	kpaths := map[string]string{} // kustomize_path -> app name
