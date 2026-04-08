@@ -105,12 +105,18 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 	commitMsg := fmt.Sprintf("deploy(%s/%s): update image tag to %s", params.Environment, params.App, params.Tag)
 
 	// Embed recovery metadata as an HTML comment (not rendered by GitHub).
-	metaJSON, _ := json.Marshal(PRMeta{
+	// json.Marshal of a flat string struct cannot fail, but log if it
+	// somehow does and continue with an empty meta blob — the PR is still
+	// usable, just without recovery metadata.
+	metaJSON, err := json.Marshal(PRMeta{
 		RequesterSlackID: params.RequesterSlackID,
 		App:              params.App,
 		Environment:      params.Environment,
 		Tag:              params.Tag,
 	})
+	if err != nil {
+		c.log.Warn("marshal PR meta", zap.Error(err))
+	}
 	prBody := fmt.Sprintf(
 		"**Environment:** %s\n**App:** %s\n**Tag:** `%s`\n**Requester:** %s\n**Reason:** %s\n\n<!-- deploy-bot-meta: %s -->",
 		params.Environment, params.App, params.Tag, formatRequester(params.Requester), sanitize.GitHubMarkdown(params.Reason), string(metaJSON),

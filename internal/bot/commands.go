@@ -80,7 +80,7 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 		return
 	}
 
-	staleDuration, _ := b.cfg.Load().StaleDuration()
+	staleDuration := b.cfg.Load().StaleDuration()
 
 	// Build app options
 	var appOptions []*slack.OptionBlockObject
@@ -153,7 +153,10 @@ func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand, envFilte
 
 			// Suggest similar apps if the app filter didn't match exactly.
 			if appFilter != "" {
-				all, _ := b.store.GetAll(ctx)
+				all, err := b.store.GetAll(ctx)
+				if err != nil {
+					b.log.Warn("store: list deploys for suggestions", zap.Error(err))
+				}
 				var suggestions []string
 				seen := map[string]struct{}{}
 				for _, d := range all {
@@ -235,14 +238,29 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 
 	var wg sync.WaitGroup
 	wg.Add(8)
-	go func() { defer wg.Done(); _ = b.gh.CommentCancelled(ctx, prNumber, requesterGH) }()
-	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
-	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
-	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
-	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
 	go func() {
 		defer wg.Done()
-		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+		b.warnIfErr("github: comment cancelled", b.gh.CommentCancelled(ctx, prNumber, requesterGH), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: remove pending label", b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		if err := b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventCancelled,
 			Trigger:     audit.TriggerSlashCommand,
 			App:         d.App,
@@ -252,11 +270,13 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 			PRURL:       d.PRURL,
 			ActorEmail:  cancellerIdent.Email,
 			ActorName:   cancellerIdent.Name,
-		})
+		}); err != nil {
+			b.log.Warn("audit log", zap.Error(err))
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.store.PushHistory(ctx, store.HistoryEntry{
+		if err := b.store.PushHistory(ctx, store.HistoryEntry{
 			EventType:   audit.EventCancelled,
 			App:         d.App,
 			Environment: d.Environment,
@@ -265,11 +285,13 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 			PRURL:       d.PRURL,
 			RequesterID: d.RequesterID,
 			CompletedAt: time.Now(),
-		})
+		}); err != nil {
+			b.log.Warn("store: push history", zap.Error(err))
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel,
+		b.postSlack(ctx, cfg.Slack.DeployChannel, "notice",
 			slack.MsgOptionText(fmt.Sprintf(
 				"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *cancelled* by <@%s>.",
 				d.App, d.Environment, d.Tag, d.PRURL, prNumber, cmd.UserID,

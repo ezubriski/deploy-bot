@@ -80,7 +80,9 @@ func main() {
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = obsProvider.Shutdown(shutdownCtx)
+		if err := obsProvider.Shutdown(shutdownCtx); err != nil {
+			log.Warn("observability shutdown", zap.Error(err))
+		}
 	}()
 
 	hh := &health.Handler{}
@@ -200,10 +202,12 @@ func main() {
 			case socketmode.EventTypeSlashCommand:
 				cmd, ok := evt.Data.(slack.SlashCommand)
 				if ok && !cfg.Slack.IsChannelAllowed(cmd.ChannelID) {
-					sm.Ack(*evt.Request, map[string]interface{}{
+					if err := sm.Ack(*evt.Request, map[string]interface{}{
 						"response_type": "ephemeral",
 						"text":          fmt.Sprintf("The `%s` command is not available in this channel.", cmd.Command),
-					})
+					}); err != nil {
+						log.Warn("slack: ack channel-disallowed", zap.Error(err))
+					}
 					continue
 				}
 				enqueueAndAck(ctx, sm, rdb, evtBuffer, evt, log)
@@ -211,7 +215,9 @@ func main() {
 			case socketmode.EventTypeInteractive:
 				callback, ok := evt.Data.(slack.InteractionCallback)
 				if !ok {
-					sm.Ack(*evt.Request)
+					if err := sm.Ack(*evt.Request); err != nil {
+						log.Warn("slack: ack", zap.Error(err))
+					}
 					continue
 				}
 				if callback.Type == slack.InteractionTypeViewSubmission &&
@@ -224,10 +230,14 @@ func main() {
 			case socketmode.EventTypeEventsAPI:
 				eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
 				if !ok {
-					sm.Ack(*evt.Request)
+					if err := sm.Ack(*evt.Request); err != nil {
+						log.Warn("slack: ack", zap.Error(err))
+					}
 					continue
 				}
-				sm.Ack(*evt.Request)
+				if err := sm.Ack(*evt.Request); err != nil {
+					log.Warn("slack: ack", zap.Error(err))
+				}
 				handleEventsAPI(ctx, rdb, evtBuffer, eventsAPIEvent, log)
 
 			case socketmode.EventTypeConnecting:
@@ -250,7 +260,9 @@ func enqueueAndAck(ctx context.Context, sm *socketmode.Client, rdb *redis.Client
 		buf.Add(evt)
 		return
 	}
-	sm.Ack(*evt.Request)
+	if err := sm.Ack(*evt.Request); err != nil {
+		log.Warn("slack: ack", zap.Error(err))
+	}
 }
 
 // validateAndDispatch runs inline validation for deploy modal submissions.
@@ -294,10 +306,12 @@ func validateAndDispatch(
 	}
 
 	if len(errs) > 0 {
-		sm.Ack(*evt.Request, map[string]interface{}{
+		if err := sm.Ack(*evt.Request, map[string]interface{}{
 			"response_action": "errors",
 			"errors":          errs,
-		})
+		}); err != nil {
+			log.Warn("slack: ack modal validation errors", zap.Error(err))
+		}
 		return
 	}
 

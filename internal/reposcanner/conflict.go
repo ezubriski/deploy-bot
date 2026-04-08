@@ -9,6 +9,7 @@ import (
 	"time"
 
 	slackPkg "github.com/slack-go/slack"
+	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
 )
@@ -35,13 +36,17 @@ type conflictTracker struct {
 	cooldown time.Duration
 	// nowFunc is injectable for testing; defaults to time.Now.
 	nowFunc func() time.Time
+	// log is used to surface Slack post failures from emitWarnings.
+	// May be nil in tests; emitWarnings tolerates that.
+	log *zap.Logger
 }
 
-func newConflictTracker() *conflictTracker {
+func newConflictTracker(log *zap.Logger) *conflictTracker {
 	return &conflictTracker{
 		warned:   make(map[string]bool),
 		cooldown: defaultWarnCooldown,
 		nowFunc:  time.Now,
+		log:      log,
 	}
 }
 
@@ -105,7 +110,9 @@ func (ct *conflictTracker) emitWarnings(ctx context.Context, slack slackclient.P
 		"*Config conflicts detected* — the following repo-sourced apps have been excluded:\n%s",
 		strings.Join(lines, "\n"),
 	)
-	_, _, _ = slack.PostMessageContext(ctx, channel, slackPkg.MsgOptionText(msg, false))
+	if _, _, err := slack.PostMessageContext(ctx, channel, slackPkg.MsgOptionText(msg, false)); err != nil && ct.log != nil {
+		ct.log.Warn("conflict tracker: post slack warning", zap.String("channel", channel), zap.Error(err))
+	}
 
 	// Mark all as warned.
 	for key := range conflicts {

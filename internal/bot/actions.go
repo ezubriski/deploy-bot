@@ -89,14 +89,14 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			appCfg, ok := cfg.AppByName(d.App)
 			if !ok {
 				b.log.Error("app config not found for rebase", zap.String("app", d.App))
-				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
 				b.notifyConflictFailed(ctx, d, prNumber, approverID)
 				return
 			}
 			baseBranch, err := b.gh.GetDefaultBranch(ctx)
 			if err != nil {
 				b.log.Error("get default branch for rebase", zap.Error(err))
-				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
 				b.notifyConflictFailed(ctx, d, prNumber, approverID)
 				return
 			}
@@ -115,7 +115,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 					return
 				}
 				b.log.Error("rebase deploy branch", zap.Int("pr", prNumber), zap.Error(rebaseErr))
-				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
 				b.notifyConflictFailed(ctx, d, prNumber, approverID)
 				return
 			}
@@ -130,7 +130,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			// Retry merge once.
 			if retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod); retryErr != nil {
 				b.log.Error("merge PR after rebase", zap.Int("pr", prNumber), zap.Error(retryErr))
-				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
 				b.notifyConflictFailed(ctx, d, prNumber, approverID)
 				return
 			}
@@ -139,8 +139,8 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 		case errors.Is(mergeErr, githubPkg.ErrCINotPassed):
 			// CI is blocking — leave the PR open so CI can finish, then re-approve.
 			b.log.Warn("merge blocked by CI", zap.Int("pr", prNumber))
-			_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
-			_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+			b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
+			b.postSlack(ctx, deployChannel, "notice",
 				slack.MsgOptionText(fmt.Sprintf(
 					"<@%s> — merge of <%s|PR #%d> (*%s* %s `%s`) is blocked by a required status check. Re-approve once CI is green.",
 					approverID, d.PRURL, prNumber, d.App, d.Environment, d.Tag,
@@ -152,8 +152,8 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			// Shouldn't normally happen (drafts can't be selected in the modal),
 			// but handle gracefully.
 			b.log.Warn("merge blocked: PR is a draft", zap.Int("pr", prNumber))
-			_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
-			_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+			b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
+			b.postSlack(ctx, deployChannel, "notice",
 				slack.MsgOptionText(fmt.Sprintf(
 					"%s — <%s|PR #%d> (*%s* %s `%s`) is in draft state and cannot be merged. Ask %s to mark it ready for review.",
 					slackMention(approverID), d.PRURL, prNumber, d.App, d.Environment, d.Tag, slackMention(d.RequesterID),
@@ -172,8 +172,8 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			}
 			if retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod); retryErr != nil {
 				b.log.Error("merge PR after head-modified retry", zap.Int("pr", prNumber), zap.Error(retryErr))
-				_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
-				_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
+				b.postSlack(ctx, deployChannel, "notice",
 					slack.MsgOptionText(fmt.Sprintf(
 						"<@%s> — <%s|PR #%d> (*%s* %s `%s`) could not be merged after a concurrent branch update. Please try approving again.",
 						approverID, d.PRURL, prNumber, d.App, d.Environment, d.Tag,
@@ -185,7 +185,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 
 		default:
 			b.log.Error("merge PR", zap.Int("pr", prNumber), zap.Error(mergeErr))
-			_ = b.store.UpdateState(ctx, prNumber, store.StatePending)
+			b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
 			var msg string
 			if errors.Is(mergeErr, githubPkg.ErrRateLimited) {
 				msg = fmt.Sprintf("<@%s> — GitHub rate limit reached. <%s|PR #%d> (*%s* %s `%s`) is still open — please try approving again in a few minutes.",
@@ -194,17 +194,29 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 				msg = fmt.Sprintf("<@%s> — failed to merge <%s|PR #%d> (*%s* %s `%s`): %v",
 					approverID, d.PRURL, prNumber, d.App, d.Environment, d.Tag, mergeErr)
 			}
-			_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, slack.MsgOptionText(msg, false))
+			b.postSlack(ctx, deployChannel, "approve flow notice", slack.MsgOptionText(msg, false))
 			return
 		}
 	}
 
 	var wg sync.WaitGroup
 	wg.Add(7)
-	go func() { defer wg.Done(); _ = b.gh.CommentApproved(ctx, prNumber, approverIdent.GitHubLogin) }()
-	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
-	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
-	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: comment approved", b.gh.CommentApproved(ctx, prNumber, approverIdent.GitHubLogin), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: remove pending label", b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
 	go func() {
 		defer wg.Done()
 		approvedOpts := []slack.MsgOption{
@@ -214,11 +226,11 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			), false),
 		}
 		approvedOpts = append(approvedOpts, threadOption(b.getThreadTS(ctx, d.Environment))...)
-		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, approvedOpts...)
+		b.postSlack(ctx, deployChannel, "notice", approvedOpts...)
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+		if err := b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventApproved,
 			Trigger:     audit.TriggerSlashCommand,
 			App:         d.App,
@@ -228,11 +240,13 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			PRURL:       d.PRURL,
 			ActorEmail:  approverIdent.Email,
 			ActorName:   approverIdent.Name,
-		})
+		}); err != nil {
+			b.log.Warn("audit log", zap.Error(err))
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.store.PushHistory(ctx, store.HistoryEntry{
+		if err := b.store.PushHistory(ctx, store.HistoryEntry{
 			EventType:   audit.EventApproved,
 			App:         d.App,
 			Environment: d.Environment,
@@ -241,7 +255,9 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			PRURL:       d.PRURL,
 			RequesterID: d.RequesterID,
 			CompletedAt: time.Now(),
-		})
+		}); err != nil {
+			b.log.Warn("store: push history", zap.Error(err))
+		}
 	}()
 	b.metrics.RecordDeploy(d.App, audit.EventApproved)
 	wg.Wait()
@@ -253,7 +269,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 // to an unresolvable conflict. The PR is left open and state is reset to
 // pending so the approver can retry after manual resolution.
 func (b *Bot) notifyConflictFailed(ctx context.Context, d *store.PendingDeploy, prNumber int, approverID string) {
-	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
+	b.postSlack(ctx, b.cfg.Load().Slack.DeployChannel, "notice",
 		slack.MsgOptionText(fmt.Sprintf(
 			"%s — merge conflict on <%s|PR #%d> (*%s* %s `%s`) could not be auto-resolved. "+
 				"Please resolve the conflict on GitHub and re-approve. %s has been notified.",
@@ -269,11 +285,26 @@ func (b *Bot) notifyConflictFailed(ctx context.Context, d *store.PendingDeploy, 
 func (b *Bot) closeNoOpPR(ctx context.Context, d *store.PendingDeploy, prNumber int) {
 	var wg sync.WaitGroup
 	wg.Add(5)
-	go func() { defer wg.Done(); _ = b.gh.CommentNoOp(ctx, prNumber, d.App, d.Tag) }()
-	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
-	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel()) }()
-	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
-	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: comment no-op", b.gh.CommentNoOp(ctx, prNumber, d.App, d.Tag), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: remove pending label", b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel()), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
 	wg.Wait()
 
 	msg := fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy. PR #%d closed.",
@@ -353,12 +384,12 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		if approverErr != nil {
 			msg = fmt.Sprintf("<@%s> — deploy request for *%s* `%s` failed: could not validate approver: %v", requesterID, appVal, tag, approverErr)
 		}
-		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, slack.MsgOptionText(msg, false))
+		b.postSlack(ctx, deployChannel, "approve flow notice", slack.MsgOptionText(msg, false))
 		return
 	}
 
 	if tagErr != nil || !tagValid {
-		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+		b.postSlack(ctx, deployChannel, "notice",
 			slack.MsgOptionText(fmt.Sprintf(
 				"<@%s> — deploy request for *%s* `%s` failed: tag not found in ECR. Use `/deploy tags %s` to list valid tags.",
 				requesterID, appVal, tag, appVal,
@@ -375,11 +406,11 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	env := appCfg.Environment
 
 	// Acquire per-app deploy lock scoped to environment.
-	lockTTL, _ := b.cfg.Load().LockTTL()
+	lockTTL := b.cfg.Load().LockTTL()
 	acquired, err := b.store.AcquireLock(ctx, env, appVal, requesterID, lockTTL)
 	if err != nil {
 		b.log.Error("acquire deploy lock", zap.String("app", appVal), zap.Error(err))
-		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+		b.postSlack(ctx, deployChannel, "notice",
 			slack.MsgOptionText(fmt.Sprintf(
 				"<@%s> — deploy request for *%s* (%s) `%s` failed: could not check deploy lock. Please try again.",
 				requesterID, appVal, env, tag,
@@ -389,10 +420,12 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	}
 	if !acquired {
 		msg := fmt.Sprintf("<@%s> — deploy of *%s* (%s) `%s` not started: a deployment is already in progress.", requesterID, appVal, env, tag)
-		if existing, _ := b.store.GetByEnvApp(ctx, env, appVal); existing != nil {
+		if existing, err := b.store.GetByEnvApp(ctx, env, appVal); err != nil {
+			b.log.Warn("store: lookup existing deploy", zap.String("env", env), zap.String("app", appVal), zap.Error(err))
+		} else if existing != nil {
 			msg = fmt.Sprintf("<@%s> — deploy of *%s* (%s) `%s` not started: a deployment is already in progress (<%s|PR #%d>).", requesterID, appVal, env, tag, existing.PRURL, existing.PRNumber)
 		}
-		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, slack.MsgOptionText(msg, false))
+		b.postSlack(ctx, deployChannel, "approve flow notice", slack.MsgOptionText(msg, false))
 		return
 	}
 
@@ -424,7 +457,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 
 	if branchErr != nil {
 		b.log.Error("get default branch", zap.Error(branchErr))
-		_ = b.store.ReleaseLock(ctx, env, appVal)
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appVal), zap.String("env", env), zap.String("app", appVal))
 		return
 	}
 
@@ -440,11 +473,11 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		RequesterSlackID: requesterID,
 	})
 	if err != nil {
-		_ = b.store.ReleaseLock(ctx, env, appVal)
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, appVal), zap.String("env", env), zap.String("app", appVal))
 		if errors.Is(err, githubPkg.ErrNoChange) {
 			noopMsg := fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy. No PR created.", appVal, env, tag)
 			b.postNoOpNotice(ctx, appVal, noopMsg)
-			_ = b.auditLog.Log(ctx, audit.AuditEvent{
+			if err := b.auditLog.Log(ctx, audit.AuditEvent{
 				EventType:   audit.EventNoop,
 				Trigger:     audit.TriggerSlashCommand,
 				App:         appVal,
@@ -452,7 +485,9 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 				Tag:         tag,
 				ActorEmail:  requesterIdent.Email,
 				ActorName:   requesterIdent.Name,
-			})
+			}); err != nil {
+				b.log.Warn("audit log", zap.Error(err))
+			}
 			b.log.Info("deploy no-op: tag already current", zap.String("app", appVal), zap.String("tag", tag))
 			return
 		}
@@ -463,11 +498,11 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		} else {
 			prErrMsg = fmt.Sprintf("<@%s> — deploy request for *%s* (%s) `%s` failed: could not create PR: %v", requesterID, appVal, env, tag, err)
 		}
-		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, slack.MsgOptionText(prErrMsg, false))
+		b.postSlack(ctx, deployChannel, "notice", slack.MsgOptionText(prErrMsg, false))
 		return
 	}
 
-	staleDuration, _ := b.cfg.Load().StaleDuration()
+	staleDuration := b.cfg.Load().StaleDuration()
 	expiresAt := time.Now().Add(staleDuration)
 
 	d := &store.PendingDeploy{
@@ -495,11 +530,11 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		// Apply deploy labels in parallel with the comment, slack post, and
 		// audit log so the label REST round trip does not extend the
 		// user-visible deploy latency.
-		_ = b.gh.AddLabels(ctx, prNumber, []string{cfg.DeployLabel(), cfg.PendingLabel()})
+		b.warnIfErr("github: add labels", b.gh.AddLabels(ctx, prNumber, []string{cfg.DeployLabel(), cfg.PendingLabel()}), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.gh.CommentRequested(ctx, prNumber, requesterGH, appVal, tag, reason)
+		b.warnIfErr("github: comment requested", b.gh.CommentRequested(ctx, prNumber, requesterGH, appVal, tag, reason), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
@@ -515,11 +550,11 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 			Reason:      reason,
 		})
 		approvalOpts = append(approvalOpts, threadOption(b.getThreadTS(ctx, env))...)
-		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, approvalOpts...)
+		b.postSlack(ctx, deployChannel, "notice", approvalOpts...)
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+		if err := b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventRequested,
 			Trigger:     audit.TriggerSlashCommand,
 			App:         appVal,
@@ -530,7 +565,9 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 			Reason:      reason,
 			ActorEmail:  requesterIdent.Email,
 			ActorName:   requesterIdent.Name,
-		})
+		}); err != nil {
+			b.log.Warn("audit log", zap.Error(err))
+		}
 	}()
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
 	wg.Wait()
@@ -540,7 +577,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 
 // postNoOpNotice posts a no-op notification to the deploy channel.
 func (b *Bot) postNoOpNotice(ctx context.Context, appName, msg string) {
-	_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel, slack.MsgOptionText(msg, false))
+	b.postSlack(ctx, b.cfg.Load().Slack.DeployChannel, "notice", slack.MsgOptionText(msg, false))
 }
 
 func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.InteractionCallback) {
@@ -559,7 +596,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 
 	isMember, rejecterIdent, err := b.validator.IsMember(ctx, approverID)
 	if err != nil || !isMember {
-		_, _, _ = b.slack.PostMessageContext(ctx, b.cfg.Load().Slack.DeployChannel,
+		b.postSlack(ctx, b.cfg.Load().Slack.DeployChannel, "notice",
 			slack.MsgOptionText(fmt.Sprintf(
 				"<@%s> — rejection of <%s|PR #%d> (*%s* %s `%s`) failed: not a member of the authorized team.",
 				approverID, d.PRURL, prNumber, d.App, d.Environment, d.Tag,
@@ -572,11 +609,26 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 
 	var wg sync.WaitGroup
 	wg.Add(8)
-	go func() { defer wg.Done(); _ = b.gh.CommentRejected(ctx, prNumber, rejecterIdent.GitHubLogin, rejReason) }()
-	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
-	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
-	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, d.Environment, d.App) }()
-	go func() { defer wg.Done(); _ = b.store.Delete(ctx, prNumber) }()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: comment rejected", b.gh.CommentRejected(ctx, prNumber, rejecterIdent.GitHubLogin, rejReason), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: remove pending label", b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
 	go func() {
 		defer wg.Done()
 		rejectedOpts := []slack.MsgOption{
@@ -586,11 +638,11 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 			), false),
 		}
 		rejectedOpts = append(rejectedOpts, threadOption(b.getThreadTS(ctx, d.Environment))...)
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, rejectedOpts...)
+		b.postSlack(ctx, cfg.Slack.DeployChannel, "notice", rejectedOpts...)
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+		if err := b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventRejected,
 			Trigger:     audit.TriggerSlashCommand,
 			App:         d.App,
@@ -601,11 +653,13 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 			Rejection:   rejReason,
 			ActorEmail:  rejecterIdent.Email,
 			ActorName:   rejecterIdent.Name,
-		})
+		}); err != nil {
+			b.log.Warn("audit log", zap.Error(err))
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.store.PushHistory(ctx, store.HistoryEntry{
+		if err := b.store.PushHistory(ctx, store.HistoryEntry{
 			EventType:   audit.EventRejected,
 			App:         d.App,
 			Environment: d.Environment,
@@ -614,7 +668,9 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 			PRURL:       d.PRURL,
 			RequesterID: d.RequesterID,
 			CompletedAt: time.Now(),
-		})
+		}); err != nil {
+			b.log.Warn("store: push history", zap.Error(err))
+		}
 	}()
 	b.metrics.RecordDeploy(d.App, audit.EventRejected)
 	wg.Wait()
@@ -634,11 +690,13 @@ func (b *Bot) replaceButtons(ctx context.Context, callback slack.InteractionCall
 			blocks = append(blocks, blk)
 		}
 	}
-	_, _, _, _ = b.slack.UpdateMessageContext(ctx,
+	if _, _, _, err := b.slack.UpdateMessageContext(ctx,
 		callback.Channel.ID,
 		callback.Message.Timestamp,
 		slack.MsgOptionBlocks(blocks...),
-	)
+	); err != nil {
+		b.log.Warn("slack: update approver message", zap.String("channel", callback.Channel.ID), zap.Error(err))
+	}
 }
 
 // updatePendingGauge refreshes the pending deployments gauge from Redis.

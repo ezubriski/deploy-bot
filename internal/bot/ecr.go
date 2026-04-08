@@ -48,7 +48,7 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 	}
 
 	// Acquire lock.
-	lockTTL, _ := cfg.LockTTL()
+	lockTTL := cfg.LockTTL()
 	acquired, err := b.store.AcquireLock(ctx, env, evt.App, ecrRequesterName, lockTTL)
 	if err != nil {
 		b.log.Error("ecr push: acquire lock", zap.String("app", evt.App), zap.Error(err))
@@ -63,7 +63,7 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 	baseBranch, err := b.gh.GetDefaultBranch(ctx)
 	if err != nil {
 		b.log.Error("ecr push: get default branch", zap.Error(err))
-		_ = b.store.ReleaseLock(ctx, env, evt.App)
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
 		return
 	}
 
@@ -77,22 +77,24 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 		Reason:        fmt.Sprintf("ECR push: %s:%s", evt.Repository, evt.Tag),
 	})
 	if err != nil {
-		_ = b.store.ReleaseLock(ctx, env, evt.App)
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
 		if errors.Is(err, githubPkg.ErrNoChange) {
 			noopMsg := fmt.Sprintf("`%s` (`%s`) is already running `%s` — no changes to deploy (ECR push). No PR created.", evt.App, env, evt.Tag)
 			b.postNoOpNotice(ctx, evt.App, noopMsg)
-			_ = b.auditLog.Log(ctx, audit.AuditEvent{
+			if err := b.auditLog.Log(ctx, audit.AuditEvent{
 				EventType:   audit.EventNoop,
 				Trigger:     audit.TriggerECRPush,
 				App:         evt.App,
 				Environment: env,
 				Tag:         evt.Tag,
-			})
+			}); err != nil {
+				b.log.Warn("audit log", zap.Error(err))
+			}
 			b.log.Info("ecr push no-op: tag already current", zap.String("app", evt.App), zap.String("tag", evt.Tag))
 			return
 		}
 		b.log.Error("ecr push: create deploy PR", zap.String("app", evt.App), zap.Error(err))
-		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel,
+		b.postSlack(ctx, deployChannel, "notice",
 			slack.MsgOptionText(fmt.Sprintf(
 				"ECR push for *%s* (%s) `%s` failed: could not create PR: %v",
 				evt.App, env, evt.Tag, err,
@@ -142,9 +144,9 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 		if rebaseErr != nil {
 			if errors.Is(rebaseErr, githubPkg.ErrNoChange) {
 				// Tag already on default branch — close as no-op.
-				_ = b.gh.CommentNoOp(ctx, prNumber, evt.App, evt.Tag)
-				_ = b.gh.ClosePR(ctx, prNumber)
-				_ = b.store.ReleaseLock(ctx, env, evt.App)
+				b.warnIfErr("github: comment no-op", b.gh.CommentNoOp(ctx, prNumber, evt.App, evt.Tag), zap.Int("pr", prNumber))
+				b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
+				b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
 				b.log.Info("ecr auto-deploy: no-op after rebase, tag already current", zap.String("app", evt.App))
 				return
 			}
@@ -169,9 +171,18 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 
 	var wg sync.WaitGroup
 	wg.Add(6)
-	go func() { defer wg.Done(); _ = b.gh.CommentApproved(ctx, prNumber, ecrRequesterName) }()
-	go func() { defer wg.Done(); _ = b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()) }()
-	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, env, evt.App) }()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: comment approved", b.gh.CommentApproved(ctx, prNumber, ecrRequesterName), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: remove pending label", b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
+	}()
 	go func() {
 		defer wg.Done()
 		autoDeployOpts := []slack.MsgOption{
@@ -181,11 +192,11 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 			), false),
 		}
 		autoDeployOpts = append(autoDeployOpts, threadOption(b.getThreadTS(ctx, env))...)
-		_, _, _ = b.slack.PostMessageContext(ctx, deployChannel, autoDeployOpts...)
+		b.postSlack(ctx, deployChannel, "notice", autoDeployOpts...)
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+		if err := b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventApproved,
 			Trigger:     audit.TriggerECRPush,
 			App:         evt.App,
@@ -194,11 +205,13 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 			PRNumber:    prNumber,
 			PRURL:       prURL,
 			AutoDeploy:  true,
-		})
+		}); err != nil {
+			b.log.Warn("audit log", zap.Error(err))
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.store.PushHistory(ctx, store.HistoryEntry{
+		if err := b.store.PushHistory(ctx, store.HistoryEntry{
 			EventType:   audit.EventApproved,
 			App:         evt.App,
 			Environment: env,
@@ -207,7 +220,9 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 			PRURL:       prURL,
 			RequesterID: ecrRequesterID,
 			CompletedAt: time.Now(),
-		})
+		}); err != nil {
+			b.log.Warn("store: push history", zap.Error(err))
+		}
 	}()
 	b.metrics.RecordDeploy(evt.App, audit.EventApproved)
 	wg.Wait()
@@ -221,7 +236,7 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	env := appCfg.Environment
 	reason := fmt.Sprintf("ECR push: %s:%s", evt.Repository, evt.Tag)
 
-	staleDuration, _ := cfg.StaleDuration()
+	staleDuration := cfg.StaleDuration()
 	expiresAt := time.Now().Add(staleDuration)
 
 	d := &store.PendingDeploy{
@@ -248,11 +263,11 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 		// Apply deploy labels in parallel with the comment, slack post, and
 		// audit log so the label REST round trip does not extend the
 		// user-visible deploy latency.
-		_ = b.gh.AddLabels(ctx, prNumber, []string{cfg.DeployLabel(), cfg.PendingLabel()})
+		b.warnIfErr("github: add labels", b.gh.AddLabels(ctx, prNumber, []string{cfg.DeployLabel(), cfg.PendingLabel()}), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.gh.CommentRequested(ctx, prNumber, ecrRequesterName, evt.App, evt.Tag, reason)
+		b.warnIfErr("github: comment requested", b.gh.CommentRequested(ctx, prNumber, ecrRequesterName, evt.App, evt.Tag, reason), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
@@ -269,7 +284,7 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+		if err := b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventRequested,
 			Trigger:     audit.TriggerECRPush,
 			App:         evt.App,
@@ -278,7 +293,9 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 			PRNumber:    prNumber,
 			PRURL:       prURL,
 			Reason:      reason,
-		})
+		}); err != nil {
+			b.log.Warn("audit log", zap.Error(err))
+		}
 	}()
 	b.metrics.RecordDeploy(evt.App, audit.EventRequested)
 	wg.Wait()
@@ -311,7 +328,7 @@ func (b *Bot) postECRApprovalRequest(ctx context.Context, cfg *config.Config, de
 		),
 	}
 	opts = append(opts, threadOption(b.getThreadTS(ctx, deploy.Environment))...)
-	_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
+	b.postSlack(ctx, cfg.Slack.DeployChannel, "notice", opts...)
 }
 
 // notifyECRAutoDeployFailed posts a failure notice to the deploy channel,
@@ -326,18 +343,27 @@ func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEv
 
 	var wg sync.WaitGroup
 	wg.Add(5)
-	go func() { defer wg.Done(); _ = b.gh.CommentAutoDeployFailed(ctx, prNumber, failErr) }()
-	go func() { defer wg.Done(); _ = b.gh.ClosePR(ctx, prNumber) }()
-	go func() { defer wg.Done(); _ = b.store.ReleaseLock(ctx, env, evt.App) }()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: comment auto-deploy failed", b.gh.CommentAutoDeployFailed(ctx, prNumber, failErr), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
+	}()
+	go func() {
+		defer wg.Done()
+		b.warnIfErr("store: release lock", b.store.ReleaseLock(ctx, env, evt.App), zap.String("env", env), zap.String("app", evt.App))
+	}()
 	go func() {
 		defer wg.Done()
 		opts := []slack.MsgOption{slack.MsgOptionText(msg, false)}
 		opts = append(opts, threadOption(b.getThreadTS(ctx, env))...)
-		_, _, _ = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel, opts...)
+		b.postSlack(ctx, cfg.Slack.DeployChannel, "notice", opts...)
 	}()
 	go func() {
 		defer wg.Done()
-		_ = b.auditLog.Log(ctx, audit.AuditEvent{
+		if err := b.auditLog.Log(ctx, audit.AuditEvent{
 			EventType:   audit.EventConflictFailed,
 			Trigger:     audit.TriggerECRPush,
 			App:         evt.App,
@@ -346,7 +372,9 @@ func (b *Bot) notifyECRAutoDeployFailed(ctx context.Context, evt queue.ECRPushEv
 			PRNumber:    prNumber,
 			PRURL:       prURL,
 			Reason:      "merge conflict could not be auto-resolved",
-		})
+		}); err != nil {
+			b.log.Warn("audit log", zap.Error(err))
+		}
 	}()
 	wg.Wait()
 }

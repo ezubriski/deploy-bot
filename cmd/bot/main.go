@@ -89,7 +89,9 @@ func main() {
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = obsProvider.Shutdown(shutdownCtx)
+		if err := obsProvider.Shutdown(shutdownCtx); err != nil {
+			log.Warn("observability shutdown", zap.Error(err))
+		}
 	}()
 	hh := &health.Handler{}
 	go func() {
@@ -270,10 +272,12 @@ func logProdAutoDeployGuard(cfg *config.Config, auditLog audit.Logger, log *zap.
 		log.Info("production apps with auto-deploy enabled",
 			zap.Strings("apps", prodAutoDeployApps),
 		)
-		_ = auditLog.Log(context.Background(), audit.AuditEvent{
+		if err := auditLog.Log(context.Background(), audit.AuditEvent{
 			EventType: audit.EventStartup,
 			Trigger:   audit.TriggerStartup,
 			Reason:    fmt.Sprintf("prod auto-deploy apps: %v", prodAutoDeployApps),
-		})
+		}); err != nil {
+			log.Warn("audit log: startup notice", zap.Error(err))
+		}
 	}
 }
