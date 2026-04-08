@@ -479,7 +479,6 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		Requester:        requesterGH,
 		Reason:           reason,
 		RequesterSlackID: evt.UserID,
-		Labels:           []string{cfg.DeployLabel(), cfg.PendingLabel()},
 	})
 	if err != nil {
 		_ = b.store.ReleaseLock(ctx, env, appName)
@@ -512,6 +511,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		b.log.Error("mention deploy: store deploy", zap.Error(err))
 	}
 
+	_ = b.gh.AddLabels(ctx, prNumber, []string{cfg.DeployLabel(), cfg.PendingLabel()})
 	_ = b.gh.CommentRequested(ctx, prNumber, requesterGH, appName, tag, reason)
 
 	deployChannel := cfg.Slack.DeployChannel

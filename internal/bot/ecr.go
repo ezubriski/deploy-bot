@@ -75,7 +75,6 @@ func (b *Bot) handleECRPush(ctx context.Context, evt queue.ECRPushEvent) {
 		BaseBranch:    baseBranch,
 		Requester:     ecrRequesterName,
 		Reason:        fmt.Sprintf("ECR push: %s:%s", evt.Repository, evt.Tag),
-		Labels:        []string{cfg.DeployLabel(), cfg.PendingLabel()},
 	})
 	if err != nil {
 		_ = b.store.ReleaseLock(ctx, env, evt.App)
@@ -243,7 +242,14 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
+	go func() {
+		defer wg.Done()
+		// Apply deploy labels in parallel with the comment, slack post, and
+		// audit log so the label REST round trip does not extend the
+		// user-visible deploy latency.
+		_ = b.gh.AddLabels(ctx, prNumber, []string{cfg.DeployLabel(), cfg.PendingLabel()})
+	}()
 	go func() {
 		defer wg.Done()
 		_ = b.gh.CommentRequested(ctx, prNumber, ecrRequesterName, evt.App, evt.Tag, reason)

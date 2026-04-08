@@ -78,6 +78,7 @@ func (s *stubGH) CommentCancelled(_ context.Context, _ int, _ string) error     
 func (s *stubGH) CommentNoOp(_ context.Context, _ int, _, _ string) error            { return nil }
 func (s *stubGH) CommentAutoDeployFailed(_ context.Context, _ int, _ error) error    { return nil }
 func (s *stubGH) RemoveLabel(_ context.Context, _ int, _ string) error               { return nil }
+func (s *stubGH) AddLabels(_ context.Context, _ int, _ []string) error               { return nil }
 
 // stubValidator always authorizes and maps slack IDs to "gh-user".
 type stubValidator struct{}
@@ -204,6 +205,10 @@ func (t *trackingGH) CommentRequested(ctx context.Context, pr int, requester, ap
 func (t *trackingGH) RemoveLabel(ctx context.Context, pr int, label string) error {
 	t.record("RemoveLabel")
 	return t.stubGH.RemoveLabel(ctx, pr, label)
+}
+func (t *trackingGH) AddLabels(ctx context.Context, pr int, labels []string) error {
+	t.record("AddLabels")
+	return t.stubGH.AddLabels(ctx, pr, labels)
 }
 func (t *trackingGH) CommentNoOp(ctx context.Context, pr int, app, tag string) error {
 	t.record("CommentNoOp")

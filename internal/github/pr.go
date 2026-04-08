@@ -70,10 +70,12 @@ func NewClient(httpClient *http.Client, org, repo string, log *zap.Logger, retry
 // Implementation: one GraphQL query fetches the base branch SHA, the
 // repository node ID, and the current kustomization file in a single round
 // trip; one GraphQL mutation then runs createRef + createCommitOnBranch +
-// createPullRequest sequentially server-side. This collapses what used to
-// be six sequential REST calls into two network requests. AddLabels still
-// goes through the REST API but is the caller's responsibility to schedule
-// off the user-blocking path if desired.
+// createPullRequest sequentially server-side.
+//
+// Label application is no longer performed here. Callers should issue
+// AddLabels separately, on a goroutine that runs in parallel with other
+// post-PR work, so the third REST round trip does not extend the
+// user-visible deploy latency.
 func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int, string, error) {
 	if !sanitize.TagIsSafe(params.Tag) {
 		return 0, "", fmt.Errorf("tag %q contains unsafe characters", params.Tag)
@@ -129,12 +131,6 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 	)
 	if err != nil {
 		return 0, "", fmt.Errorf("create deploy commit and PR: %w", err)
-	}
-
-	if len(params.Labels) > 0 {
-		if err := c.AddLabels(ctx, prNumber, params.Labels); err != nil {
-			_ = err
-		}
 	}
 
 	return prNumber, prURL, nil
@@ -290,7 +286,6 @@ type CreatePRParams struct {
 	Requester        string
 	Reason           string
 	RequesterSlackID string
-	Labels           []string
 }
 
 var newTagRegex = regexp.MustCompile(`(newTag:\s*)(\S+)`)
