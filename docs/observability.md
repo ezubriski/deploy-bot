@@ -29,18 +29,28 @@ metrics and traces to a collector or to stdout. Setting any of the
 variables below on the `bot` or `receiver` containers takes effect at
 process start with no code changes:
 
-| Variable | Purpose | Common values |
-|---|---|---|
-| `OTEL_SERVICE_NAME` | Sets the `service.name` resource attribute. Defaults to `deploy-bot` / `deploy-bot-receiver` from code. | any string |
-| `OTEL_METRICS_EXPORTER` | Adds a metrics pipeline alongside the always-on Prometheus reader. Unset = Prometheus only. | `otlp`, `console`, `none` |
-| `OTEL_TRACES_EXPORTER` | Enables a tracer provider. No spans are emitted unless this is set. | `otlp`, `console`, `none` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector address used by `otlp` exporters. | `http://otel-collector.observability:4318` |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP wire format. | `grpc`, `http/protobuf` |
-| `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes merged onto every signal. | `deployment.environment=prod,team=platform` |
+| Variable | Purpose | Default in deploy-bot | Common values |
+|---|---|---|---|
+| `OTEL_SERVICE_NAME` | Sets the `service.name` resource attribute. | `deploy-bot` (worker) / `deploy-bot-receiver` (receiver), set in code | any string |
+| `OTEL_METRICS_EXPORTER` | Adds a metrics pipeline alongside the always-on Prometheus reader. | unset → Prometheus only; we deliberately do **not** call autoexport when this is empty so the SDK does not silently push OTLP to localhost | `otlp`, `console`, `none` |
+| `OTEL_TRACES_EXPORTER` | Enables a tracer provider. | unset → no tracer provider installed, no spans emitted | `otlp`, `console`, `none` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector address used by `otlp` exporters. | OTEL spec default: `http://localhost:4318` (HTTP) or `http://localhost:4317` (gRPC) | `http://otel-collector.observability:4318` |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP wire format. | OTEL spec default: `grpc` | `grpc`, `http/protobuf` |
+| `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes merged onto every signal. | none | `deployment.environment=prod,team=platform` |
 
 OTEL log signal routing (`OTEL_LOGS_EXPORTER`) is **not** wired —
 deploy-bot uses zap for application logging and does not emit OTEL log
 records.
+
+### Configuration source
+
+The variables above are the **only** supported way to configure OTEL in
+deploy-bot. The OTEL spec also defines a file-based configuration mechanism
+(`OTEL_EXPERIMENTAL_CONFIG_FILE` and the YAML declarative config format);
+deploy-bot does **not** wire that in. If you need to manage OTEL settings
+declaratively, set the environment variables via your Kubernetes manifests
+(or whatever process manager you use) — do not point deploy-bot at an OTEL
+config file, it will be ignored.
 
 > **One-off profiling tip.** To capture a baseline of external I/O
 > without standing up a collector, set `OTEL_METRICS_EXPORTER=console`
