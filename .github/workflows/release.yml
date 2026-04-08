@@ -15,55 +15,19 @@ on:
 permissions:
   contents: write
   packages: write
+  actions: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 env:
   AWS_REGION: us-west-2
   GHCR_IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  lint:
-    runs-on: self-hosted
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-
-      - name: Lint
-        run: golangci-lint run
-
-  test:
-    runs-on: self-hosted
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Test
-        run: make test
-
-  build:
-    runs-on: self-hosted
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Build image
-        run: podman build -t deploy-bot:ci .
-
   tag:
     runs-on: self-hosted
-    needs: [lint, test, build]
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -99,9 +63,40 @@ jobs:
           git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git
           git push origin ${VERSION}
 
-  release:
+  wait-ci:
     runs-on: self-hosted
     needs: [tag]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Wait for CI build on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FULL_SHA=$(git rev-parse HEAD)
+          echo "Waiting for CI workflow on ${FULL_SHA}..."
+          DEADLINE=$(( $(date +%s) + 1800 ))
+          while :; do
+            STATUS=$(gh run list \
+              --workflow=build.yml \
+              --commit="${FULL_SHA}" \
+              --json status,conclusion \
+              --jq '.[0] | "\(.status) \(.conclusion)"' || echo "missing missing")
+            echo "  status: ${STATUS}"
+            case "${STATUS}" in
+              "completed success") echo "CI succeeded"; exit 0 ;;
+              "completed "*)        echo "CI did not succeed: ${STATUS}"; exit 1 ;;
+            esac
+            if [ "$(date +%s)" -ge "${DEADLINE}" ]; then
+              echo "Timed out waiting for CI on ${FULL_SHA}"; exit 1
+            fi
+            sleep 15
+          done
+
+  release:
+    runs-on: self-hosted
+    needs: [tag, wait-ci]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -124,39 +119,38 @@ jobs:
 
   push:
     runs-on: self-hosted
-    needs: [tag]
+    needs: [tag, wait-ci]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Build image
-        run: |
-          VERSION=${{ needs.tag.outputs.version }}
-          SHA=$(git rev-parse --short HEAD)
-          podman build \
-            -t ${{ env.GHCR_IMAGE }}:${VERSION} \
-            -t ${{ env.GHCR_IMAGE }}:${SHA} \
-            -t ${{ env.GHCR_IMAGE }}:latest .
+      - name: Set short SHA
+        id: sha
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Push to ghcr.io
+      - name: Pull, retag, push to ghcr.io
         run: |
           VERSION=${{ needs.tag.outputs.version }}
-          SHA=$(git rev-parse --short HEAD)
+          SHA=${{ steps.sha.outputs.sha }}
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             podman login ghcr.io -u ${{ github.actor }} --password-stdin
+          podman pull ${{ env.GHCR_IMAGE }}:${SHA}
+          podman tag ${{ env.GHCR_IMAGE }}:${SHA} ${{ env.GHCR_IMAGE }}:${VERSION}
+          podman tag ${{ env.GHCR_IMAGE }}:${SHA} ${{ env.GHCR_IMAGE }}:latest
           podman push ${{ env.GHCR_IMAGE }}:${VERSION}
-          podman push ${{ env.GHCR_IMAGE }}:${SHA}
           podman push ${{ env.GHCR_IMAGE }}:latest
 
-      - name: Push to ECR
+      - name: Pull, retag, push to ECR
         if: env.ECR_REGISTRY != ''
         env:
           ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
         run: |
           VERSION=${{ needs.tag.outputs.version }}
+          SHA=${{ steps.sha.outputs.sha }}
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
             podman login --username AWS --password-stdin ${ECR_REGISTRY}
-          podman tag ${{ env.GHCR_IMAGE }}:${VERSION} ${ECR_REGISTRY}/deploy-bot:${VERSION}
-          podman tag ${{ env.GHCR_IMAGE }}:${VERSION} ${ECR_REGISTRY}/deploy-bot:latest
+          podman pull ${ECR_REGISTRY}/deploy-bot:${SHA}
+          podman tag ${ECR_REGISTRY}/deploy-bot:${SHA} ${ECR_REGISTRY}/deploy-bot:${VERSION}
+          podman tag ${ECR_REGISTRY}/deploy-bot:${SHA} ${ECR_REGISTRY}/deploy-bot:latest
           podman push ${ECR_REGISTRY}/deploy-bot:${VERSION}
           podman push ${ECR_REGISTRY}/deploy-bot:latest
