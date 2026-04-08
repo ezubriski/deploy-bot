@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	gh "github.com/google/go-github/v60/github"
@@ -23,6 +24,10 @@ type Scanner struct {
 	slack    slackclient.Poster
 	cmWriter ConfigMapWriter
 	log      *zap.Logger
+
+	// stateMu guards etags/lastContent/repoPushedAt during concurrent
+	// fetch fan-out in scan().
+	stateMu sync.Mutex
 
 	// etags caches the ETag for each repo's config file to avoid re-fetching
 	// unchanged files. Keyed by "owner/repo".
@@ -97,28 +102,34 @@ func (s *Scanner) scan(ctx context.Context) {
 		return
 	}
 
-	var allDiscovered []config.DiscoveredAppConfig
-	// Track which repos contributed apps for stale detection.
-	seenRepos := make(map[string]bool)
+	// One rate-limit check up front rather than per-repo: with a parallel
+	// fan-out, the floor check is racy anyway, and cached-content repos
+	// don't consume API quota.
+	if !s.checkRateLimit(ctx, rd.RateLimitFloorValue()) {
+		s.log.Warn("reposcanner: rate limit floor reached, pausing scan")
+		return
+	}
+
+	var (
+		mu            sync.Mutex
+		allDiscovered []config.DiscoveredAppConfig
+		seenRepos     = make(map[string]bool)
+	)
+
+	// Partition repos: cached (parse only, no network) vs needs fetch.
+	type fetchJob struct {
+		repo         *gh.Repository
+		repoFullName string
+		pushedAt     time.Time
+	}
+	var toFetch []fetchJob
 
 	for _, repo := range repos {
-		if ctx.Err() != nil {
-			return
-		}
-
 		repoFullName := fmt.Sprintf("%s/%s", s.org, repo.GetName())
 		seenRepos[repoFullName] = true
 
-		// Check rate limit floor.
-		if !s.checkRateLimit(ctx, rd.RateLimitFloorValue()) {
-			s.log.Warn("reposcanner: rate limit floor reached, pausing scan")
-			return
-		}
-
-		// Skip repos that haven't been pushed to since last scan.
 		pushedAt := repo.GetPushedAt().Time
 		if lastPush, ok := s.repoPushedAt[repoFullName]; ok && !pushedAt.After(lastPush) {
-			// Use cached content if available.
 			if cached, ok := s.lastContent[repoFullName]; ok {
 				apps, errs := parseRepoConfig(cached, repoFullName, rd)
 				for _, e := range errs {
@@ -128,31 +139,50 @@ func (s *Scanner) scan(ctx context.Context) {
 			}
 			continue
 		}
-		s.repoPushedAt[repoFullName] = pushedAt
-
-		content, err := s.fetchConfigFile(ctx, repo, configFile)
-		if err != nil {
-			s.log.Debug("reposcanner: fetch config", zap.String("repo", repoFullName), zap.Error(err))
-			// If we have cached content and this is a transient error, keep using it.
-			if cached, ok := s.lastContent[repoFullName]; ok {
-				apps, _ := parseRepoConfig(cached, repoFullName, rd)
-				allDiscovered = append(allDiscovered, apps...)
-			}
-			continue
-		}
-		if content == nil {
-			// No config file in this repo.
-			delete(s.lastContent, repoFullName)
-			continue
-		}
-
-		s.lastContent[repoFullName] = content
-		apps, errs := parseRepoConfig(content, repoFullName, rd)
-		for _, e := range errs {
-			s.log.Warn("reposcanner: validation error", zap.String("repo", repoFullName), zap.Error(e))
-		}
-		allDiscovered = append(allDiscovered, apps...)
+		toFetch = append(toFetch, fetchJob{repo: repo, repoFullName: repoFullName, pushedAt: pushedAt})
 	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5)
+	for _, job := range toFetch {
+		if ctx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(job fetchJob) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			content, err := s.fetchConfigFile(ctx, job.repo, configFile)
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			s.repoPushedAt[job.repoFullName] = job.pushedAt
+
+			if err != nil {
+				s.log.Debug("reposcanner: fetch config", zap.String("repo", job.repoFullName), zap.Error(err))
+				if cached, ok := s.lastContent[job.repoFullName]; ok {
+					apps, _ := parseRepoConfig(cached, job.repoFullName, rd)
+					allDiscovered = append(allDiscovered, apps...)
+				}
+				return
+			}
+			if content == nil {
+				delete(s.lastContent, job.repoFullName)
+				return
+			}
+
+			s.lastContent[job.repoFullName] = content
+			apps, errs := parseRepoConfig(content, job.repoFullName, rd)
+			for _, e := range errs {
+				s.log.Warn("reposcanner: validation error", zap.String("repo", job.repoFullName), zap.Error(e))
+			}
+			allDiscovered = append(allDiscovered, apps...)
+		}(job)
+	}
+	wg.Wait()
 
 	// Remove cached data for repos that are no longer visible.
 	for repoName := range s.lastContent {
@@ -236,7 +266,9 @@ func (s *Scanner) fetchConfigFile(ctx context.Context, repo *gh.Repository, conf
 
 	// Cache ETag for future conditional requests.
 	if resp != nil && resp.Header.Get("ETag") != "" {
+		s.stateMu.Lock()
 		s.etags[repoFullName] = resp.Header.Get("ETag")
+		s.stateMu.Unlock()
 	}
 
 	if fc == nil {
@@ -361,6 +393,8 @@ func (s *Scanner) setCommitStatuses(ctx context.Context, discovered []config.Dis
 		repoApps[d.SourceRepo] = true
 	}
 
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 5)
 	for repoFullName := range repoApps {
 		parts := strings.SplitN(repoFullName, "/", 2)
 		if len(parts) != 2 {
@@ -389,21 +423,28 @@ func (s *Scanner) setCommitStatuses(ctx context.Context, discovered []config.Dis
 			description = "All apps registered successfully"
 		}
 
-		// Get the default branch HEAD SHA.
-		ref, _, err := s.gh.Git.GetRef(ctx, owner, repo, "refs/heads/main")
-		if err != nil {
-			s.log.Debug("reposcanner: get ref for status", zap.String("repo", repoFullName), zap.Error(err))
-			continue
-		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(owner, repo, repoFullName, state, description string) {
+			defer wg.Done()
+			defer func() { <-sem }()
 
-		statusCtx := "deploy-bot/config"
-		_, _, err = s.gh.Repositories.CreateStatus(ctx, owner, repo, ref.GetObject().GetSHA(), &gh.RepoStatus{
-			State:       &state,
-			Description: &description,
-			Context:     &statusCtx,
-		})
-		if err != nil {
-			s.log.Warn("reposcanner: set commit status", zap.String("repo", repoFullName), zap.Error(err))
-		}
+			ref, _, err := s.gh.Git.GetRef(ctx, owner, repo, "refs/heads/main")
+			if err != nil {
+				s.log.Debug("reposcanner: get ref for status", zap.String("repo", repoFullName), zap.Error(err))
+				return
+			}
+
+			statusCtx := "deploy-bot/config"
+			_, _, err = s.gh.Repositories.CreateStatus(ctx, owner, repo, ref.GetObject().GetSHA(), &gh.RepoStatus{
+				State:       &state,
+				Description: &description,
+				Context:     &statusCtx,
+			})
+			if err != nil {
+				s.log.Warn("reposcanner: set commit status", zap.String("repo", repoFullName), zap.Error(err))
+			}
+		}(owner, repo, repoFullName, state, description)
 	}
+	wg.Wait()
 }
