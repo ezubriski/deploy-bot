@@ -45,7 +45,7 @@ Submit, and a single tidy message lands in the deploy channel: who's deploying w
 
 **Guardrails that stay out of the way.** Only one deploy of a given app can be in flight at a time, so two people can't accidentally race each other. Pending requests expire on their own if nobody approves them, instead of lingering forever as half-finished work. If something goes sideways, `/deploy rollback` re-ships the previous tag with one command. None of this needs explaining to new users -- they just bump into it the one time it matters.
 
-**Mistakes are cheap.** Cancelled your own request? `/deploy cancel`. Approver went to lunch? `/deploy nudge`. Not sure a tag is real? `/deploy tags`. The bot is designed so that the worst thing a confused user can do is ask a harmless question.
+**Mistakes are cheap.** Hit submit too soon? `/deploy cancel`. Approver went to lunch? `/deploy nudge`. Not sure a tag is real? `/deploy tags`. The bot is designed so that the worst thing a confused user can do is run a harmless command.
 
 The net effect: deploys stop being a context switch. They're a sentence in a channel, a button click, and a thread you can scroll back to next week.
 
