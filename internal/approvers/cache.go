@@ -31,27 +31,32 @@ const membersKey = "team_members"
 // non-members and the deploy modal returns an inline error. The live
 // IsMember check in the worker remains the authoritative gate.
 type Cache struct {
-	rdb   *redis.Client
-	gh    *github.Client
-	slack *slack.Client
-	auth  config.ParsedAuthorization
-	org   string
-	log   *zap.Logger
+	rdb               *redis.Client
+	gh                *github.Client
+	slack             *slack.Client
+	auth              config.ParsedAuthorization
+	org               string
+	identityOverrides map[string]string // slackID -> github login
+	log               *zap.Logger
 }
 
 // New creates a Cache. The httpClient may be nil if no GitHub team is configured.
-func New(httpClient *http.Client, slackClient *slack.Client, rdb *redis.Client, org string, auth config.ParsedAuthorization, log *zap.Logger) *Cache {
+// identityOverrides is the slack-id -> github-login map; the cache uses its
+// reverse to short-circuit GitHub login -> Slack ID resolution for users with
+// private GitHub emails.
+func New(httpClient *http.Client, slackClient *slack.Client, rdb *redis.Client, org string, auth config.ParsedAuthorization, identityOverrides map[string]string, log *zap.Logger) *Cache {
 	var gh *github.Client
 	if httpClient != nil {
 		gh = github.NewClient(httpClient)
 	}
 	return &Cache{
-		rdb:   rdb,
-		gh:    gh,
-		slack: slackClient,
-		auth:  auth,
-		org:   org,
-		log:   log,
+		rdb:               rdb,
+		gh:                gh,
+		slack:             slackClient,
+		auth:              auth,
+		org:               org,
+		identityOverrides: identityOverrides,
+		log:               log,
 	}
 }
 
@@ -228,6 +233,13 @@ func (c *Cache) fetchTeamMembers(ctx context.Context, teamSlug string) ([]string
 // email → Slack user lookup by email. Returns the email alongside the Slack
 // ID for logging purposes.
 func (c *Cache) resolveSlackID(ctx context.Context, githubLogin string) (slackID, email string, err error) {
+	// Identity overrides bypass the email-based resolution path for users
+	// whose GitHub email is private.
+	for sid, login := range c.identityOverrides {
+		if login == githubLogin {
+			return sid, "", nil
+		}
+	}
 	ghUser, _, err := c.gh.Users.Get(ctx, githubLogin)
 	if err != nil {
 		return "", "", fmt.Errorf("could not find github user for email: %w", err)
