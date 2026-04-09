@@ -90,7 +90,7 @@ jobs:
   promote:
     runs-on: self-hosted
     needs: [lint, test, build-and-push]
-permissions:
+    permissions:
       contents: read
       packages: write
     steps:
