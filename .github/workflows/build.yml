@@ -83,9 +83,9 @@ jobs:
         run: |
           SHA=${{ steps.sha.outputs.sha }}
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-            podman login --username AWS --password-stdin ${ECR_REGISTRY}
-          podman tag ${{ env.GHCR_IMAGE }}:${SHA} ${ECR_REGISTRY}/deploy-bot:${SHA}
-          podman push ${ECR_REGISTRY}/deploy-bot:${SHA}
+            podman login --username AWS --password-stdin "${ECR_REGISTRY}"
+          podman tag ${{ env.GHCR_IMAGE }}:"${SHA}" "${ECR_REGISTRY}/deploy-bot:${SHA}"
+          podman push "${ECR_REGISTRY}/deploy-bot:${SHA}"
 
   promote:
     runs-on: self-hosted
@@ -117,7 +117,7 @@ jobs:
         run: |
           SHA=${{ steps.sha.outputs.sha }}
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-            podman login --username AWS --password-stdin ${ECR_REGISTRY}
-          podman pull ${ECR_REGISTRY}/deploy-bot:${SHA}
-          podman tag ${ECR_REGISTRY}/deploy-bot:${SHA} ${ECR_REGISTRY}/deploy-bot:latest
-          podman push ${ECR_REGISTRY}/deploy-bot:latest
+            podman login --username AWS --password-stdin "${ECR_REGISTRY}"
+          podman pull "${ECR_REGISTRY}/deploy-bot:${SHA}"
+          podman tag "${ECR_REGISTRY}/deploy-bot:${SHA}" "${ECR_REGISTRY}/deploy-bot:latest"
+          podman push "${ECR_REGISTRY}/deploy-bot:latest"
