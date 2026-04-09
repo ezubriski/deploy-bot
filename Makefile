@@ -12,7 +12,7 @@ INTEG_RUN       ?=  # empty = run all; set to -run TestFoo to filter
 .DEFAULT_GOAL := build
 
 .PHONY: build build-linux bot receiver deploy-bot-config test test-unit test-pkg test-integ test-integ-single \
-        fmt fmt-check lint check image push ecr-login release \
+        fmt fmt-check lint lint-actions check image push ecr-login release \
         docs-setup docs-serve docs-build docs-deploy clean help
 
 # --- build ---
@@ -59,6 +59,9 @@ fmt-check: ## Check gofmt (fails if any file needs formatting)
 
 lint: ## Run golangci-lint
 	golangci-lint run
+
+lint-actions: ## Lint GitHub Actions workflows with actionlint
+	actionlint
 
 check: fmt-check lint test-unit ## Run fmt check, lint, and unit tests
 
