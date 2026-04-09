@@ -45,15 +45,19 @@ jobs:
         id: version
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "version=dev" >> "$GITHUB_OUTPUT"
-            echo "alias=" >> "$GITHUB_OUTPUT"
-            echo "set_default=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "version=dev"
+              echo "alias="
+              echo "set_default=false"
+            } >> "$GITHUB_OUTPUT"
           else
             # workflow_run from Release — find the latest tag
             VERSION=$(git describe --tags --abbrev=0)
-            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-            echo "alias=latest" >> "$GITHUB_OUTPUT"
-            echo "set_default=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "version=${VERSION}"
+              echo "alias=latest"
+              echo "set_default=true"
+            } >> "$GITHUB_OUTPUT"
           fi
 
       - name: Deploy docs

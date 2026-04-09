@@ -12,9 +12,7 @@ INTEG_RUN       ?=  # empty = run all; set to -run TestFoo to filter
 .DEFAULT_GOAL := build
 
 .PHONY: build build-linux bot receiver deploy-bot-config test test-unit test-pkg test-integ test-integ-single \
-
         fmt fmt-check lint lint-actions check image push ecr-login release \
-
         docs-setup docs-serve docs-build docs-deploy clean help
 
 # --- build ---

@@ -59,9 +59,9 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_PAT }}
         run: |
           VERSION=${{ steps.version.outputs.version }}
-          git tag ${VERSION}
-          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git
-          git push origin ${VERSION}
+          git tag "${VERSION}"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin "${VERSION}"
 
   wait-ci:
     runs-on: self-hosted
@@ -148,9 +148,9 @@ jobs:
           VERSION=${{ needs.tag.outputs.version }}
           SHA=${{ steps.sha.outputs.sha }}
           aws ecr get-login-password --region ${{ env.AWS_REGION }} | \
-            podman login --username AWS --password-stdin ${ECR_REGISTRY}
-          podman pull ${ECR_REGISTRY}/deploy-bot:${SHA}
-          podman tag ${ECR_REGISTRY}/deploy-bot:${SHA} ${ECR_REGISTRY}/deploy-bot:${VERSION}
-          podman tag ${ECR_REGISTRY}/deploy-bot:${SHA} ${ECR_REGISTRY}/deploy-bot:latest
-          podman push ${ECR_REGISTRY}/deploy-bot:${VERSION}
-          podman push ${ECR_REGISTRY}/deploy-bot:latest
+            podman login --username AWS --password-stdin "${ECR_REGISTRY}"
+          podman pull "${ECR_REGISTRY}/deploy-bot:${SHA}"
+          podman tag "${ECR_REGISTRY}/deploy-bot:${SHA}" "${ECR_REGISTRY}/deploy-bot:${VERSION}"
+          podman tag "${ECR_REGISTRY}/deploy-bot:${SHA}" "${ECR_REGISTRY}/deploy-bot:latest"
+          podman push "${ECR_REGISTRY}/deploy-bot:${VERSION}"
+          podman push "${ECR_REGISTRY}/deploy-bot:latest"
