@@ -8,9 +8,17 @@ Built for organizations running Kubernetes + Argo CD that want centralized, audi
 
 deploy-bot lives where your team already works -- a Slack channel -- and turns "shipping a change" into a short, visible conversation instead of a ritual involving the gitops repo, a YAML edit, a PR, a reviewer hunt, and a dashboard refresh.
 
-**Asking for a deploy.** A developer types `/deploy` and gets a small form: pick an app, pick a tag, optionally name an approver, optionally write a one-line reason. Tag autocomplete shows what's actually in ECR, so there's no copy-pasting SHAs from another tab and no guessing whether the image exists yet. Submit, and a single tidy message lands in the deploy channel: who's deploying what, to which environment, and why.
+**Asking for a deploy.** A developer types `/deploy` and gets a small form: pick an app, pick a tag, optionally name an approver, optionally write a one-line reason. Tag autocomplete shows what's actually in ECR, so there's no copy-pasting SHAs from another tab and no guessing whether the image exists yet.
+
+![Deploy request modal](images/deploy_modal.png)
+
+Submit, and a single tidy message lands in the deploy channel: who's deploying what, to which environment, and why.
+
+![Deploy request message](images/deploy_message.png)
 
 **Approving a deploy.** The approver sees that same message with two buttons: Approve and Reject. No links to click through, no PR to open, no branch to inspect. One click and the bot takes it from there -- merging the PR, posting the result back in the same thread, and quietly handing off to Argo CD. If they reject, the requester is told why, and the slot is freed for someone else.
+
+![Deploy approved](images/deploy_approved.png)
 
 **The channel as a status board.** Because every deploy -- requested, approved, rejected, expired, rolled back -- shows up in one place, the channel itself becomes the deployment log. New team members can scroll up and see the rhythm of the service. On-call can glance at it during an incident and know what changed in the last hour without opening a single dashboard. `/deploy list` answers "what's waiting on me?" and `/deploy history` answers "what shipped recently?" -- both without leaving the chat.
 

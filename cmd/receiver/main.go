@@ -147,7 +147,7 @@ func main() {
 			log.Fatal("member cache github client", zap.Error(err))
 		}
 	}
-	memberCache := approvers.New(memberHTTP, slackClient, rdb, cfg.GitHub.Org, parsedAuth, log)
+	memberCache := approvers.New(memberHTTP, slackClient, rdb, cfg.GitHub.Org, parsedAuth, cfg.IdentityOverrides, log)
 	if err := memberCache.Refresh(ctx); err != nil {
 		// Fail open: log the error but continue. The cache will retry on the
 		// next tick, and the worker still validates members authoritatively.

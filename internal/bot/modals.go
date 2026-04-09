@@ -133,7 +133,7 @@ func buildDeployModal(appOptions []*slack.OptionBlockObject, tagOptions []*slack
 					}
 					return el
 				}(),
-			),
+			).WithOptional(true),
 			slack.NewInputBlock(BlockReason,
 				slack.NewTextBlockObject("plain_text", "Reason", false, false),
 				nil,
