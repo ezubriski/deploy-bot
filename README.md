@@ -43,9 +43,9 @@ Submit, and a single tidy message lands in the deploy channel: who's deploying w
 
 **The channel as a status board.** Because every deploy -- requested, approved, rejected, expired, rolled back -- shows up in one place, the channel itself becomes the deployment log. New team members can scroll up and see the rhythm of the service. On-call can glance at it during an incident and know what changed in the last hour without opening a single dashboard. `/deploy list` answers "what's waiting on me?" and `/deploy history` answers "what shipped recently?" -- both without leaving the chat.
 
-**Guardrails that stay out of the way.** Only one deploy of a given app can be in flight at a time, so two people can't accidentally race each other. Pending requests expire on their own if nobody approves them, instead of lingering forever as half-finished work. If something goes sideways, `/deploy rollback` re-ships the previous tag with one command. None of this needs explaining to new users -- they just bump into it the one time it matters.
+**Guardrails that stay out of the way.** Only one deploy of a given app can be in flight at a time, so two people can't accidentally race each other. Pending requests expire on their own if nobody approves them, instead of lingering forever as half-finished work. None of this needs explaining to new users -- they just bump into it the one time it matters.
 
-**Mistakes are cheap.** Hit submit too soon? `/deploy cancel`. Approver went to lunch? `/deploy nudge`. Not sure a tag is real? `/deploy tags`.
+**Recoverable by default.** Hit submit too soon? `/deploy cancel`. Approver went to lunch? `/deploy nudge`. Shipped the wrong tag? `/deploy rollback`. Not sure a tag is real? `/deploy tags`.
 
 The net effect: deploys stop being a context switch. They're a sentence in a channel, a button click, and a thread you can scroll back to next week.
 
