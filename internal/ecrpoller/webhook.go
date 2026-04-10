@@ -59,5 +59,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.metrics.RecordWebhookRequest("200")
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = fmt.Fprintf(w, `{"status":"ok","matched":%d,"enqueued":%d}`, matched, enqueued)
+	if _, err := fmt.Fprintf(w, `{"status":"ok","matched":%d,"enqueued":%d}`, matched, enqueued); err != nil {
+		h.log.Warn("webhook: write response", zap.Error(err))
+	}
 }

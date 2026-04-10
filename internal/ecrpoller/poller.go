@@ -145,7 +145,7 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 		}
 	}
 
-	_, _ = p.ProcessEvent(ctx, eb)
+	p.ProcessEvent(ctx, eb)
 
 	// Delete SQS message after processing all matching apps.
 	p.deleteMessage(ctx, msg)
