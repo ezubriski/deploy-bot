@@ -122,6 +122,25 @@ variable "ecr_events_enabled" {
   default     = false
 }
 
+variable "ecr_webhook_enabled" {
+  description = "Enable EventBridge API Destination for HTTP webhook delivery of ECR push events"
+  type        = bool
+  default     = false
+}
+
+variable "ecr_webhook_endpoint" {
+  description = "HTTPS endpoint URL for the ECR webhook (e.g. https://deploy-bot.example.com/v1/webhooks/ecr)"
+  type        = string
+  default     = ""
+}
+
+variable "ecr_webhook_api_key" {
+  description = "API key for authenticating to the webhook endpoint. Must be at least 32 characters"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "ecr_events_visibility_timeout" {
   description = "SQS visibility timeout in seconds. Should exceed the buffer retry window"
   type        = number

@@ -67,3 +67,8 @@ output "sqs_queue_arn" {
   description = "SQS queue ARN (empty if ECR events disabled)"
   value       = var.ecr_events_enabled ? aws_sqs_queue.ecr_events[0].arn : ""
 }
+
+output "webhook_api_destination_arn" {
+  description = "EventBridge API Destination ARN for ECR webhook (empty if webhook disabled)"
+  value       = var.ecr_webhook_enabled ? aws_cloudwatch_event_api_destination.ecr_webhook[0].arn : ""
+}
