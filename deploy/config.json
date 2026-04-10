@@ -4,6 +4,7 @@
     "repo": "gitops-repo"
   },
   "authorization": [
+    {"type": "slack_emails", "value": ["deployer@example.com"]},
     {"type": "github_teams", "value": ["deployers"]}
   ],
   "slack": {
