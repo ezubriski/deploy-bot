@@ -80,37 +80,85 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 		return
 	}
 
-	staleDuration := b.cfg.Load().StaleDuration()
+	cfg := b.cfg.Load()
+	staleDuration := cfg.StaleDuration()
 
-	// Build app options
-	var appOptions []*slack.OptionBlockObject
-	for _, app := range b.cfg.Load().Apps {
-		appOptions = append(appOptions, slack.NewOptionBlockObject(
-			app.FullName(),
-			slack.NewTextBlockObject("plain_text", app.FullName(), false, false),
-			nil,
-		))
+	// Parse pre-selected app (FullName like "nginx-01-dev") into components.
+	var selectedApp, selectedEnv string
+	if preSelectedApp != "" {
+		if appCfg, ok := cfg.AppByName(preSelectedApp); ok {
+			selectedApp = appCfg.App
+			selectedEnv = appCfg.Environment
+		}
 	}
 
-	// Build tag options for first app (or pre-selected)
-	tagApp := preSelectedApp
-	if tagApp == "" && len(b.cfg.Load().Apps) > 0 {
-		tagApp = b.cfg.Load().Apps[0].FullName()
-	}
-	tags := b.ecrCache.RecentTags(tagApp)
-	var tagOptions []*slack.OptionBlockObject
-	for _, t := range tags {
-		tagOptions = append(tagOptions, slack.NewOptionBlockObject(
-			t,
-			slack.NewTextBlockObject("plain_text", t, false, false),
-			nil,
-		))
-	}
+	params := b.buildFilteredModalParams(cfg, selectedApp, selectedEnv, preSelectedTag)
+	params.StaleDuration = staleDuration.String()
+	params.CommandName = cmd.Command
 
-	modal := buildDeployModal(appOptions, tagOptions, preSelectedApp, preSelectedTag, staleDuration.String(), cmd.Command)
+	modal := buildDeployModal(params)
 	_, err = b.slack.OpenViewContext(ctx, cmd.TriggerID, modal)
 	if err != nil {
 		b.log.Error("open deploy modal", zap.Error(err))
+	}
+}
+
+// buildFilteredModalParams builds DeployModalParams with bidirectional
+// filtering between app name and environment. If selectedApp is set, only
+// environments where that app exists are offered. If selectedEnv is set, only
+// apps available in that environment are offered. Tags are only populated when
+// both are selected.
+func (b *Bot) buildFilteredModalParams(cfg *config.Config, selectedApp, selectedEnv, preSelectedTag string) DeployModalParams {
+	// Determine filtered option lists.
+	var appNames, envNames []string
+	if selectedEnv != "" {
+		appNames = cfg.AppsForEnvironment(selectedEnv)
+	} else {
+		appNames = cfg.UniqueAppNames()
+	}
+	if selectedApp != "" {
+		envNames = cfg.EnvironmentsForApp(selectedApp)
+	} else {
+		envNames = cfg.UniqueEnvironments()
+	}
+
+	appOptions := make([]*slack.OptionBlockObject, len(appNames))
+	for i, name := range appNames {
+		appOptions[i] = slack.NewOptionBlockObject(
+			name,
+			slack.NewTextBlockObject("plain_text", name, false, false),
+			nil,
+		)
+	}
+	envOptions := make([]*slack.OptionBlockObject, len(envNames))
+	for i, env := range envNames {
+		envOptions[i] = slack.NewOptionBlockObject(
+			env,
+			slack.NewTextBlockObject("plain_text", env, false, false),
+			nil,
+		)
+	}
+
+	// Only fetch tags when both app and env are selected.
+	var tagOptions []*slack.OptionBlockObject
+	if selectedApp != "" && selectedEnv != "" {
+		fullName := selectedApp + "-" + selectedEnv
+		for _, t := range b.ecrCache.RecentTags(fullName) {
+			tagOptions = append(tagOptions, slack.NewOptionBlockObject(
+				t,
+				slack.NewTextBlockObject("plain_text", t, false, false),
+				nil,
+			))
+		}
+	}
+
+	return DeployModalParams{
+		AppNameOptions: appOptions,
+		EnvOptions:     envOptions,
+		TagOptions:     tagOptions,
+		SelectedApp:    selectedApp,
+		SelectedEnv:    selectedEnv,
+		SelectedTag:    preSelectedTag,
 	}
 }
 

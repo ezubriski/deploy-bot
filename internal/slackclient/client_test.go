@@ -259,6 +259,29 @@ func TestOpenViewContext_RetriesOnRateLimit(t *testing.T) {
 	}
 }
 
+func TestUpdateViewContext_RetriesOnRateLimit(t *testing.T) {
+	srv, calls := rateLimitThenOK(t, map[string]any{
+		"ok":   true,
+		"view": map[string]any{"id": "V123", "type": "modal"},
+	})
+	c := newClient(t, srv.URL, 1)
+
+	resp, err := c.UpdateViewContext(context.Background(), slack.ModalViewRequest{
+		Type:  slack.VTModal,
+		Title: slack.NewTextBlockObject("plain_text", "Title", false, false),
+	}, "", "hash123", "V123")
+
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil ViewResponse")
+	}
+	if n := calls.Load(); n != 2 {
+		t.Errorf("calls = %d, want 2 (1 rate-limited + 1 success)", n)
+	}
+}
+
 func TestPostMessageContext_ContextCancelledReturnsCtxErr(t *testing.T) {
 	// Server always 429s; context is already cancelled so retry wait fires ctx.Done.
 	var calls atomic.Int32

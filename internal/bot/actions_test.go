@@ -121,6 +121,9 @@ func (c *captureSlack) UpdateMessageContext(_ context.Context, _, _ string, _ ..
 func (c *captureSlack) OpenViewContext(_ context.Context, _ string, _ slack.ModalViewRequest) (*slack.ViewResponse, error) {
 	return nil, nil
 }
+func (c *captureSlack) UpdateViewContext(_ context.Context, _ slack.ModalViewRequest, _, _, _ string) (*slack.ViewResponse, error) {
+	return nil, nil
+}
 
 func (c *captureSlack) hasMessageTo(channel string) bool {
 	c.mu.Lock()
@@ -315,7 +318,8 @@ func deploySubmitCallback() slack.InteractionCallback {
 			CallbackID: ModalCallbackDeploy,
 			State: &slack.ViewState{
 				Values: map[string]map[string]slack.BlockAction{
-					BlockApp:       {ActionApp: {SelectedOption: slack.OptionBlockObject{Value: "myapp-prod"}}},
+					BlockAppName:   {ActionAppName: {SelectedOption: slack.OptionBlockObject{Value: "myapp"}}},
+					BlockEnv:       {ActionEnv: {SelectedOption: slack.OptionBlockObject{Value: "prod"}}},
 					BlockTag:       {ActionTag: {SelectedOption: slack.OptionBlockObject{}}},
 					BlockTagManual: {ActionTagManual: {Value: "v2.0.0"}},
 					BlockReason:    {ActionReason: {Value: "test"}},

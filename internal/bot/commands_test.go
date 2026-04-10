@@ -75,9 +75,13 @@ func TestFindRollbackTag_EmptyHistory(t *testing.T) {
 // buildDeployModal pre-filled tag tests
 
 func TestBuildDeployModal_PreSelectedTag(t *testing.T) {
-	modal := buildDeployModal(nil, nil, "myapp", "v1.2.3", "2h", "/deploy")
+	modal := buildDeployModal(DeployModalParams{
+		SelectedApp:   "myapp",
+		ManualTag:     "v1.2.3",
+		StaleDuration: "2h",
+		CommandName:   "/deploy",
+	})
 
-	// Find the manual tag input block and check its InitialValue.
 	for _, blk := range modal.Blocks.BlockSet {
 		ib, ok := blk.(*slack.InputBlock)
 		if !ok || ib.BlockID != BlockTagManual {
@@ -96,7 +100,11 @@ func TestBuildDeployModal_PreSelectedTag(t *testing.T) {
 }
 
 func TestBuildDeployModal_NoPreSelectedTag(t *testing.T) {
-	modal := buildDeployModal(nil, nil, "myapp", "", "2h", "/deploy")
+	modal := buildDeployModal(DeployModalParams{
+		SelectedApp:   "myapp",
+		StaleDuration: "2h",
+		CommandName:   "/deploy",
+	})
 
 	for _, blk := range modal.Blocks.BlockSet {
 		ib, ok := blk.(*slack.InputBlock)
@@ -113,4 +121,67 @@ func TestBuildDeployModal_NoPreSelectedTag(t *testing.T) {
 		return
 	}
 	t.Fatal("BlockTagManual input block not found in modal")
+}
+
+func TestBuildDeployModal_DispatchAction(t *testing.T) {
+	modal := buildDeployModal(DeployModalParams{StaleDuration: "2h"})
+
+	for _, blk := range modal.Blocks.BlockSet {
+		ib, ok := blk.(*slack.InputBlock)
+		if !ok {
+			continue
+		}
+		switch ib.BlockID {
+		case BlockAppName, BlockEnv:
+			if !ib.DispatchAction {
+				t.Errorf("block %s should have DispatchAction=true", ib.BlockID)
+			}
+		}
+	}
+}
+
+func TestBuildDeployModal_TagHintWhenNoTags(t *testing.T) {
+	modal := buildDeployModal(DeployModalParams{StaleDuration: "2h"})
+
+	for _, blk := range modal.Blocks.BlockSet {
+		sec, ok := blk.(*slack.SectionBlock)
+		if ok && sec.BlockID == BlockTagHint {
+			return // found the hint
+		}
+	}
+	t.Fatal("expected tag hint section when no tags provided")
+}
+
+func TestBuildDeployModal_TagSelectWhenTagsProvided(t *testing.T) {
+	tags := []*slack.OptionBlockObject{
+		slack.NewOptionBlockObject("v1.0.0", slack.NewTextBlockObject("plain_text", "v1.0.0", false, false), nil),
+	}
+	modal := buildDeployModal(DeployModalParams{
+		TagOptions:    tags,
+		StaleDuration: "2h",
+	})
+
+	for _, blk := range modal.Blocks.BlockSet {
+		ib, ok := blk.(*slack.InputBlock)
+		if ok && ib.BlockID == BlockTag {
+			return // found the tag input
+		}
+	}
+	t.Fatal("expected tag input block when tags provided")
+}
+
+func TestDeployModalState_RoundTrip(t *testing.T) {
+	state := DeployModalState{SelectedApp: "nginx", SelectedEnv: "prod"}
+	raw := state.Marshal()
+	parsed := ParseDeployModalState(raw)
+	if parsed.SelectedApp != "nginx" || parsed.SelectedEnv != "prod" {
+		t.Errorf("round-trip failed: got %+v", parsed)
+	}
+}
+
+func TestParseDeployModalState_Empty(t *testing.T) {
+	parsed := ParseDeployModalState("")
+	if parsed.SelectedApp != "" || parsed.SelectedEnv != "" {
+		t.Errorf("expected empty state, got %+v", parsed)
+	}
 }

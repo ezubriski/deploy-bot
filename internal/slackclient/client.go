@@ -17,6 +17,7 @@ type Poster interface {
 	PostEphemeralContext(ctx context.Context, channelID, userID string, options ...slack.MsgOption) (string, error)
 	UpdateMessageContext(ctx context.Context, channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error)
 	OpenViewContext(ctx context.Context, triggerID string, view slack.ModalViewRequest) (*slack.ViewResponse, error)
+	UpdateViewContext(ctx context.Context, view slack.ModalViewRequest, externalID, hash, viewID string) (*slack.ViewResponse, error)
 }
 
 // Client wraps *slack.Client and retries on Slack 429 rate-limit responses.
@@ -102,6 +103,16 @@ func (c *Client) UpdateMessageContext(ctx context.Context, channelID, msgTimesta
 func (c *Client) OpenViewContext(ctx context.Context, triggerID string, view slack.ModalViewRequest) (resp *slack.ViewResponse, err error) {
 	if retryErr := c.retryOnRateLimit(ctx, func() error {
 		resp, err = c.Client.OpenViewContext(ctx, triggerID, view)
+		return err
+	}); retryErr != nil {
+		err = retryErr
+	}
+	return
+}
+
+func (c *Client) UpdateViewContext(ctx context.Context, view slack.ModalViewRequest, externalID, hash, viewID string) (resp *slack.ViewResponse, err error) {
+	if retryErr := c.retryOnRateLimit(ctx, func() error {
+		resp, err = c.Client.UpdateViewContext(ctx, view, externalID, hash, viewID)
 		return err
 	}); retryErr != nil {
 		err = retryErr

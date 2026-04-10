@@ -307,7 +307,9 @@ func validateAndDispatch(
 	log *zap.Logger,
 ) {
 	vals := bot.ModalValues(callback.View.State.Values)
-	appVal := vals.SelectedOption(bot.BlockApp, bot.ActionApp)
+	appName := vals.SelectedOption(bot.BlockAppName, bot.ActionAppName)
+	env := vals.SelectedOption(bot.BlockEnv, bot.ActionEnv)
+	appVal := appName + "-" + env // reconstruct FullName
 	approverID := vals.SelectedUser(bot.BlockApprover, bot.ActionApprover)
 	manualTag := vals.Text(bot.BlockTagManual, bot.ActionTagManual)
 
@@ -316,13 +318,20 @@ func validateAndDispatch(
 	// Fast, in-memory checks only. Lock checks are deferred to the worker
 	// so the modal responds immediately even under heavy load.
 
+	if appName == "" {
+		errs[bot.BlockAppName] = "Application is required."
+	}
+	if env == "" {
+		errs[bot.BlockEnv] = "Environment is required."
+	}
+
 	// Check team membership via cache (in-memory).
 	if approverID != "" && !memberCache.IsMember(approverID) {
 		errs[bot.BlockApprover] = "Selected approver is not a member of the authorized team."
 	}
 
 	// Validate manual tag override against the app's tag pattern (in-memory).
-	if manualTag != "" && appVal != "" {
+	if manualTag != "" && appName != "" && env != "" {
 		appCfg, ok := cfg.AppByName(appVal)
 		if ok && !appCfg.CompiledTagPattern().MatchString(manualTag) {
 			errs[bot.BlockTagManual] = fmt.Sprintf(

@@ -40,7 +40,35 @@ func (b *Bot) handleBlockAction(ctx context.Context, callback slack.InteractionC
 			b.handleApprove(ctx, callback, action)
 		case ActionReject:
 			b.handleRejectButton(ctx, callback, action)
+		case ActionAppName, ActionEnv:
+			b.handleDeployFilter(ctx, callback)
+			return // one view update per event
 		}
+	}
+}
+
+// handleDeployFilter updates the deploy modal in response to an app name or
+// environment dropdown change. It recomputes filtered options and calls
+// UpdateViewContext to refresh the modal.
+func (b *Bot) handleDeployFilter(ctx context.Context, callback slack.InteractionCallback) {
+	vals := ModalValues(callback.View.State.Values)
+
+	selectedApp := vals.SelectedOption(BlockAppName, ActionAppName)
+	selectedEnv := vals.SelectedOption(BlockEnv, ActionEnv)
+
+	cfg := b.cfg.Load()
+	params := b.buildFilteredModalParams(cfg, selectedApp, selectedEnv, "")
+	params.StaleDuration = cfg.StaleDuration().String()
+
+	// Preserve user-entered values across the view update.
+	params.ManualTag = vals.Text(BlockTagManual, ActionTagManual)
+	params.Reason = vals.Text(BlockReason, ActionReason)
+	params.Approver = vals.SelectedUser(BlockApprover, ActionApprover)
+
+	modal := buildDeployModal(params)
+	_, err := b.slack.UpdateViewContext(ctx, modal, "", callback.View.Hash, callback.View.ID)
+	if err != nil {
+		b.log.Warn("update deploy modal", zap.Error(err))
 	}
 }
 
@@ -344,7 +372,9 @@ func (b *Bot) handleViewSubmission(ctx context.Context, callback slack.Interacti
 func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.InteractionCallback) {
 	vals := ModalValues(callback.View.State.Values)
 
-	appVal := vals.SelectedOption(BlockApp, ActionApp)
+	appName := vals.SelectedOption(BlockAppName, ActionAppName)
+	env := vals.SelectedOption(BlockEnv, ActionEnv)
+	appVal := appName + "-" + env // reconstruct FullName
 	tagVal := vals.SelectedOption(BlockTag, ActionTag)
 	manualTag := vals.Text(BlockTagManual, ActionTagManual)
 	reason := vals.Text(BlockReason, ActionReason)
@@ -403,8 +433,6 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		b.log.Error("app not found", zap.String("app", appVal))
 		return
 	}
-	env := appCfg.Environment
-
 	// Acquire per-app deploy lock scoped to environment.
 	lockTTL := b.cfg.Load().LockTTL()
 	acquired, err := b.store.AcquireLock(ctx, env, appVal, requesterID, lockTTL)
