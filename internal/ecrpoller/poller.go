@@ -71,6 +71,18 @@ func New(ctx context.Context, rdb *redis.Client, buf bufferAdder, st *store.Stor
 	}, nil
 }
 
+// NewWithoutSQS creates a Poller that can process events via ProcessEvent but
+// does not poll SQS. Used by the HTTP webhook handler.
+func NewWithoutSQS(rdb *redis.Client, buf bufferAdder, st *store.Store, cfg *config.Holder, log *zap.Logger) *Poller {
+	return &Poller{
+		rdb:   rdb,
+		buf:   buf,
+		store: st,
+		cfg:   cfg,
+		log:   log,
+	}
+}
+
 // Run polls SQS in a loop until ctx is cancelled. It should be started as a
 // goroutine under the leader context.
 func (p *Poller) Run(ctx context.Context) {
@@ -114,7 +126,7 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 
 	// SQS messages from EventBridge via SNS have the event in a "Message"
 	// field. Direct EventBridge→SQS puts the event at the top level.
-	var eb eventBridgeEvent
+	var eb EventBridgeEvent
 	if err := json.Unmarshal([]byte(body), &eb); err != nil {
 		p.log.Error("ecrpoller: unmarshal event", zap.Error(err))
 		p.deleteMessage(ctx, msg)
@@ -123,7 +135,7 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 
 	// If "source" is empty, try unwrapping SNS envelope.
 	if eb.Source == "" {
-		var wrapper sqsBody
+		var wrapper SQSBody
 		if err := json.Unmarshal([]byte(body), &wrapper); err == nil && wrapper.Message != "" {
 			if err := json.Unmarshal([]byte(wrapper.Message), &eb); err != nil {
 				p.log.Error("ecrpoller: unmarshal SNS message", zap.Error(err))
@@ -133,13 +145,22 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 		}
 	}
 
+	p.ProcessEvent(ctx, eb)
+
+	// Delete SQS message after processing all matching apps.
+	p.deleteMessage(ctx, msg)
+}
+
+// ProcessEvent validates an EventBridge ECR push event, matches against
+// configured apps, checks deploy locks, and enqueues matching events to Redis.
+// Returns the number of matched apps and successfully enqueued events.
+func (p *Poller) ProcessEvent(ctx context.Context, eb EventBridgeEvent) (matched, enqueued int) {
 	if eb.Detail.ActionType != "PUSH" || eb.Detail.Result != "SUCCESS" {
 		p.log.Debug("ecrpoller: skipping non-push event",
 			zap.String("action", eb.Detail.ActionType),
 			zap.String("result", eb.Detail.Result),
 		)
-		p.deleteMessage(ctx, msg)
-		return
+		return 0, 0
 	}
 
 	repoName := eb.Detail.RepositoryName
@@ -149,11 +170,9 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 	matchingApps := cfg.AppsByECRRepo(repoName)
 	if len(matchingApps) == 0 {
 		p.log.Debug("ecrpoller: no app matches repo", zap.String("repo", repoName))
-		p.deleteMessage(ctx, msg)
-		return
+		return 0, 0
 	}
 
-	enqueued := 0
 	for _, appCfg := range matchingApps {
 		// Validate tag against pattern.
 		if appCfg.TagPattern != "" && !appCfg.CompiledTagPattern().MatchString(imageTag) {
@@ -197,14 +216,13 @@ func (p *Poller) handleMessage(ctx context.Context, msg sqstypes.Message) {
 		)
 	}
 
-	// Delete SQS message after processing all matching apps.
-	p.deleteMessage(ctx, msg)
 	p.log.Info("ecrpoller: processed push event",
 		zap.String("repo", repoName),
 		zap.String("tag", imageTag),
 		zap.Int("matched", len(matchingApps)),
 		zap.Int("enqueued", enqueued),
 	)
+	return len(matchingApps), enqueued
 }
 
 func (p *Poller) deleteMessage(ctx context.Context, msg sqstypes.Message) {

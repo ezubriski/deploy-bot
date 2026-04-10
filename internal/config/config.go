@@ -167,9 +167,10 @@ func (r *RepoDiscoveryConfig) RateLimitFloorValue() int {
 
 // ECRAutoDeployConfig holds settings for ECR push-triggered deploys.
 type ECRAutoDeployConfig struct {
-	Enabled      bool   `json:"enabled,omitempty"`
-	SQSQueueURL  string `json:"sqs_queue_url,omitempty"`
-	PollInterval string `json:"poll_interval,omitempty"`
+	Enabled        bool   `json:"enabled,omitempty"`
+	SQSQueueURL    string `json:"sqs_queue_url,omitempty"`
+	PollInterval   string `json:"poll_interval,omitempty"`
+	WebhookEnabled bool   `json:"webhook_enabled,omitempty"`
 }
 
 // PollIntervalDuration returns the parsed poll interval, defaulting to 30s.
@@ -360,6 +361,7 @@ type Secrets struct {
 	RedisIAMAuth            bool   `json:"redis_iam_auth,omitempty"`
 	RedisUserID             string `json:"redis_user_id,omitempty"`
 	RedisReplicationGroupID string `json:"redis_replication_group_id,omitempty"`
+	ECRWebhookAPIKey        string `json:"ecr_webhook_api_key,omitempty"`
 }
 
 // UseGitHubApp returns true if GitHub App credentials are configured.

@@ -24,6 +24,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/ecrpoller"
 	"github.com/ezubriski/deploy-bot/internal/health"
+	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/observability"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/reposcanner"
@@ -97,15 +98,9 @@ func main() {
 	}()
 
 	hh := &health.Handler{}
-	go func() {
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
-		mux.HandleFunc("/healthz", hh.Liveness)
-		log.Info("health server listening", zap.String("addr", healthAddr))
-		if err := http.ListenAndServe(healthAddr, mux); err != nil {
-			log.Error("health server error", zap.Error(err))
-		}
-	}()
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/healthz", hh.Liveness)
 
 	redisStore, err := store.NewFromSecrets(ctx, secrets)
 	if err != nil {
@@ -155,16 +150,30 @@ func main() {
 	}
 	memberCache.StartRefresh(ctx, approverRefreshInterval)
 
-	// Start ECR poller if configured. It enqueues to the same Redis stream
-	// as Slack events, using its own buffer for Redis backpressure.
-	if cfg.ECRAutoDeploy.Enabled && cfg.ECRAutoDeploy.SQSQueueURL != "" {
+	// Start ECR poller and/or webhook if configured. Both share the same
+	// buffer and Redis stream for ECR events.
+	if cfg.ECRAutoDeploy.Enabled {
 		ecrBuf := buffer.New(buffer.DefaultSize, rdb, queue.StreamKeyECR, log)
 		go ecrBuf.Run(ctx)
-		poller, err := ecrpoller.New(ctx, rdb, ecrBuf, redisStore, config.NewHolder(cfg, configPath), log)
-		if err != nil {
-			log.Fatal("init ecr poller", zap.Error(err))
+		holder := config.NewHolder(cfg, configPath)
+
+		if cfg.ECRAutoDeploy.SQSQueueURL != "" {
+			poller, err := ecrpoller.New(ctx, rdb, ecrBuf, redisStore, holder, log)
+			if err != nil {
+				log.Fatal("init ecr poller", zap.Error(err))
+			}
+			go poller.Run(ctx)
 		}
-		go poller.Run(ctx)
+
+		if cfg.ECRAutoDeploy.WebhookEnabled {
+			if len(secrets.ECRWebhookAPIKey) < 32 {
+				log.Fatal("ecr_webhook_api_key must be at least 32 characters when webhook is enabled")
+			}
+			m := metrics.NewDefault()
+			webhookPoller := ecrpoller.NewWithoutSQS(rdb, ecrBuf, redisStore, holder, log)
+			mux.Handle("/v1/webhooks/ecr", ecrpoller.NewWebhookHandler(webhookPoller, secrets.ECRWebhookAPIKey, m, log))
+			log.Info("ecr webhook endpoint registered", zap.String("path", "/v1/webhooks/ecr"))
+		}
 	}
 
 	// Start repo scanner if configured.
@@ -189,6 +198,13 @@ func main() {
 		scanner := reposcanner.NewScanner(scannerHTTP, cfg.GitHub.Org, scannerSlack, cmWriter, cfgHolder, log)
 		go scanner.Run(ctx)
 	}
+
+	go func() {
+		log.Info("health server listening", zap.String("addr", healthAddr))
+		if err := http.ListenAndServe(healthAddr, mux); err != nil {
+			log.Error("health server error", zap.Error(err))
+		}
+	}()
 
 	sm := socketmode.New(slackClient)
 

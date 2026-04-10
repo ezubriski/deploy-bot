@@ -46,10 +46,10 @@ func (b *stubBuffer) Add(evt socketmode.Event) bool {
 }
 
 func makeECRPushMessage(repoName, imageTag string) sqstypes.Message {
-	eb := eventBridgeEvent{
+	eb := EventBridgeEvent{
 		Source:     "aws.ecr",
 		DetailType: "ECR Image Action",
-		Detail: ecrPushDetail{
+		Detail: ECRPushDetail{
 			ActionType:     "PUSH",
 			Result:         "SUCCESS",
 			RepositoryName: repoName,
@@ -221,10 +221,10 @@ func TestPoller_LockedApp(t *testing.T) {
 }
 
 func TestPoller_NonPushEvent(t *testing.T) {
-	eb := eventBridgeEvent{
+	eb := EventBridgeEvent{
 		Source:     "aws.ecr",
 		DetailType: "ECR Image Action",
-		Detail: ecrPushDetail{
+		Detail: ECRPushDetail{
 			ActionType:     "DELETE",
 			Result:         "SUCCESS",
 			RepositoryName: "myapp",

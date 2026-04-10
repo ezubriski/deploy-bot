@@ -95,7 +95,7 @@ resource "aws_sqs_queue_policy" "ecr_events" {
 # --- EventBridge rule for ECR push events ---
 
 resource "aws_cloudwatch_event_rule" "ecr_push" {
-  count = var.ecr_events_enabled ? 1 : 0
+  count = (var.ecr_events_enabled || var.ecr_webhook_enabled) ? 1 : 0
 
   name        = "${var.name}-ecr-push"
   description = "Capture ECR image push events for deploy-bot"
@@ -117,4 +117,86 @@ resource "aws_cloudwatch_event_target" "ecr_push_sqs" {
   rule      = aws_cloudwatch_event_rule.ecr_push[0].name
   target_id = "${var.name}-sqs"
   arn       = aws_sqs_queue.ecr_events[0].arn
+}
+
+# --- EventBridge API Destination for HTTP webhook delivery (optional) ---
+
+resource "aws_cloudwatch_event_connection" "ecr_webhook" {
+  count = var.ecr_webhook_enabled ? 1 : 0
+
+  name               = "${var.name}-ecr-webhook"
+  description        = "API key auth for deploy-bot ECR webhook"
+  authorization_type = "API_KEY"
+
+  auth_parameters {
+    api_key {
+      key   = "x-api-key"
+      value = var.ecr_webhook_api_key
+    }
+  }
+}
+
+resource "aws_cloudwatch_event_api_destination" "ecr_webhook" {
+  count = var.ecr_webhook_enabled ? 1 : 0
+
+  name                             = "${var.name}-ecr-webhook"
+  description                      = "HTTP endpoint for ECR push events"
+  invocation_endpoint              = var.ecr_webhook_endpoint
+  http_method                      = "POST"
+  invocation_rate_limit_per_second = 10
+  connection_arn                   = aws_cloudwatch_event_connection.ecr_webhook[0].arn
+}
+
+resource "aws_cloudwatch_event_target" "ecr_push_webhook" {
+  count = var.ecr_webhook_enabled ? 1 : 0
+
+  rule      = aws_cloudwatch_event_rule.ecr_push[0].name
+  target_id = "${var.name}-webhook"
+  arn       = aws_cloudwatch_event_api_destination.ecr_webhook[0].arn
+  role_arn  = aws_iam_role.eventbridge_webhook[0].arn
+}
+
+data "aws_iam_policy_document" "eventbridge_webhook_assume" {
+  count = var.ecr_webhook_enabled ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["events.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "eventbridge_webhook" {
+  count = var.ecr_webhook_enabled ? 1 : 0
+
+  name               = "${var.name}-eb-webhook"
+  assume_role_policy = data.aws_iam_policy_document.eventbridge_webhook_assume[0].json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "eventbridge_webhook" {
+  count = var.ecr_webhook_enabled ? 1 : 0
+
+  statement {
+    sid       = "InvokeAPIDestination"
+    actions   = ["events:InvokeApiDestination"]
+    resources = [aws_cloudwatch_event_api_destination.ecr_webhook[0].arn]
+  }
+}
+
+resource "aws_iam_policy" "eventbridge_webhook" {
+  count = var.ecr_webhook_enabled ? 1 : 0
+
+  name   = "${var.name}-eb-webhook"
+  policy = data.aws_iam_policy_document.eventbridge_webhook[0].json
+  tags   = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "eventbridge_webhook" {
+  count = var.ecr_webhook_enabled ? 1 : 0
+
+  role       = aws_iam_role.eventbridge_webhook[0].name
+  policy_arn = aws_iam_policy.eventbridge_webhook[0].arn
 }

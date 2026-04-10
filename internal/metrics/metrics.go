@@ -10,11 +10,12 @@ import (
 // with a custom registry (useful in tests) or NewDefault to register against
 // prometheus.DefaultRegisterer.
 type Metrics struct {
-	DeploysTotal       *prometheus.CounterVec
-	ECRCacheHits       *prometheus.CounterVec
-	ECRCacheMisses     *prometheus.CounterVec
-	ECRRefreshDuration *prometheus.HistogramVec
-	PendingDeploys     prometheus.Gauge
+	DeploysTotal         *prometheus.CounterVec
+	ECRCacheHits         *prometheus.CounterVec
+	ECRCacheMisses       *prometheus.CounterVec
+	ECRRefreshDuration   *prometheus.HistogramVec
+	PendingDeploys       prometheus.Gauge
+	WebhookRequestsTotal *prometheus.CounterVec
 }
 
 func New(reg prometheus.Registerer) *Metrics {
@@ -44,6 +45,11 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name: "deploybot_pending_deployments",
 			Help: "Current number of deployments awaiting approval.",
 		}),
+
+		WebhookRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "deploybot_webhook_requests_total",
+			Help: "Total ECR webhook requests by HTTP status.",
+		}, []string{"status"}),
 	}
 
 	reg.MustRegister(
@@ -52,6 +58,7 @@ func New(reg prometheus.Registerer) *Metrics {
 		m.ECRCacheMisses,
 		m.ECRRefreshDuration,
 		m.PendingDeploys,
+		m.WebhookRequestsTotal,
 	)
 
 	return m
@@ -86,4 +93,10 @@ func (m *Metrics) ObserveECRRefresh(app string, d time.Duration) {
 // SetPendingDeploys sets the pending deployments gauge to n.
 func (m *Metrics) SetPendingDeploys(n int) {
 	m.PendingDeploys.Set(float64(n))
+}
+
+// RecordWebhookRequest increments the webhook request counter for the given
+// HTTP status code.
+func (m *Metrics) RecordWebhookRequest(status string) {
+	m.WebhookRequestsTotal.WithLabelValues(status).Inc()
 }
