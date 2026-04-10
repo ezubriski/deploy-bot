@@ -59,5 +59,5 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.metrics.RecordWebhookRequest("200")
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status":"ok","matched":%d,"enqueued":%d}`, matched, enqueued)
+	_, _ = fmt.Fprintf(w, `{"status":"ok","matched":%d,"enqueued":%d}`, matched, enqueued)
 }
