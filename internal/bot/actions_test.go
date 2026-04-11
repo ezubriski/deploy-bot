@@ -30,7 +30,7 @@ type stubGH struct {
 	getDefaultBranch   func(context.Context) (string, error)
 	createDeployPR     func(context.Context, githubpkg.CreatePRParams) (int, string, error)
 	rebaseDeployBranch func(context.Context, githubpkg.CreatePRParams) error
-	mergePR            func(context.Context, int, string) error
+	mergePR            func(context.Context, int, string) (string, error)
 	closePR            func(context.Context, int) error
 	deleteBranch       func(context.Context, string) error
 }
@@ -53,11 +53,11 @@ func (s *stubGH) RebaseDeployBranch(ctx context.Context, p githubpkg.CreatePRPar
 	}
 	return nil
 }
-func (s *stubGH) MergePR(ctx context.Context, prNumber int, method string) error {
+func (s *stubGH) MergePR(ctx context.Context, prNumber int, method string) (string, error) {
 	if s.mergePR != nil {
 		return s.mergePR(ctx, prNumber, method)
 	}
-	return nil
+	return "stub-merge-sha", nil
 }
 func (s *stubGH) ClosePR(ctx context.Context, prNumber int) error {
 	if s.closePR != nil {
@@ -227,7 +227,7 @@ func (t *trackingGH) ClosePR(ctx context.Context, pr int) error {
 	t.record("ClosePR")
 	return t.stubGH.ClosePR(ctx, pr)
 }
-func (t *trackingGH) MergePR(ctx context.Context, pr int, method string) error {
+func (t *trackingGH) MergePR(ctx context.Context, pr int, method string) (string, error) {
 	t.record("MergePR")
 	return t.stubGH.MergePR(ctx, pr, method)
 }
@@ -377,12 +377,12 @@ func TestHandleApprove_ConflictAutoResolved(t *testing.T) {
 
 	callCount := 0
 	gh := &stubGH{
-		mergePR: func(_ context.Context, _ int, _ string) error {
+		mergePR: func(_ context.Context, _ int, _ string) (string, error) {
 			callCount++
 			if callCount == 1 {
-				return githubpkg.ErrMergeConflict
+				return "", githubpkg.ErrMergeConflict
 			}
-			return nil
+			return "merge-sha", nil
 		},
 		rebaseDeployBranch: func(_ context.Context, _ githubpkg.CreatePRParams) error {
 			return nil
@@ -422,8 +422,8 @@ func TestHandleApprove_ConflictUnresolvable(t *testing.T) {
 	sl := &captureSlack{}
 
 	gh := &stubGH{
-		mergePR: func(_ context.Context, _ int, _ string) error {
-			return githubpkg.ErrMergeConflict
+		mergePR: func(_ context.Context, _ int, _ string) (string, error) {
+			return "", githubpkg.ErrMergeConflict
 		},
 		rebaseDeployBranch: func(_ context.Context, _ githubpkg.CreatePRParams) error {
 			return nil
@@ -464,8 +464,8 @@ func TestHandleApprove_ConflictRebaseIsNoOp(t *testing.T) {
 
 	var prClosed bool
 	gh := &stubGH{
-		mergePR: func(_ context.Context, _ int, _ string) error {
-			return githubpkg.ErrMergeConflict
+		mergePR: func(_ context.Context, _ int, _ string) (string, error) {
+			return "", githubpkg.ErrMergeConflict
 		},
 		rebaseDeployBranch: func(_ context.Context, _ githubpkg.CreatePRParams) error {
 			return githubpkg.ErrNoChange

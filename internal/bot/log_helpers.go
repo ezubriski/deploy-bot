@@ -43,3 +43,19 @@ func (b *Bot) postSlack(ctx context.Context, channelID, op string, options ...sl
 		b.log.Warn("slack post: "+op, zap.String("channel", channelID), zap.Error(err))
 	}
 }
+
+// postSlackWithHandle is the variant of postSlack that returns the resolved
+// channel ID and message timestamp. Used by the deploy-request post sites
+// so the (channel, ts) pair can be persisted on the PendingDeploy and later
+// HistoryEntry — letting follow-up notifications (e.g. ArgoCD lifecycle
+// events) reference the original message after the per-environment thread
+// TTL has expired. Returns empty strings on error; the caller is expected
+// to fall back to no Slack handle in that case.
+func (b *Bot) postSlackWithHandle(ctx context.Context, channelID, op string, options ...slack.MsgOption) (channel, ts string) {
+	ch, t, err := b.slack.PostMessageContext(ctx, channelID, options...)
+	if err != nil {
+		b.log.Warn("slack post: "+op, zap.String("channel", channelID), zap.Error(err))
+		return "", ""
+	}
+	return ch, t
+}

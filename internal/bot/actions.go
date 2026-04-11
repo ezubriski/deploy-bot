@@ -155,8 +155,11 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	cfg := b.cfg.Load()
 	deployChannel := cfg.Slack.DeployChannel
 
-	// First merge attempt
-	mergeErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
+	// First merge attempt. mergeSHA is captured here and on each retry path
+	// so it can be persisted on the resulting HistoryEntry. Downstream
+	// signals (e.g. ArgoCD notifications carrying a synced revision) use
+	// this SHA to correlate back to the deploy that produced it.
+	mergeSHA, mergeErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
 	if mergeErr != nil {
 		switch {
 		case errors.Is(mergeErr, githubPkg.ErrMergeConflict):
@@ -203,12 +206,14 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			}
 
 			// Retry merge once.
-			if retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod); retryErr != nil {
+			retrySHA, retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
+			if retryErr != nil {
 				b.log.Error("merge PR after rebase", zap.Int("pr", prNumber), zap.Error(retryErr))
 				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
 				b.notifyConflictFailed(ctx, d, prNumber, approverID)
 				return
 			}
+			mergeSHA = retrySHA
 			// Merge succeeded after rebase — fall through to completion.
 
 		case errors.Is(mergeErr, githubPkg.ErrCINotPassed):
@@ -245,7 +250,8 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 				return
 			case <-time.After(2 * time.Second):
 			}
-			if retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod); retryErr != nil {
+			retrySHA, retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
+			if retryErr != nil {
 				b.log.Error("merge PR after head-modified retry", zap.Int("pr", prNumber), zap.Error(retryErr))
 				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, prNumber, store.StatePending), zap.Int("pr", prNumber))
 				b.postSlack(ctx, deployChannel, "notice",
@@ -256,6 +262,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 				)
 				return
 			}
+			mergeSHA = retrySHA
 			// Merge succeeded — fall through to completion.
 
 		default:
@@ -322,14 +329,17 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	go func() {
 		defer wg.Done()
 		if err := b.store.PushHistory(ctx, store.HistoryEntry{
-			EventType:   audit.EventApproved,
-			App:         d.App,
-			Environment: d.Environment,
-			Tag:         d.Tag,
-			PRNumber:    prNumber,
-			PRURL:       d.PRURL,
-			RequesterID: d.RequesterID,
-			CompletedAt: time.Now(),
+			EventType:       audit.EventApproved,
+			App:             d.App,
+			Environment:     d.Environment,
+			Tag:             d.Tag,
+			PRNumber:        prNumber,
+			PRURL:           d.PRURL,
+			RequesterID:     d.RequesterID,
+			CompletedAt:     time.Now(),
+			GitopsCommitSHA: mergeSHA,
+			SlackChannel:    d.SlackChannel,
+			SlackMessageTS:  d.SlackMessageTS,
 		}); err != nil {
 			b.log.Warn("store: push history", zap.Error(err))
 		}
@@ -598,6 +608,12 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 		b.log.Error("store deploy", zap.Error(err))
 	}
 
+	// slackChannel/slackTS are written by the approval-post goroutine and
+	// read after wg.Wait. The wait group provides happens-before, so the
+	// read is race-free. Captured here so we can persist the message handle
+	// on the PendingDeploy for later correlation by ArgoCD lifecycle events.
+	var slackChannel, slackTS string
+
 	var wg sync.WaitGroup
 	wg.Add(4)
 	go func() {
@@ -625,7 +641,7 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 			Reason:      reason,
 		})
 		approvalOpts = append(approvalOpts, threadOption(b.getThreadTS(ctx, env))...)
-		b.postSlack(ctx, deployChannel, "notice", approvalOpts...)
+		slackChannel, slackTS = b.postSlackWithHandle(ctx, deployChannel, "notice", approvalOpts...)
 	}()
 	go func() {
 		defer wg.Done()
@@ -646,6 +662,20 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	}()
 	b.metrics.RecordDeploy(appVal, audit.EventRequested)
 	wg.Wait()
+
+	// If the approval post succeeded, write the message handle back onto
+	// the PendingDeploy. Done after wg.Wait so the goroutine's writes are
+	// visible. A failed Slack post is non-fatal — the deploy still proceeds
+	// without a stored handle, and ArgoCD correlation falls back to the
+	// per-environment thread.
+	if slackTS != "" {
+		d.SlackChannel = slackChannel
+		d.SlackMessageTS = slackTS
+		if err := b.store.Set(ctx, d, staleDuration); err != nil {
+			b.log.Warn("store: update deploy with slack handle", zap.Error(err))
+		}
+	}
+
 	b.updatePendingGauge(ctx)
 	b.log.Info("deployment requested", zap.String("app", appVal), zap.String("tag", tag), zap.Int("pr", prNumber), zap.String("requester", requesterIdent.String()))
 }
@@ -735,14 +765,16 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	go func() {
 		defer wg.Done()
 		if err := b.store.PushHistory(ctx, store.HistoryEntry{
-			EventType:   audit.EventRejected,
-			App:         d.App,
-			Environment: d.Environment,
-			Tag:         d.Tag,
-			PRNumber:    prNumber,
-			PRURL:       d.PRURL,
-			RequesterID: d.RequesterID,
-			CompletedAt: time.Now(),
+			EventType:      audit.EventRejected,
+			App:            d.App,
+			Environment:    d.Environment,
+			Tag:            d.Tag,
+			PRNumber:       prNumber,
+			PRURL:          d.PRURL,
+			RequesterID:    d.RequesterID,
+			CompletedAt:    time.Now(),
+			SlackChannel:   d.SlackChannel,
+			SlackMessageTS: d.SlackMessageTS,
 		}); err != nil {
 			b.log.Warn("store: push history", zap.Error(err))
 		}

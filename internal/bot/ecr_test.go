@@ -148,9 +148,9 @@ func TestHandleECRPush_AutoDeploy(t *testing.T) {
 
 	merged := false
 	gh := &stubGH{
-		mergePR: func(_ context.Context, _ int, _ string) error {
+		mergePR: func(_ context.Context, _ int, _ string) (string, error) {
 			merged = true
-			return nil
+			return "merge-sha", nil
 		},
 	}
 	b := newECRTestBot(t, gh, sl, st, apps)
@@ -187,9 +187,9 @@ func TestHandleECRPush_ProdGuard(t *testing.T) {
 
 	merged := false
 	gh := &stubGH{
-		mergePR: func(_ context.Context, _ int, _ string) error {
+		mergePR: func(_ context.Context, _ int, _ string) (string, error) {
 			merged = true
-			return nil
+			return "merge-sha", nil
 		},
 	}
 	b := newECRTestBot(t, gh, sl, st, apps)
@@ -229,12 +229,12 @@ func TestHandleECRPush_AutoDeploy_MergeConflict_RebaseSucceeds(t *testing.T) {
 
 	mergeAttempts := 0
 	gh := &stubGH{
-		mergePR: func(_ context.Context, _ int, _ string) error {
+		mergePR: func(_ context.Context, _ int, _ string) (string, error) {
 			mergeAttempts++
 			if mergeAttempts == 1 {
-				return githubpkg.ErrMergeConflict
+				return "", githubpkg.ErrMergeConflict
 			}
-			return nil // retry succeeds
+			return "merge-sha", nil // retry succeeds
 		},
 		rebaseDeployBranch: func(_ context.Context, _ githubpkg.CreatePRParams) error {
 			return nil
@@ -272,8 +272,8 @@ func TestHandleECRPush_AutoDeploy_MergeConflict_RebaseFails(t *testing.T) {
 
 	prClosed := false
 	gh := &stubGH{
-		mergePR: func(_ context.Context, _ int, _ string) error {
-			return githubpkg.ErrMergeConflict
+		mergePR: func(_ context.Context, _ int, _ string) (string, error) {
+			return "", githubpkg.ErrMergeConflict
 		},
 		rebaseDeployBranch: func(_ context.Context, _ githubpkg.CreatePRParams) error {
 			return fmt.Errorf("rebase failed")
@@ -313,8 +313,8 @@ func TestHandleECRPush_AutoDeploy_MergeConflict_NoOp(t *testing.T) {
 
 	prClosed := false
 	gh := &stubGH{
-		mergePR: func(_ context.Context, _ int, _ string) error {
-			return githubpkg.ErrMergeConflict
+		mergePR: func(_ context.Context, _ int, _ string) (string, error) {
+			return "", githubpkg.ErrMergeConflict
 		},
 		rebaseDeployBranch: func(_ context.Context, _ githubpkg.CreatePRParams) error {
 			return githubpkg.ErrNoChange
