@@ -891,6 +891,28 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#late-arriving-notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Late-arriving notifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resource-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resource detail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#dedupe" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1055,15 +1077,15 @@ behaviour, and to suggest actions (rollback) where the bot can help.</p>
 <tbody>
 <tr>
 <td><code>on-sync-succeeded</code></td>
-<td>Threaded reply under the original deploy message: "synced and healthy"</td>
+<td>Quiet threaded reply under the original deploy message: "synced and healthy"</td>
 </tr>
 <tr>
 <td><code>on-sync-failed</code></td>
-<td><strong>Top-level alarming message</strong> in the deploy channel + separate rollback prompt</td>
+<td><strong>Top-level alarming message</strong> in the deploy channel with failing-resource detail</td>
 </tr>
 <tr>
 <td><code>on-health-degraded</code></td>
-<td><strong>Top-level alarming message</strong> with failing-resource detail + rollback prompt</td>
+<td><strong>Top-level alarming message</strong> with failing-resource detail</td>
 </tr>
 <tr>
 <td><code>on-sync-running</code></td>
@@ -1072,11 +1094,16 @@ behaviour, and to suggest actions (rollback) where the bot can help.</p>
 </tbody>
 </table>
 <blockquote>
-<p><strong>Phase 2 status (this commit):</strong> the receiver-side webhook endpoint, queue
-plumbing, dedupe, and config flag are all live. The worker-side handler is a
-logging stub — operators can wire ArgoCD up and confirm end-to-end delivery,
-but no Slack post happens yet. Phase 3 lands the failure messages, rollback
-prompt, and dismiss button.</p>
+<p><strong>Phase 3 status (this commit):</strong> receiver webhook + queue plumbing + dedupe
++ worker-side correlation + failure posting are all live. Failure messages
+land top-level in the deploy channel with siren framing, requester ping,
+per-resource detail, and a permalink back to the original deploy. Late-
+arriving notifications (deploy &gt; 2h old) use calmer framing with an
+"investigate before rolling back" note.</p>
+<p><strong>Still deferred to phase 4:</strong> the separate rollback-prompt message with
+[Roll back] and [Dismiss] buttons, and the late-arrival suppression of
+the rollback prompt specifically (the phase-3 status message still
+surfaces, the prompt does not).</p>
 </blockquote>
 <h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>ArgoCD app  ─►  argocd-notifications-controller  ─►  POST /v1/webhooks/argocd
@@ -1100,12 +1127,34 @@ on stream-write errors (the in-memory buffer absorbs them).</p>
 <p>ArgoCD's notification carries the <strong>gitops repo commit SHA</strong>
 (<code>.app.status.operationState.syncResult.revision</code>). deploy-bot persists the
 same SHA on every <code>HistoryEntry</code> (since #47 / phase 1) when it merges a deploy
-PR. The worker matches on that SHA to find the originating deploy and the
-Slack message it posted, so follow-up notifications can post in context.</p>
+PR. The worker matches on that SHA via <code>store.FindHistoryBySHA</code> to find the
+originating deploy and the Slack message it posted, so follow-up
+notifications can post in the right context.</p>
 <p>No annotation or naming convention on the ArgoCD <code>Application</code> is required —
 correlation is purely by SHA. If a notification arrives for a SHA the bot has
-no history entry for (e.g. a deploy made via another tool), it is logged and
-dropped.</p>
+no history entry for (e.g. a deploy made via another tool, or an entry that
+has aged out of the 100-entry retained window), it is logged at info level
+and dropped. The whole value proposition of the handler is "deploy-bot
+knows who deployed what" — without a matching history entry there's nothing
+actionable to say.</p>
+<h3 id="late-arriving-notifications">Late-arriving notifications<a class="headerlink" href="#late-arriving-notifications" title="Permanent link">&para;</a></h3>
+<p>If the matched history entry's <code>CompletedAt</code> is more than <strong>2 hours</strong> ago
+when a <code>sync-failed</code> or <code>health-degraded</code> notification arrives, the handler
+re-frames the message: no siren emojis, no ALL-CAPS banner, and an
+":information_source: <em>This deploy is more than 2 hours old. The current
+failure may not be caused by this deploy — investigate before rolling back.</em>"
+note. The rationale (from the planning discussion): a sync that was healthy
+for hours and then degrades is almost certainly a runtime issue, not a
+bad deploy, and rolling back a hours-old stable deploy is rarely the right
+first response.</p>
+<h3 id="resource-detail">Resource detail<a class="headerlink" href="#resource-detail" title="Permanent link">&para;</a></h3>
+<p>The webhook template includes <code>.app.status.resources</code> as a JSON array in the
+payload. On <code>sync-failed</code> / <code>health-degraded</code> the handler parses this,
+filters to entries with a non-empty non-<code>Healthy</code> <code>healthStatus</code>, and
+renders the first 10 as a bullet list in the alert. Resources with no
+health status (ConfigMaps, Secrets, Services) are filtered out — they
+don't report health and would just be visual noise. Overflow beyond 10
+renders as "<em>…and N more</em>".</p>
 <h3 id="dedupe">Dedupe<a class="headerlink" href="#dedupe" title="Permanent link">&para;</a></h3>
 <p>Each <code>(argocd_app, gitops_sha, trigger)</code> tuple is deduped through a Redis
 <code>SET NX</code> with a 24h TTL. This handles three sources of duplication:</p>
@@ -1214,6 +1263,13 @@ since early v2.x, so the wiring should work on older versions. Confirmation
 against older releases will land once the homelab cluster upgrades.</p>
 <h2 id="future-work">Future work<a class="headerlink" href="#future-work" title="Permanent link">&para;</a></h2>
 <ul>
+<li><strong>Rollback button + Dismiss</strong>: phase 4. A separate top-level message
+  posted alongside the phase-3 status message, carrying the previous
+  known-good tag and a <code>[Roll back]</code> button that opens the standard
+  deploy-approval modal, plus a <code>[Dismiss]</code> button an authorized approver
+  can use to clear the prompt when fixing forward. Late-arriving
+  notifications will post the status message but suppress the rollback
+  prompt — a hours-old deploy is rarely the right thing to roll back.</li>
 <li><strong><code>on-sync-running</code> watchdog</strong>: rather than echoing every "sync started"
   notification (low signal), use the absence of a <code>sync-succeeded</code> within
   N minutes of a merge to detect stuck ArgoCD or unsubscribed apps. Tracked
@@ -1222,7 +1278,6 @@ against older releases will land once the homelab cluster upgrades.</p>
   the original failure when a degraded app self-heals. Requires a custom
   <code>on-app-healthy</code> trigger whose <code>oncePer</code> semantics need empirical
   verification against v3.3.6 — gated on the homelab cluster upgrade.</li>
-<li><strong>Rollback button + Dismiss</strong>: phase 3.</li>
 </ul>
 <h2 id="gotchas">Gotchas<a class="headerlink" href="#gotchas" title="Permanent link">&para;</a></h2>
 <ul>
