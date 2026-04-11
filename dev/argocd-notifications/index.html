@@ -1048,6 +1048,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Gotchas">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-template-per-trigger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One template per trigger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retrywaitmin-retrywaitmax-crash-the-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        retryWaitMin / retryWaitMax crash the controller
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1251,10 +1279,13 @@ Apply it to your <code>argocd</code> namespace alongside the rest of the
 <ul>
 <li>A custom <code>service.webhook.deploybot</code> pointing at the receiver URL with the
   <code>X-Deploybot-Secret</code> header sourced from <code>argocd-notifications-secret</code>.</li>
-<li>A custom <code>template.deploybot-event</code> whose <code>body:</code> renders deploy-bot's
-  expected JSON shape (see below).</li>
-<li>A wiring section showing how to add the new template to each of the four
-  triggers we care about.</li>
+<li>Three custom templates — <code>template.deploybot-sync-succeeded</code>,
+  <code>template.deploybot-sync-failed</code>, and <code>template.deploybot-health-degraded</code>
+  — each of which renders deploy-bot's expected JSON shape with the
+  matching trigger name hardcoded in the body. See the
+  <a href="#one-template-per-trigger">one-template-per-trigger gotcha</a> below for
+  why this is structured as three templates rather than one shared one.</li>
+<li>A wiring section pointing each trigger at its matching template.</li>
 </ul>
 <h3 id="subscribing-an-application">Subscribing an Application<a class="headerlink" href="#subscribing-an-application" title="Permanent link">&para;</a></h3>
 <p>On any <code>Application</code> you want deploy-bot to receive notifications for, add:</p>
@@ -1343,6 +1374,36 @@ against older releases will land once the homelab cluster upgrades.</p>
   so authentication is shared-secret-in-header. Terminate at an internal
   ingress that adds mTLS if you need stronger transport security.</li>
 </ul>
+<h3 id="one-template-per-trigger">One template per trigger<a class="headerlink" href="#one-template-per-trigger" title="Permanent link">&para;</a></h3>
+<p>argocd-notifications does not expose the current trigger name inside a
+template. There is no <code>{{.trigger}}</code>, and <code>{{.context.eventType}}</code> is only
+populated if the operator explicitly defines it under a top-level
+<code>context:</code> key in <code>argocd-notifications-cm</code> (Go templates render a missing
+map key as the literal string <code>&lt;no value&gt;</code>). That literal string slips
+past the receiver's non-empty-trigger check and then fails its
+recognized-trigger gate, so every notification silently drops with
+<code>recognized:false, enqueued:false</code> even though the HTTP hop returns 200.</p>
+<p>The only reliable way to ship the trigger name into the body is to
+hardcode it per template — hence the three distinct <code>template.deploybot-*</code>
+definitions in the reference patch, and the <code>send:</code> list on each trigger
+pointing at exactly one of them. If you find yourself wanting a shared
+template, you'll hit this bug.</p>
+<h3 id="retrywaitmin-retrywaitmax-crash-the-controller"><code>retryWaitMin</code> / <code>retryWaitMax</code> crash the controller<a class="headerlink" href="#retrywaitmin-retrywaitmax-crash-the-controller" title="Permanent link">&para;</a></h3>
+<p>Do not add <code>retryWaitMin</code> / <code>retryWaitMax</code> to the webhook service
+definition, even though the upstream argocd-notifications service
+examples sometimes show them. Those fields are modeled as bare
+<code>time.Duration</code> on <code>WebhookOptions</code>, and the controller decodes the
+service config with stdlib JSON, which refuses to unmarshal <code>"1s"</code> /
+<code>"10s"</code> strings into <code>Duration</code>. The resulting error is fatal for the
+whole controller — not just the misconfigured service — because it
+fires on every api-context fetch:</p>
+<div class="highlight"><pre><span></span><code>Failed to get api: errors getting apis: [json: cannot unmarshal string
+into Go struct field WebhookOptions.retryWaitMax of type time.Duration]
+</code></pre></div>
+<p>…which blocks delivery for every subscribed Application. The reference
+patch sets only <code>retryMax: 3</code> and leaves the wait intervals to the
+controller's internal defaults. This has been reported upstream but is
+not fixed as of Argo CD v3.3.6.</p>
 
 
 
