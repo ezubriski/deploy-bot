@@ -56,6 +56,8 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 		b.handleNudge(ctx, cmd, parts[1])
 	case parts[0] == "rollback" && len(parts) >= 2:
 		b.handleRollback(ctx, cmd, parts[1])
+	case parts[0] == "rollback":
+		b.handleRollbackModal(ctx, cmd)
 	case parts[0] == "apps":
 		b.handleApps(ctx, cmd)
 	case parts[0] == "conflicts":
@@ -510,6 +512,32 @@ func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appNam
 	b.openDeployModal(ctx, cmd, appName, rollbackTag)
 }
 
+// handleRollbackModal opens the deploy modal with environment defaulted to
+// prod so the user can pick an app to roll back. Used when /deploy rollback
+// is invoked without an app argument.
+func (b *Bot) handleRollbackModal(ctx context.Context, cmd slack.SlashCommand) {
+	isMember, _, err := b.validator.IsMember(ctx, cmd.UserID)
+	if err != nil {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to validate permissions: %v", err))
+		return
+	}
+	if !isMember {
+		b.postEphemeralCommand(ctx, cmd, "You are not a member of the authorized team.")
+		return
+	}
+
+	cfg := b.cfg.Load()
+	params := b.buildFilteredModalParams(cfg, "", "prod", "")
+	params.StaleDuration = cfg.StaleDuration().String()
+	params.CommandName = cmd.Command
+
+	modal := buildDeployModal(params)
+	_, err = b.slack.OpenViewContext(ctx, cmd.TriggerID, modal)
+	if err != nil {
+		b.log.Error("open rollback modal", zap.Error(err))
+	}
+}
+
 func (b *Bot) handleTagList(ctx context.Context, cmd slack.SlashCommand, appName string) {
 	if _, ok := b.cfg.Load().AppByName(appName); !ok {
 		b.postEphemeralCommand(ctx, cmd, b.unknownAppMessage(appName))
@@ -626,7 +654,7 @@ App names include the environment suffix (e.g. `+"`myapp-dev`"+`, `+"`myapp-prod
 • `+"`%s tags <app-env> <tag>`"+`  — check if a specific tag exists
 • `+"`%s cancel <pr>`"+`  — cancel your own pending deployment
 • `+"`%s nudge <pr>`"+`  — remind the approver
-• `+"`%s rollback <app-env>`"+`  — deploy the previously merged tag
+• `+"`%s rollback [app-env]`"+`  — deploy the previously merged tag (defaults to prod)
 • `+"`%s help`"+`  — show this message`,
 		cmdName,
 		cmdName, cmdName, cmdName, cmdName, cmdName,
