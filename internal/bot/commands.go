@@ -509,6 +509,15 @@ func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appNam
 		return
 	}
 
+	// If appName isn't a known FullName, try appending "-prod" since
+	// rollback defaults to prod.
+	cfg := b.cfg.Load()
+	if _, found := cfg.AppByName(appName); !found {
+		if _, found := cfg.AppByName(appName + "-prod"); found {
+			appName = appName + "-prod"
+		}
+	}
+
 	entries, err := b.store.GetHistory(ctx, 100)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to fetch history: %v", err))
