@@ -126,6 +126,58 @@ func TestDecode_ECRPushEvent(t *testing.T) {
 	}
 }
 
+func TestDecode_ArgoCDNotificationEvent(t *testing.T) {
+	evt := NewArgoCDNotificationEvent(ArgoCDNotificationEvent{
+		Trigger:         "on-health-degraded",
+		ArgoCDApp:       "myapp-prod",
+		Namespace:       "argocd",
+		RepoURL:         "https://github.com/org/gitops",
+		GitopsCommitSHA: "deadbeefcafe",
+		SyncStatus:      "Synced",
+		HealthStatus:    "Degraded",
+		Phase:           "Succeeded",
+		Message:         "ReplicaSet has timed out progressing",
+		Resources:       []byte(`[{"kind":"Deployment","name":"myapp"}]`),
+		ReceivedAt:      time.Unix(1700000000, 0).UTC(),
+	})
+
+	rdb := newTestClient(t)
+	ctx := context.Background()
+
+	if err := EnqueueArgoCD(ctx, rdb, evt); err != nil {
+		t.Fatalf("enqueue argocd: %v", err)
+	}
+
+	msgs, err := rdb.XRange(ctx, StreamKeyArgoCD, "-", "+").Result()
+	if err != nil || len(msgs) == 0 {
+		t.Fatalf("expected 1 message in argocd stream, got err=%v msgs=%d", err, len(msgs))
+	}
+
+	got, err := decode(msgs[0])
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Type != EventTypeArgoCDNotification {
+		t.Errorf("type = %q, want %q", got.Type, EventTypeArgoCDNotification)
+	}
+	argo, ok := got.Data.(ArgoCDNotificationEvent)
+	if !ok {
+		t.Fatal("Data is not ArgoCDNotificationEvent")
+	}
+	if argo.Trigger != "on-health-degraded" {
+		t.Errorf("trigger = %q", argo.Trigger)
+	}
+	if argo.GitopsCommitSHA != "deadbeefcafe" {
+		t.Errorf("sha = %q", argo.GitopsCommitSHA)
+	}
+	if argo.HealthStatus != "Degraded" {
+		t.Errorf("health = %q", argo.HealthStatus)
+	}
+	if string(argo.Resources) != `[{"kind":"Deployment","name":"myapp"}]` {
+		t.Errorf("resources lost in round trip: %s", string(argo.Resources))
+	}
+}
+
 func TestDecode_UnknownType(t *testing.T) {
 	rdb := newTestClient(t)
 	ctx := context.Background()

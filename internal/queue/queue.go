@@ -19,9 +19,14 @@ const (
 	StreamKeyUser = "user:events"
 	// StreamKeyECR carries ECR push events.
 	StreamKeyECR = "ecr:events"
+	// StreamKeyArgoCD carries ArgoCD lifecycle webhook notifications
+	// (sync-succeeded, sync-failed, health-degraded). Drained at the same
+	// priority tier as ECR — after the user stream — so an interactive
+	// click is never delayed by an inbound ArgoCD burst.
+	StreamKeyArgoCD = "argocd:events"
 
 	// StreamKey is kept for backward compatibility. New code should use
-	// StreamKeyUser or StreamKeyECR.
+	// StreamKeyUser, StreamKeyECR, or StreamKeyArgoCD.
 	StreamKey = StreamKeyUser
 
 	ConsumerGroup = "bot-workers"
@@ -32,8 +37,9 @@ const (
 )
 
 // AllStreams is the list of streams the worker reads from. User stream is
-// listed first so it has priority when both streams have pending messages.
-var AllStreams = []string{StreamKeyUser, StreamKeyECR}
+// listed first so it has priority when both background streams have pending
+// messages; ECR and ArgoCD share the second tier.
+var AllStreams = []string{StreamKeyUser, StreamKeyECR, StreamKeyArgoCD}
 
 // envelope carries the event type alongside the raw JSON payload so the
 // worker can reconstruct the concrete socketmode.Event.Data type.
@@ -112,6 +118,12 @@ func decode(msg redis.XMessage) (socketmode.Event, error) {
 			return socketmode.Event{}, fmt.Errorf("unmarshal app mention event: %w", err)
 		}
 		evt.Data = mention
+	case EventTypeArgoCDNotification:
+		var argo ArgoCDNotificationEvent
+		if err := json.Unmarshal(env.Data, &argo); err != nil {
+			return socketmode.Event{}, fmt.Errorf("unmarshal argocd notification event: %w", err)
+		}
+		evt.Data = argo
 	default:
 		return socketmode.Event{}, fmt.Errorf("unsupported event type: %s", env.Type)
 	}
@@ -191,13 +203,20 @@ func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmod
 		default:
 		}
 
-		// Priority read: drain user stream first, then ECR.
-		// This ensures interactive events (button clicks, modal submits)
-		// are never delayed by an ECR bulk backlog.
+		// Priority read: drain user stream first, then background streams
+		// (ECR and ArgoCD). This ensures interactive events (button clicks,
+		// modal submits) are never delayed by an ECR bulk backlog or an
+		// ArgoCD notification burst.
 		if w.readStream(ctx, StreamKeyUser, handle, nil) {
-			continue // user stream had messages — check it again before ECR
+			continue // user stream had messages — check it again before background streams
 		}
 		w.readStream(ctx, StreamKeyECR, handle, ecrSem)
+		// ArgoCD events are processed sequentially: volume is naturally
+		// low (one notification per app per sync) and the worker-side
+		// handler does its own dedupe + lookups, so unbounded concurrency
+		// would only multiply Redis round trips for no real throughput
+		// gain.
+		w.readStream(ctx, StreamKeyArgoCD, handle, nil)
 	}
 }
 

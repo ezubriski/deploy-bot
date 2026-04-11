@@ -1,0 +1,158 @@
+# Reference patches to wire ArgoCD's notifications controller into deploy-bot.
+#
+# This file is *not* a complete kustomization — it's a per-key reference for
+# the upstream argocd-notifications-cm ConfigMap and argocd-notifications-secret
+# Secret. Apply these keys alongside whatever else you have in those resources;
+# the keys are namespaced under each section so they can be merged in.
+#
+# Tested against Argo CD v3.3.6. The default trigger catalog used here
+# (on-sync-succeeded, on-sync-failed, on-health-degraded, on-sync-running) has
+# been stable since early v2.x.
+#
+# Workflow:
+#   1. Add `service.webhook.deploybot` and `template.deploybot-event` to
+#      argocd-notifications-cm.
+#   2. Add `deploybot-webhook-secret` to argocd-notifications-secret.
+#   3. Wire the four triggers to send the new template alongside any existing
+#      destinations (Slack, email, etc).
+#   4. Annotate the Applications you want deploy-bot to watch.
+#
+# See docs/argocd-notifications.md for the operator guide.
+
+---
+# ──────────────────────────────────────────────────────────────────────────
+# Patch 1 — argocd-notifications-cm
+# Add these keys to the existing ConfigMap.
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  # The receiver URL is the deploy-bot receiver's health-server address.
+  # Inside the cluster this is typically the Service for the receiver Deployment
+  # on port 8080 — adjust namespace/service name to match your install.
+  service.webhook.deploybot: |
+    url: http://deploy-bot-receiver.deploy-bot.svc.cluster.local:8080/v1/webhooks/argocd
+    headers:
+    - name: X-Deploybot-Secret
+      value: $deploybot-webhook-secret
+    - name: Content-Type
+      value: application/json
+    retryMax: 3
+    retryWaitMin: 1s
+    retryWaitMax: 10s
+
+  # The template body is what the receiver actually parses. Field names match
+  # internal/argocd/payload.go in the deploy-bot repo. Unknown fields are
+  # ignored on decode, so you can add diagnostic fields here without breaking
+  # the receiver.
+  #
+  # Notes on the template syntax:
+  #   - The `{{end}}` separator on `resources` is intentional — Go templates
+  #     do not allow trailing commas in JSON, so we emit a comma before each
+  #     element except the first via `{{if $i}},{{end}}`.
+  #   - `?.` style optional chaining is not native to Go templates; we guard
+  #     `.app.status.operationState` and `.app.status.health` checks with
+  #     `if` so a payload missing them does not crash the template engine.
+  template.deploybot-event: |
+    webhook:
+      deploybot:
+        method: POST
+        body: |
+          {
+            "trigger": "{{.context.eventType}}",
+            "argocdApp": "{{.app.metadata.name}}",
+            "namespace": "{{.app.metadata.namespace}}",
+            "repoURL": "{{.app.spec.source.repoURL}}",
+            "revision": "{{.app.status.sync.revision}}",
+            "syncResultRevision": "{{if .app.status.operationState}}{{if .app.status.operationState.syncResult}}{{.app.status.operationState.syncResult.revision}}{{end}}{{end}}",
+            "syncStatus": "{{.app.status.sync.status}}",
+            "healthStatus": "{{.app.status.health.status}}",
+            "phase": "{{if .app.status.operationState}}{{.app.status.operationState.phase}}{{end}}",
+            "message": "{{if .app.status.operationState}}{{.app.status.operationState.message}}{{end}}",
+            "finishedAt": "{{if .app.status.operationState}}{{.app.status.operationState.finishedAt}}{{end}}",
+            "resources": [
+              {{- range $i, $r := .app.status.resources}}
+              {{- if $i}},{{end}}
+              {
+                "kind": "{{$r.kind}}",
+                "name": "{{$r.name}}",
+                "namespace": "{{$r.namespace}}",
+                "syncStatus": "{{$r.status}}",
+                "healthStatus": "{{if $r.health}}{{$r.health.status}}{{end}}",
+                "healthMessage": "{{if $r.health}}{{$r.health.message}}{{end}}"
+              }
+              {{- end}}
+            ]
+          }
+
+  # Wire the new template into each of the four triggers we care about. The
+  # default catalog ships these triggers; if you have other recipients
+  # (Slack, email), preserve them in the `send:` list and add `deploybot-event`.
+  #
+  # If your install uses the upstream notifications_catalog/install.yaml, the
+  # easiest way to apply this is to override the `trigger.on-*` keys entirely
+  # with the blocks below — the only difference from the catalog defaults is
+  # the `send:` list.
+  trigger.on-sync-succeeded: |
+    - description: Application syncing has succeeded
+      oncePer: app.status.operationState?.syncResult?.revision
+      send: [app-sync-succeeded, deploybot-event]
+      when: app.status.operationState != nil and app.status.operationState.phase in ['Succeeded']
+
+  trigger.on-sync-failed: |
+    - description: Application syncing has failed
+      oncePer: app.status.operationState?.syncResult?.revision
+      send: [app-sync-failed, deploybot-event]
+      when: app.status.operationState != nil and app.status.operationState.phase in ['Error', 'Failed']
+
+  trigger.on-health-degraded: |
+    - description: Application has degraded
+      oncePer: app.status.operationState?.syncResult?.revision
+      send: [app-health-degraded, deploybot-event]
+      when: app.status.health.status == 'Degraded'
+
+  # on-sync-running is currently dropped by the receiver (it returns 200 with
+  # enqueued=false). Subscribing is harmless and lets you flip the bot
+  # behaviour later without an ArgoCD-side change. Comment this trigger out
+  # if you want to avoid the wire traffic entirely.
+  trigger.on-sync-running: |
+    - description: Application is being synced
+      oncePer: app.status.operationState?.syncResult?.revision
+      send: [app-sync-running, deploybot-event]
+      when: app.status.operationState != nil and app.status.operationState.phase in ['Running']
+---
+# ──────────────────────────────────────────────────────────────────────────
+# Patch 2 — argocd-notifications-secret
+# The shared secret. MUST match `argocd_webhook_api_key` in the deploy-bot
+# receiver's secrets, and MUST be at least 32 characters long.
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-notifications-secret
+  namespace: argocd
+type: Opaque
+stringData:
+  deploybot-webhook-secret: REPLACE_ME_WITH_A_32_PLUS_CHARACTER_SHARED_SECRET
+---
+# ──────────────────────────────────────────────────────────────────────────
+# Patch 3 — example Application annotations
+# Apply these annotations to any Argo CD Application you want deploy-bot to
+# receive notifications for. The `deploybot` segment matches
+# service.webhook.deploybot above. No deploy-bot–specific annotations are
+# required — correlation back to a deploy-bot history entry is purely by
+# the gitops repo commit SHA.
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: myapp-prod
+  namespace: argocd
+  annotations:
+    notifications.argoproj.io/subscribe.on-sync-succeeded.deploybot: ""
+    notifications.argoproj.io/subscribe.on-sync-failed.deploybot: ""
+    notifications.argoproj.io/subscribe.on-health-degraded.deploybot: ""
+spec: {} # … your existing spec …

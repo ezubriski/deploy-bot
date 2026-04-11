@@ -27,8 +27,14 @@ type Config struct {
 	Deployment        DeploymentConfig    `json:"deployment"`
 	AWS               AWSConfig           `json:"aws"`
 	ECRAutoDeploy     ECRAutoDeployConfig `json:"ecr_auto_deploy,omitempty"`
-	RepoDiscovery     RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
-	Apps              []AppConfig         `json:"apps"`
+	// ArgoCDNotifications gates the optional inbound webhook endpoint that
+	// receives lifecycle notifications from the argocd-notifications
+	// controller (sync-succeeded, sync-failed, health-degraded). When
+	// disabled, the receiver mounts no handler and consumes no Redis
+	// stream, so existing deployments are unaffected.
+	ArgoCDNotifications ArgoCDNotificationsConfig `json:"argocd_notifications,omitempty"`
+	RepoDiscovery       RepoDiscoveryConfig       `json:"repo_discovery,omitempty"`
+	Apps                []AppConfig               `json:"apps"`
 	// LogLevel sets the minimum severity emitted by zap. Valid values are
 	// "debug", "info", "warn", "error". Defaults to "info" when empty. The
 	// LOG_LEVEL environment variable, if set on the bot/receiver process,
@@ -172,6 +178,20 @@ type ECRAutoDeployConfig struct {
 	SQSQueueURL    string `json:"sqs_queue_url,omitempty"`
 	PollInterval   string `json:"poll_interval,omitempty"`
 	WebhookEnabled bool   `json:"webhook_enabled,omitempty"`
+}
+
+// ArgoCDNotificationsConfig holds settings for the optional inbound ArgoCD
+// notifications webhook endpoint. When Enabled is false (the default), the
+// receiver mounts nothing and consumes no Redis stream — bot/receiver
+// behavior is unchanged from a standard install.
+//
+// The receiver expects the argocd-notifications-controller webhook service
+// to POST a JSON body matching internal/argocd.WebhookPayload to
+// /v1/webhooks/argocd, with the shared secret in the X-Deploybot-Secret
+// header. See deploy/argocd-notifications/templates.yaml for the
+// reference ConfigMap patch.
+type ArgoCDNotificationsConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // PollIntervalDuration returns the parsed poll interval, defaulting to 30s.
@@ -363,6 +383,10 @@ type Secrets struct {
 	RedisUserID             string `json:"redis_user_id,omitempty"`
 	RedisReplicationGroupID string `json:"redis_replication_group_id,omitempty"`
 	ECRWebhookAPIKey        string `json:"ecr_webhook_api_key,omitempty"`
+	// ArgoCDWebhookAPIKey is the shared secret expected in the
+	// X-Deploybot-Secret header on inbound ArgoCD notification webhooks.
+	// Required (>= 32 chars) when ArgoCDNotifications.Enabled is true.
+	ArgoCDWebhookAPIKey string `json:"argocd_webhook_api_key,omitempty"`
 }
 
 // UseGitHubApp returns true if GitHub App credentials are configured.

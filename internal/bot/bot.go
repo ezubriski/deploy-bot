@@ -110,6 +110,13 @@ func (b *Bot) HandleEvent(ctx context.Context, evt socketmode.Event) {
 			return
 		}
 		b.handleMention(ctx, mention)
+	case queue.EventTypeArgoCDNotification:
+		argo, ok := evt.Data.(queue.ArgoCDNotificationEvent)
+		if !ok {
+			b.log.Error("bot: argocd_notification event has unexpected data type")
+			return
+		}
+		b.handleArgoCDNotification(ctx, argo)
 	default:
 		b.log.Warn("bot: unhandled event type", zap.String("type", string(evt.Type)))
 	}
