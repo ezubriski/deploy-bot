@@ -95,6 +95,19 @@ data "aws_iam_policy_document" "receiver" {
     }
   }
 
+  # Read-only ECR access so the receiver can validate manual-tag overrides
+  # inline on deploy modal submissions (mirror of the bot role's ReadECR).
+  statement {
+    sid = "ReadECR"
+    actions = [
+      "ecr:GetAuthorizationToken",
+      "ecr:DescribeImages",
+      "ecr:BatchGetImage",
+      "ecr:ListImages",
+    ]
+    resources = ["*"]
+  }
+
   dynamic "statement" {
     for_each = local.elasticache_iam ? [1] : []
     content {

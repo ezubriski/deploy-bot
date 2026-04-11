@@ -2,6 +2,8 @@ bin/
 .terraform/
 .terraform.lock.hcl
 /bot
+/receiver
+/deploy-bot-config
 tests/integration/testdata/config.json
 tests/integration/cpu.prof
 .env.integration

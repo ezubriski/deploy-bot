@@ -27,13 +27,20 @@ const (
 	maxRecentTags   = 5
 )
 
+// TagWithTime pairs a tag string with its ECR push timestamp.
+type TagWithTime struct {
+	Tag      string
+	PushedAt time.Time
+}
+
 type appCache struct {
-	mu         sync.RWMutex
-	tags       []string // sorted newest first
-	newestPush time.Time
-	pattern    *regexp.Regexp
-	repoName   string
-	registryID string
+	mu           sync.RWMutex
+	tags         []string      // sorted newest first
+	tagsWithTime []TagWithTime // sorted newest first, parallel to tags
+	newestPush   time.Time
+	pattern      *regexp.Regexp
+	repoName     string
+	registryID   string
 }
 
 // repoTag is a tag with its push timestamp, stored unfiltered in Redis.
@@ -160,9 +167,10 @@ func (c *Cache) Populate(ctx context.Context) {
 		sample := group.apps[0].ac
 		if repoTags, _, ok := c.readRepoTagsFromRedis(ctx, sample); ok {
 			for _, entry := range group.apps {
-				filtered, newest := filterRepoTags(repoTags, entry.ac)
+				filtered, withTime, newest := filterRepoTags(repoTags, entry.ac)
 				entry.ac.mu.Lock()
 				entry.ac.tags = filtered
+				entry.ac.tagsWithTime = withTime
 				entry.ac.newestPush = newest
 				entry.ac.mu.Unlock()
 				c.log.Debug("ecr cache loaded from redis", zap.String("app", entry.name), zap.Int("tags", len(filtered)))
@@ -195,9 +203,10 @@ func (c *Cache) Populate(ctx context.Context) {
 				c.writeRepoTagsToRedis(ctx, g.apps[0].ac, allRepoTags, allRepoTags[0].PushedAt)
 			}
 			for _, entry := range g.apps {
-				filtered, newest := filterRepoTags(allRepoTags, entry.ac)
+				filtered, withTime, newest := filterRepoTags(allRepoTags, entry.ac)
 				entry.ac.mu.Lock()
 				entry.ac.tags = filtered
+				entry.ac.tagsWithTime = withTime
 				entry.ac.newestPush = newest
 				entry.ac.mu.Unlock()
 				c.metrics.ObserveECRRefresh(entry.name, time.Since(start))
@@ -292,12 +301,13 @@ func (c *Cache) refresh(ctx context.Context, appName string, ac *appCache) error
 	}
 
 	allRepoTags := imagesToRepoTags(images)
-	filteredTags, newest := filterRepoTags(allRepoTags, ac)
+	filteredTags, withTime, newest := filterRepoTags(allRepoTags, ac)
 
 	ac.mu.Lock()
 	previousNewest := ac.newestPush
 	if newest.After(previousNewest) || len(ac.tags) == 0 {
 		ac.tags = filteredTags
+		ac.tagsWithTime = withTime
 		ac.newestPush = newest
 	}
 	ac.mu.Unlock()
@@ -339,18 +349,23 @@ func (c *Cache) readRepoTagsFromRedis(ctx context.Context, ac *appCache) ([]repo
 
 // filterRepoTags applies the app's tag pattern to unfiltered repo tags,
 // returning matched tags sorted newest-first.
-func filterRepoTags(tags []repoTag, ac *appCache) ([]string, time.Time) {
+func filterRepoTags(tags []repoTag, ac *appCache) ([]string, []TagWithTime, time.Time) {
 	var filtered []string
+	var withTime []TagWithTime
 	var newest time.Time
 	for _, t := range tags {
 		if ac.pattern.MatchString(t.Tag) {
 			filtered = append(filtered, t.Tag)
+			// Direct conversion: repoTag and TagWithTime have identical
+			// fields. If either struct gains a field, this will fail to
+			// compile, forcing the mismatch to be addressed explicitly.
+			withTime = append(withTime, TagWithTime(t))
 			if t.PushedAt.After(newest) {
 				newest = t.PushedAt
 			}
 		}
 	}
-	return filtered, newest
+	return filtered, withTime, newest
 }
 
 // Tags returns up to limit of the most recent tags for an app.
@@ -388,6 +403,26 @@ func (c *Cache) RecentTags(appName string) []string {
 	}
 	out := make([]string, n)
 	copy(out, ac.tags[:n])
+	return out
+}
+
+// RecentTagsWithTime returns up to 5 most recent tags with their push
+// timestamps for an app.
+func (c *Cache) RecentTagsWithTime(appName string) []TagWithTime {
+	c.mu.RLock()
+	ac, ok := c.apps[appName]
+	c.mu.RUnlock()
+	if !ok {
+		return nil
+	}
+	ac.mu.RLock()
+	defer ac.mu.RUnlock()
+	n := len(ac.tagsWithTime)
+	if n > maxRecentTags {
+		n = maxRecentTags
+	}
+	out := make([]TagWithTime, n)
+	copy(out, ac.tagsWithTime[:n])
 	return out
 }
 

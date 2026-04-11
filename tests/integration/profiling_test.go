@@ -163,8 +163,15 @@ func resetAppStateFor(t *testing.T, app string) {
 }
 
 // injectDeployRequestFor enqueues a deploy request for a specific app and tag.
+// app is a FullName (e.g. "myapp-dev").
 func injectDeployRequestFor(t *testing.T, app, tag, reason string) {
 	t.Helper()
+	appCfg, ok := env.cfg.AppByName(app)
+	baseName, appEnv := app, ""
+	if ok {
+		baseName = appCfg.App
+		appEnv = appCfg.Environment
+	}
 	evt := socketmode.Event{
 		Type: socketmode.EventTypeInteractive,
 		Data: slack.InteractionCallback{
@@ -173,8 +180,11 @@ func injectDeployRequestFor(t *testing.T, app, tag, reason string) {
 				CallbackID: bot.ModalCallbackDeploy,
 				State: &slack.ViewState{
 					Values: map[string]map[string]slack.BlockAction{
-						bot.BlockApp: {
-							bot.ActionApp: {SelectedOption: slack.OptionBlockObject{Value: app}},
+						bot.BlockAppName: {
+							bot.ActionAppName: {SelectedOption: slack.OptionBlockObject{Value: baseName}},
+						},
+						bot.BlockEnv: {
+							bot.ActionEnv: {SelectedOption: slack.OptionBlockObject{Value: appEnv}},
 						},
 						bot.BlockTag: {
 							bot.ActionTag: {SelectedOption: slack.OptionBlockObject{}},

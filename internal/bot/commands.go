@@ -27,7 +27,7 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 
 	switch {
 	case len(parts) == 0:
-		b.openDeployModal(ctx, cmd, "", "")
+		b.openDeployModal(ctx, cmd, "", "", false)
 	case parts[0] == "list" || parts[0] == "status":
 		envFilter := ""
 		appFilter := ""
@@ -56,6 +56,8 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 		b.handleNudge(ctx, cmd, parts[1])
 	case parts[0] == "rollback" && len(parts) >= 2:
 		b.handleRollback(ctx, cmd, parts[1])
+	case parts[0] == "rollback":
+		b.handleRollbackModal(ctx, cmd)
 	case parts[0] == "apps":
 		b.handleApps(ctx, cmd)
 	case parts[0] == "conflicts":
@@ -64,11 +66,11 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 		b.handleSlashHelp(ctx, cmd)
 	default:
 		// Treat first arg as app name
-		b.openDeployModal(ctx, cmd, parts[0], "")
+		b.openDeployModal(ctx, cmd, parts[0], "", false)
 	}
 }
 
-func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSelectedApp, preSelectedTag string) {
+func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSelectedApp, preSelectedTag string, isRollback bool) {
 	// Validate deployer
 	isMember, _, err := b.validator.IsMember(ctx, cmd.UserID)
 	if err != nil {
@@ -80,38 +82,143 @@ func (b *Bot) openDeployModal(ctx context.Context, cmd slack.SlashCommand, preSe
 		return
 	}
 
-	staleDuration := b.cfg.Load().StaleDuration()
+	cfg := b.cfg.Load()
+	staleDuration := cfg.StaleDuration()
 
-	// Build app options
-	var appOptions []*slack.OptionBlockObject
-	for _, app := range b.cfg.Load().Apps {
-		appOptions = append(appOptions, slack.NewOptionBlockObject(
-			app.FullName(),
-			slack.NewTextBlockObject("plain_text", app.FullName(), false, false),
-			nil,
-		))
+	// Parse pre-selected app (FullName like "nginx-01-dev") into components.
+	var selectedApp, selectedEnv string
+	if preSelectedApp != "" {
+		if appCfg, ok := cfg.AppByName(preSelectedApp); ok {
+			selectedApp = appCfg.App
+			selectedEnv = appCfg.Environment
+		}
 	}
 
-	// Build tag options for first app (or pre-selected)
-	tagApp := preSelectedApp
-	if tagApp == "" && len(b.cfg.Load().Apps) > 0 {
-		tagApp = b.cfg.Load().Apps[0].FullName()
-	}
-	tags := b.ecrCache.RecentTags(tagApp)
-	var tagOptions []*slack.OptionBlockObject
-	for _, t := range tags {
-		tagOptions = append(tagOptions, slack.NewOptionBlockObject(
-			t,
-			slack.NewTextBlockObject("plain_text", t, false, false),
-			nil,
-		))
-	}
+	params := b.buildFilteredModalParams(ctx, cfg, selectedApp, selectedEnv, preSelectedTag, isRollback)
+	params.StaleDuration = staleDuration.String()
+	params.CommandName = cmd.Command
 
-	modal := buildDeployModal(appOptions, tagOptions, preSelectedApp, preSelectedTag, staleDuration.String(), cmd.Command)
+	modal := buildDeployModal(params)
 	_, err = b.slack.OpenViewContext(ctx, cmd.TriggerID, modal)
 	if err != nil {
 		b.log.Error("open deploy modal", zap.Error(err))
 	}
+}
+
+// buildFilteredModalParams builds DeployModalParams with bidirectional
+// filtering between app name and environment. If selectedApp is set, only
+// environments where that app exists are offered. If selectedEnv is set, only
+// apps available in that environment are offered. Tags are only populated when
+// both are selected.
+func (b *Bot) buildFilteredModalParams(ctx context.Context, cfg *config.Config, selectedApp, selectedEnv, preSelectedTag string, isRollback bool) DeployModalParams {
+	// Determine filtered option lists.
+	var appNames, envNames []string
+	if selectedEnv != "" {
+		appNames = cfg.AppsForEnvironment(selectedEnv)
+	} else {
+		appNames = cfg.UniqueAppNames()
+	}
+	if selectedApp != "" {
+		envNames = cfg.EnvironmentsForApp(selectedApp)
+	} else {
+		envNames = cfg.UniqueEnvironments()
+	}
+
+	appOptions := make([]*slack.OptionBlockObject, len(appNames))
+	for i, name := range appNames {
+		appOptions[i] = slack.NewOptionBlockObject(
+			name,
+			slack.NewTextBlockObject("plain_text", name, false, false),
+			nil,
+		)
+	}
+	envOptions := make([]*slack.OptionBlockObject, len(envNames))
+	for i, env := range envNames {
+		envOptions[i] = slack.NewOptionBlockObject(
+			env,
+			slack.NewTextBlockObject("plain_text", env, false, false),
+			nil,
+		)
+	}
+
+	params := DeployModalParams{
+		AppNameOptions: appOptions,
+		EnvOptions:     envOptions,
+		SelectedApp:    selectedApp,
+		SelectedEnv:    selectedEnv,
+		SelectedTag:    preSelectedTag,
+		IsRollback:     isRollback,
+		HideManualTag:  isRollback,
+	}
+
+	ecrTagOptions := func(fullName string) []*slack.OptionBlockObject {
+		var opts []*slack.OptionBlockObject
+		for _, t := range b.ecrCache.RecentTagsWithTime(fullName) {
+			label := fmt.Sprintf("%s (published %s)", t.Tag, t.PushedAt.UTC().Format("Jan 2 15:04 MST"))
+			opts = append(opts, slack.NewOptionBlockObject(
+				t.Tag,
+				slack.NewTextBlockObject("plain_text", label, false, false),
+				nil,
+			))
+		}
+		return opts
+	}
+
+	// Only fetch tags when both app and env are selected.
+	if selectedApp != "" && selectedEnv != "" {
+		fullName := selectedApp + "-" + selectedEnv
+
+		if isRollback {
+			// Rollback: source tags from deployment history with deployed dates.
+			entries, histErr := b.store.GetHistory(ctx, 100)
+			cur, prev, ok := findRollbackEntries(entries, fullName)
+			if histErr == nil && ok {
+				params.RollbackCurrent = cur.Tag
+				params.RollbackCurrentDate = cur.CompletedAt
+				params.RollbackTarget = prev.Tag
+				params.RollbackTargetDate = prev.CompletedAt
+				params.ExcludeTag = cur.Tag
+				if preSelectedTag == "" {
+					params.SelectedTag = prev.Tag
+				}
+				// Build tag options from all unique approved deploys.
+				seen := map[string]bool{}
+				for _, e := range entries {
+					if e.App == fullName && e.EventType == "approved" && !seen[e.Tag] {
+						seen[e.Tag] = true
+						label := fmt.Sprintf("%s (deployed %s)", e.Tag, e.CompletedAt.UTC().Format("Jan 2 15:04 MST"))
+						params.TagOptions = append(params.TagOptions, slack.NewOptionBlockObject(
+							e.Tag,
+							slack.NewTextBlockObject("plain_text", label, false, false),
+							nil,
+						))
+					}
+				}
+			} else {
+				// Not enough history to suggest a rollback target. Fall back to
+				// ECR-sourced tags and let the user pick or manually enter one.
+				params.HideManualTag = false
+				params.TagOptions = ecrTagOptions(fullName)
+				switch {
+				case histErr != nil:
+					params.RollbackNote = fmt.Sprintf(
+						":warning: Couldn't load deploy history for *%s*. Pick a tag from ECR or enter one manually.",
+						fullName,
+					)
+				default:
+					params.RollbackNote = fmt.Sprintf(
+						":information_source: No prior deploys recorded for *%s* — can't auto-suggest a rollback target. Pick a tag from ECR or enter one manually.",
+						fullName,
+					)
+				}
+			}
+		} else {
+			// Regular deploy: source tags from ECR cache with published dates.
+			params.TagOptions = ecrTagOptions(fullName)
+		}
+	}
+
+	return params
 }
 
 // handleStatus lists pending deployments, optionally filtered by environment
@@ -386,20 +493,29 @@ func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilt
 	b.postEphemeralCommand(ctx, cmd, header+"\n"+strings.Join(lines, "\n"))
 }
 
-// findRollbackTag scans entries (newest-first) for the two most recent approved
-// deploys of appName. It returns (currentTag, previousTag, true) when found,
-// and ("", "", false) when fewer than two approved entries exist.
-func findRollbackTag(entries []store.HistoryEntry, appName string) (current, previous string, ok bool) {
+// findRollbackEntries scans entries (newest-first) for the two most recent
+// approved deploys of appName. It returns (current, previous, true) when found,
+// and (zero, zero, false) when fewer than two approved entries exist.
+func findRollbackEntries(entries []store.HistoryEntry, appName string) (current, previous store.HistoryEntry, ok bool) {
 	var approved []store.HistoryEntry
 	for _, e := range entries {
 		if e.App == appName && e.EventType == "approved" {
 			approved = append(approved, e)
 			if len(approved) == 2 {
-				return approved[0].Tag, approved[1].Tag, true
+				return approved[0], approved[1], true
 			}
 		}
 	}
-	return "", "", false
+	return store.HistoryEntry{}, store.HistoryEntry{}, false
+}
+
+// findRollbackTag is a tag-only wrapper around findRollbackEntries.
+func findRollbackTag(entries []store.HistoryEntry, appName string) (current, previous string, ok bool) {
+	cur, prev, ok := findRollbackEntries(entries, appName)
+	if !ok {
+		return "", "", false
+	}
+	return cur.Tag, prev.Tag, true
 }
 
 func eventIcon(eventType string) string {
@@ -426,6 +542,15 @@ func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appNam
 	if !isMember {
 		b.postEphemeralCommand(ctx, cmd, "You are not a member of the authorized team.")
 		return
+	}
+
+	// If appName isn't a known FullName, try appending "-prod" since
+	// rollback defaults to prod.
+	cfg := b.cfg.Load()
+	if _, found := cfg.AppByName(appName); !found {
+		if _, found := cfg.AppByName(appName + "-prod"); found {
+			appName = appName + "-prod"
+		}
 	}
 
 	entries, err := b.store.GetHistory(ctx, 100)
@@ -459,7 +584,33 @@ func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appNam
 		":rewind: Rolling back *%s* from `%s` to `%s`. Opening deploy modal…",
 		appName, current, rollbackTag,
 	))
-	b.openDeployModal(ctx, cmd, appName, rollbackTag)
+	b.openDeployModal(ctx, cmd, appName, rollbackTag, true)
+}
+
+// handleRollbackModal opens the deploy modal with environment defaulted to
+// prod so the user can pick an app to roll back. Used when /deploy rollback
+// is invoked without an app argument.
+func (b *Bot) handleRollbackModal(ctx context.Context, cmd slack.SlashCommand) {
+	isMember, _, err := b.validator.IsMember(ctx, cmd.UserID)
+	if err != nil {
+		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to validate permissions: %v", err))
+		return
+	}
+	if !isMember {
+		b.postEphemeralCommand(ctx, cmd, "You are not a member of the authorized team.")
+		return
+	}
+
+	cfg := b.cfg.Load()
+	params := b.buildFilteredModalParams(ctx, cfg, "", "prod", "", true)
+	params.StaleDuration = cfg.StaleDuration().String()
+	params.CommandName = cmd.Command
+
+	modal := buildDeployModal(params)
+	_, err = b.slack.OpenViewContext(ctx, cmd.TriggerID, modal)
+	if err != nil {
+		b.log.Error("open rollback modal", zap.Error(err))
+	}
 }
 
 func (b *Bot) handleTagList(ctx context.Context, cmd slack.SlashCommand, appName string) {
@@ -578,7 +729,7 @@ App names include the environment suffix (e.g. `+"`myapp-dev`"+`, `+"`myapp-prod
 • `+"`%s tags <app-env> <tag>`"+`  — check if a specific tag exists
 • `+"`%s cancel <pr>`"+`  — cancel your own pending deployment
 • `+"`%s nudge <pr>`"+`  — remind the approver
-• `+"`%s rollback <app-env>`"+`  — deploy the previously merged tag
+• `+"`%s rollback [app-env]`"+`  — deploy the previously merged tag (defaults to prod)
 • `+"`%s help`"+`  — show this message`,
 		cmdName,
 		cmdName, cmdName, cmdName, cmdName, cmdName,

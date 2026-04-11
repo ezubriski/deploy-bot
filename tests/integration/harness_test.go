@@ -48,7 +48,8 @@ type testEnv struct {
 	requesterID       string
 	requesterUsername string
 	approverID        string
-	app               string
+	app               string // FullName (e.g. "myapp-dev")
+	appBaseName       string // base name (e.g. "myapp")
 	environment       string
 	// tag is any valid ECR tag used by tests that only need ECR validation
 	// (e.g. TestValidateTag_CacheMiss). Deployment tests call pickTagFor instead.
@@ -174,6 +175,7 @@ func TestMain(m *testing.M) {
 		requesterUsername: requesterUsername,
 		approverID:        approverID,
 		app:               app,
+		appBaseName:       appCfg.App,
 		environment:       appCfg.Environment,
 		tag:               tagPool[len(tagPool)-1], // any valid ECR tag; deploy tests use pickTagFor
 		defaultBranch:     defaultBranch,
@@ -373,8 +375,11 @@ func injectDeployRequestWithTag(t *testing.T, tag, reason string) {
 				CallbackID: bot.ModalCallbackDeploy,
 				State: &slack.ViewState{
 					Values: map[string]map[string]slack.BlockAction{
-						bot.BlockApp: {
-							bot.ActionApp: {SelectedOption: slack.OptionBlockObject{Value: env.app}},
+						bot.BlockAppName: {
+							bot.ActionAppName: {SelectedOption: slack.OptionBlockObject{Value: env.appBaseName}},
+						},
+						bot.BlockEnv: {
+							bot.ActionEnv: {SelectedOption: slack.OptionBlockObject{Value: env.environment}},
 						},
 						bot.BlockTag: {
 							bot.ActionTag: {SelectedOption: slack.OptionBlockObject{}},

@@ -48,6 +48,7 @@ type deployValidator interface {
 type tagCache interface {
 	ValidateTag(ctx context.Context, app, tag string) (bool, error)
 	RecentTags(app string) []string
+	RecentTagsWithTime(app string) []ecr.TagWithTime
 	Tags(app string, n int) []string
 }
 

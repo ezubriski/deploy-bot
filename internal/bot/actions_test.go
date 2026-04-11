@@ -16,6 +16,7 @@ import (
 
 	"github.com/ezubriski/deploy-bot/internal/audit"
 	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/ecr"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/store"
@@ -98,6 +99,7 @@ type stubECR struct{}
 
 func (stubECR) ValidateTag(_ context.Context, _, _ string) (bool, error) { return true, nil }
 func (stubECR) RecentTags(_ string) []string                             { return nil }
+func (stubECR) RecentTagsWithTime(_ string) []ecr.TagWithTime            { return nil }
 func (stubECR) Tags(_ string, _ int) []string                            { return nil }
 
 // captureSlack records channels that receive PostMessageContext calls.
@@ -119,6 +121,9 @@ func (c *captureSlack) UpdateMessageContext(_ context.Context, _, _ string, _ ..
 	return "", "", "", nil
 }
 func (c *captureSlack) OpenViewContext(_ context.Context, _ string, _ slack.ModalViewRequest) (*slack.ViewResponse, error) {
+	return nil, nil
+}
+func (c *captureSlack) UpdateViewContext(_ context.Context, _ slack.ModalViewRequest, _, _, _ string) (*slack.ViewResponse, error) {
 	return nil, nil
 }
 
@@ -315,7 +320,8 @@ func deploySubmitCallback() slack.InteractionCallback {
 			CallbackID: ModalCallbackDeploy,
 			State: &slack.ViewState{
 				Values: map[string]map[string]slack.BlockAction{
-					BlockApp:       {ActionApp: {SelectedOption: slack.OptionBlockObject{Value: "myapp-prod"}}},
+					BlockAppName:   {ActionAppName: {SelectedOption: slack.OptionBlockObject{Value: "myapp"}}},
+					BlockEnv:       {ActionEnv: {SelectedOption: slack.OptionBlockObject{Value: "prod"}}},
 					BlockTag:       {ActionTag: {SelectedOption: slack.OptionBlockObject{}}},
 					BlockTagManual: {ActionTagManual: {Value: "v2.0.0"}},
 					BlockReason:    {ActionReason: {Value: "test"}},

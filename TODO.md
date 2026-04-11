@@ -29,6 +29,26 @@ release; they're tracked here so they don't get lost.
   zap and optionally S3. The S3 path adds latency to the user-visible deploy
   flow. Consider a buffered channel + background flusher with bounded retries.
 
+- [ ] **Collapse `appCache.tags` / `tagsWithTime` parallel slices.** The ECR
+  cache currently stores filtered tags twice on `appCache`: once as
+  `[]string` (`tags`) and once as `[]TagWithTime` (`tagsWithTime`), kept in
+  lockstep by `filterRepoTags` and the two `Populate`/`refresh` write
+  sites. Drop `tags` and derive it on demand from `tagsWithTime` (or
+  rewrite `RecentTags`/`Tags` to read from the richer slice). Removes a
+  drift hazard introduced by the tag-timestamp commit.
+
+- [ ] **Disable self-approval by default.** Self-approval (requester == approver)
+  should be disabled by default; it's useful for testing but questionable in
+  production. When disabled: (1) filter the requesting user out of the approver
+  dropdown in the deploy modal, (2) if a user submits themselves as approver via
+  slash command or other interface, respond with a message explaining why the
+  request won't be fulfilled. Add a config flag (e.g.
+  `deployment.allow_self_approval`, default `false`) so it can be enabled for
+  test environments. Defense in depth: the worker's `handleApprove` path should
+  also reject self-approvals (requester ID == approver ID on the pending deploy)
+  with an error log and a message to the deploy channel, in case the UI-level
+  guards are bypassed or a request is crafted outside the modal.
+
 ## Open questions
 
 - Should `allow_prod_auto_deploy` move from a global guard to a per-app

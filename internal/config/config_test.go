@@ -590,3 +590,107 @@ func TestEffectiveAutoDeploy(t *testing.T) {
 		}
 	})
 }
+
+func multiEnvConfig() *Config {
+	return &Config{
+		Apps: []AppConfig{
+			{App: "nginx", Environment: "dev"},
+			{App: "nginx", Environment: "prod"},
+			{App: "api", Environment: "dev"},
+			{App: "api", Environment: "stage"},
+			{App: "api", Environment: "prod"},
+		},
+	}
+}
+
+func TestUniqueAppNames(t *testing.T) {
+	cfg := multiEnvConfig()
+	got := cfg.UniqueAppNames()
+	want := []string{"api", "nginx"}
+	if len(got) != len(want) {
+		t.Fatalf("UniqueAppNames() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("UniqueAppNames()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestUniqueEnvironments(t *testing.T) {
+	cfg := multiEnvConfig()
+	got := cfg.UniqueEnvironments()
+	want := []string{"dev", "prod", "stage"}
+	if len(got) != len(want) {
+		t.Fatalf("UniqueEnvironments() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("UniqueEnvironments()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestEnvironmentsForApp(t *testing.T) {
+	cfg := multiEnvConfig()
+
+	got := cfg.EnvironmentsForApp("api")
+	want := []string{"dev", "prod", "stage"}
+	if len(got) != len(want) {
+		t.Fatalf("EnvironmentsForApp(api) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	got = cfg.EnvironmentsForApp("nginx")
+	want = []string{"dev", "prod"}
+	if len(got) != len(want) {
+		t.Fatalf("EnvironmentsForApp(nginx) = %v, want %v", got, want)
+	}
+
+	got = cfg.EnvironmentsForApp("nonexistent")
+	if len(got) != 0 {
+		t.Errorf("EnvironmentsForApp(nonexistent) = %v, want empty", got)
+	}
+}
+
+func TestAppsForEnvironment(t *testing.T) {
+	cfg := multiEnvConfig()
+
+	got := cfg.AppsForEnvironment("dev")
+	want := []string{"api", "nginx"}
+	if len(got) != len(want) {
+		t.Fatalf("AppsForEnvironment(dev) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	got = cfg.AppsForEnvironment("stage")
+	want = []string{"api"}
+	if len(got) != len(want) {
+		t.Fatalf("AppsForEnvironment(stage) = %v, want %v", got, want)
+	}
+}
+
+func TestAppByComponents(t *testing.T) {
+	cfg := multiEnvConfig()
+
+	app, ok := cfg.AppByComponents("nginx", "dev")
+	if !ok {
+		t.Fatal("expected to find nginx/dev")
+	}
+	if app.App != "nginx" || app.Environment != "dev" {
+		t.Errorf("got %s/%s, want nginx/dev", app.App, app.Environment)
+	}
+
+	_, ok = cfg.AppByComponents("nginx", "stage")
+	if ok {
+		t.Error("expected nginx/stage to not exist")
+	}
+}

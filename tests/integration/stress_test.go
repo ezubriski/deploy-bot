@@ -19,8 +19,15 @@ import (
 
 // buildDeployEvent constructs a deploy modal submission event without
 // enqueuing it. Useful for concurrent enqueue scenarios where t.Fatalf
-// cannot be called from a goroutine.
+// cannot be called from a goroutine. app is a FullName (e.g. "myapp-dev");
+// it is split into base name and environment via the test config.
 func buildDeployEvent(app, tag, reason string) socketmode.Event {
+	appCfg, ok := env.cfg.AppByName(app)
+	baseName, appEnv := app, ""
+	if ok {
+		baseName = appCfg.App
+		appEnv = appCfg.Environment
+	}
 	return socketmode.Event{
 		Type: socketmode.EventTypeInteractive,
 		Data: slack.InteractionCallback{
@@ -29,8 +36,11 @@ func buildDeployEvent(app, tag, reason string) socketmode.Event {
 				CallbackID: bot.ModalCallbackDeploy,
 				State: &slack.ViewState{
 					Values: map[string]map[string]slack.BlockAction{
-						bot.BlockApp: {
-							bot.ActionApp: {SelectedOption: slack.OptionBlockObject{Value: app}},
+						bot.BlockAppName: {
+							bot.ActionAppName: {SelectedOption: slack.OptionBlockObject{Value: baseName}},
+						},
+						bot.BlockEnv: {
+							bot.ActionEnv: {SelectedOption: slack.OptionBlockObject{Value: appEnv}},
 						},
 						bot.BlockTag: {
 							bot.ActionTag: {SelectedOption: slack.OptionBlockObject{}},

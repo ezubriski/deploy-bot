@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -702,4 +703,70 @@ func (c *Config) AppsByECRRepo(repoName string) []*AppConfig {
 		}
 	}
 	return matches
+}
+
+// UniqueAppNames returns deduplicated, sorted base app names across all
+// configured apps.
+func (c *Config) UniqueAppNames() []string {
+	seen := map[string]bool{}
+	for _, app := range c.Apps {
+		seen[app.App] = true
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// UniqueEnvironments returns deduplicated, sorted environment names across all
+// configured apps.
+func (c *Config) UniqueEnvironments() []string {
+	seen := map[string]bool{}
+	for _, app := range c.Apps {
+		seen[app.Environment] = true
+	}
+	envs := make([]string, 0, len(seen))
+	for env := range seen {
+		envs = append(envs, env)
+	}
+	sort.Strings(envs)
+	return envs
+}
+
+// EnvironmentsForApp returns the sorted environments where the given base app
+// name is configured.
+func (c *Config) EnvironmentsForApp(appName string) []string {
+	var envs []string
+	for _, app := range c.Apps {
+		if app.App == appName {
+			envs = append(envs, app.Environment)
+		}
+	}
+	sort.Strings(envs)
+	return envs
+}
+
+// AppsForEnvironment returns the sorted base app names available in the given
+// environment.
+func (c *Config) AppsForEnvironment(env string) []string {
+	var names []string
+	for _, app := range c.Apps {
+		if app.Environment == env {
+			names = append(names, app.App)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// AppByComponents looks up an AppConfig by base name and environment.
+func (c *Config) AppByComponents(appName, env string) (*AppConfig, bool) {
+	for i := range c.Apps {
+		if c.Apps[i].App == appName && c.Apps[i].Environment == env {
+			return &c.Apps[i], true
+		}
+	}
+	return nil, false
 }

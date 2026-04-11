@@ -34,6 +34,9 @@ func (c *captureSlack) UpdateMessageContext(_ context.Context, _, _ string, _ ..
 func (c *captureSlack) OpenViewContext(_ context.Context, _ string, _ slackPkg.ModalViewRequest) (*slackPkg.ViewResponse, error) {
 	return nil, nil
 }
+func (c *captureSlack) UpdateViewContext(_ context.Context, _ slackPkg.ModalViewRequest, _, _, _ string) (*slackPkg.ViewResponse, error) {
+	return nil, nil
+}
 
 func newTestTracker() *conflictTracker {
 	ct := newConflictTracker(nil)
