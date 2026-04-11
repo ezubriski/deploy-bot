@@ -151,24 +151,35 @@ func (b *Bot) buildFilteredModalParams(ctx context.Context, cfg *config.Config, 
 		HideManualTag:  isRollback,
 	}
 
+	ecrTagOptions := func(fullName string) []*slack.OptionBlockObject {
+		var opts []*slack.OptionBlockObject
+		for _, t := range b.ecrCache.RecentTagsWithTime(fullName) {
+			label := fmt.Sprintf("%s (published %s)", t.Tag, t.PushedAt.Format("Jan 2 15:04"))
+			opts = append(opts, slack.NewOptionBlockObject(
+				t.Tag,
+				slack.NewTextBlockObject("plain_text", label, false, false),
+				nil,
+			))
+		}
+		return opts
+	}
+
 	// Only fetch tags when both app and env are selected.
 	if selectedApp != "" && selectedEnv != "" {
 		fullName := selectedApp + "-" + selectedEnv
 
 		if isRollback {
 			// Rollback: source tags from deployment history with deployed dates.
-			entries, err := b.store.GetHistory(ctx, 100)
-			if err == nil {
-				cur, prev, ok := findRollbackEntries(entries, fullName)
-				if ok {
-					params.RollbackCurrent = cur.Tag
-					params.RollbackCurrentDate = cur.CompletedAt
-					params.RollbackTarget = prev.Tag
-					params.RollbackTargetDate = prev.CompletedAt
-					params.ExcludeTag = cur.Tag
-					if preSelectedTag == "" {
-						params.SelectedTag = prev.Tag
-					}
+			entries, histErr := b.store.GetHistory(ctx, 100)
+			cur, prev, ok := findRollbackEntries(entries, fullName)
+			if histErr == nil && ok {
+				params.RollbackCurrent = cur.Tag
+				params.RollbackCurrentDate = cur.CompletedAt
+				params.RollbackTarget = prev.Tag
+				params.RollbackTargetDate = prev.CompletedAt
+				params.ExcludeTag = cur.Tag
+				if preSelectedTag == "" {
+					params.SelectedTag = prev.Tag
 				}
 				// Build tag options from all unique approved deploys.
 				seen := map[string]bool{}
@@ -183,17 +194,27 @@ func (b *Bot) buildFilteredModalParams(ctx context.Context, cfg *config.Config, 
 						))
 					}
 				}
+			} else {
+				// Not enough history to suggest a rollback target. Fall back to
+				// ECR-sourced tags and let the user pick or manually enter one.
+				params.HideManualTag = false
+				params.TagOptions = ecrTagOptions(fullName)
+				switch {
+				case histErr != nil:
+					params.RollbackNote = fmt.Sprintf(
+						":warning: Couldn't load deploy history for *%s*. Pick a tag from ECR or enter one manually.",
+						fullName,
+					)
+				default:
+					params.RollbackNote = fmt.Sprintf(
+						":information_source: No prior deploys recorded for *%s* — can't auto-suggest a rollback target. Pick a tag from ECR or enter one manually.",
+						fullName,
+					)
+				}
 			}
 		} else {
 			// Regular deploy: source tags from ECR cache with published dates.
-			for _, t := range b.ecrCache.RecentTagsWithTime(fullName) {
-				label := fmt.Sprintf("%s (published %s)", t.Tag, t.PushedAt.Format("Jan 2 15:04"))
-				params.TagOptions = append(params.TagOptions, slack.NewOptionBlockObject(
-					t.Tag,
-					slack.NewTextBlockObject("plain_text", label, false, false),
-					nil,
-				))
-			}
+			params.TagOptions = ecrTagOptions(fullName)
 		}
 	}
 

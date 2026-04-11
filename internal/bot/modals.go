@@ -89,6 +89,7 @@ type DeployModalParams struct {
 	ExcludeTag          string // tag to filter out of TagOptions (the current version)
 	HideManualTag       bool   // hide manual tag override (rollback mode)
 	TagValidation       string // validation result message for manual tag (mrkdwn)
+	RollbackNote        string // info note shown in rollback mode (e.g. when history is empty)
 }
 
 // ModalValues provides safe access to Slack modal view state values,
@@ -212,6 +213,15 @@ func buildDeployModal(p DeployModalParams) slack.ModalViewRequest {
 		))
 	}
 
+	// Rollback note — shown when rollback mode can't auto-suggest a target
+	// (e.g. no history). Falls back to ECR tags + manual override below.
+	if p.IsRollback && p.RollbackNote != "" {
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn", p.RollbackNote, false, false),
+			nil, nil,
+		))
+	}
+
 	// Filter out excluded tag (e.g. current version during rollback).
 	tagOptions := p.TagOptions
 	if p.ExcludeTag != "" {
@@ -272,7 +282,7 @@ func buildDeployModal(p DeployModalParams) slack.ModalViewRequest {
 			manualTagEl.InitialValue = p.ManualTag
 		}
 		manualTagEl.DispatchActionConfig = &slack.DispatchActionConfig{
-			TriggerActionsOn: []string{"on_character_entered"},
+			TriggerActionsOn: []string{"on_enter_pressed"},
 		}
 		commandHint := p.CommandName
 		if commandHint == "" {

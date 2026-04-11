@@ -356,6 +356,9 @@ func filterRepoTags(tags []repoTag, ac *appCache) ([]string, []TagWithTime, time
 	for _, t := range tags {
 		if ac.pattern.MatchString(t.Tag) {
 			filtered = append(filtered, t.Tag)
+			// Direct conversion: repoTag and TagWithTime have identical
+			// fields. If either struct gains a field, this will fail to
+			// compile, forcing the mismatch to be addressed explicitly.
 			withTime = append(withTime, TagWithTime(t))
 			if t.PushedAt.After(newest) {
 				newest = t.PushedAt

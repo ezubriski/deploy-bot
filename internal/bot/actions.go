@@ -101,16 +101,12 @@ func (b *Bot) handleManualTagValidation(ctx context.Context, callback slack.Inte
 		} else if exists {
 			params.TagValidation = fmt.Sprintf(":white_check_mark: Tag `%s` found.", manualTag)
 		} else {
+			// CommandName isn't preserved across view updates (PrivateMetadata
+			// only carries app/env/rollback), so hardcode /deploy here.
 			params.TagValidation = fmt.Sprintf(
-				":x: Tag `%s` not found for *%s*. Use `%s tags %s` to list available tags.",
-				manualTag, fullName, params.CommandName, fullName,
+				":x: Tag `%s` not found for *%s*. Use `/deploy tags %s` to list available tags.",
+				manualTag, fullName, fullName,
 			)
-			if params.CommandName == "" {
-				params.TagValidation = fmt.Sprintf(
-					":x: Tag `%s` not found for *%s*. Use `/deploy tags %s` to list available tags.",
-					manualTag, fullName, fullName,
-				)
-			}
 		}
 	} else if manualTag != "" {
 		params.TagValidation = "_Select an app and environment to validate this tag._"

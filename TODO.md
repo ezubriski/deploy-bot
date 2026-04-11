@@ -29,6 +29,14 @@ release; they're tracked here so they don't get lost.
   zap and optionally S3. The S3 path adds latency to the user-visible deploy
   flow. Consider a buffered channel + background flusher with bounded retries.
 
+- [ ] **Collapse `appCache.tags` / `tagsWithTime` parallel slices.** The ECR
+  cache currently stores filtered tags twice on `appCache`: once as
+  `[]string` (`tags`) and once as `[]TagWithTime` (`tagsWithTime`), kept in
+  lockstep by `filterRepoTags` and the two `Populate`/`refresh` write
+  sites. Drop `tags` and derive it on demand from `tagsWithTime` (or
+  rewrite `RecentTags`/`Tags` to read from the richer slice). Removes a
+  drift hazard introduced by the tag-timestamp commit.
+
 - [ ] **Disable self-approval by default.** Self-approval (requester == approver)
   should be disabled by default; it's useful for testing but questionable in
   production. When disabled: (1) filter the requesting user out of the approver
