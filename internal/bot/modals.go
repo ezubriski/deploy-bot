@@ -198,7 +198,7 @@ func buildDeployModal(p DeployModalParams) slack.ModalViewRequest {
 			appLabel = p.SelectedApp + "-" + p.SelectedEnv
 		}
 		info := fmt.Sprintf(
-			":rewind: *Rolling back %s*\nCurrent:  `%s` (deployed %s)\nTarget:   `%s` (deployed %s)",
+			":rewind: *Rolling back %s*\nCurrent version:  `%s` (deployed %s)\nRolling back to:  `%s` (deployed %s)",
 			appLabel,
 			p.RollbackCurrent, p.RollbackCurrentDate.Format("Jan 2"),
 			p.RollbackTarget, p.RollbackTargetDate.Format("Jan 2"),
