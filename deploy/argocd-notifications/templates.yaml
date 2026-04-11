@@ -6,18 +6,43 @@
 # the keys are namespaced under each section so they can be merged in.
 #
 # Tested against Argo CD v3.3.6. The default trigger catalog used here
-# (on-sync-succeeded, on-sync-failed, on-health-degraded, on-sync-running) has
-# been stable since early v2.x.
+# (on-sync-succeeded, on-sync-failed, on-health-degraded) has been stable
+# since early v2.x.
 #
 # Workflow:
-#   1. Add `service.webhook.deploybot` and `template.deploybot-event` to
-#      argocd-notifications-cm.
+#   1. Add `service.webhook.deploybot` and the three `template.deploybot-*`
+#      templates to argocd-notifications-cm.
 #   2. Add `deploybot-webhook-secret` to argocd-notifications-secret.
-#   3. Wire the four triggers to send the new template alongside any existing
-#      destinations (Slack, email, etc).
+#   3. Wire the three triggers to send the matching per-trigger template
+#      alongside any existing destinations (Slack, email, etc).
 #   4. Annotate the Applications you want deploy-bot to watch.
 #
 # See docs/argocd-notifications.md for the operator guide.
+#
+# One template per trigger, not one shared template:
+#
+#   argocd-notifications does NOT expose the current trigger name inside
+#   a template — there is no `{{.trigger}}`, and `{{.context.eventType}}`
+#   is only populated if the operator explicitly defines it under a
+#   top-level `context:` key (Go templates render missing keys as the
+#   literal string "<no value>", which slips past the receiver's
+#   non-empty check and then fails its recognized-trigger gate, silently
+#   dropping every notification). The only reliable way to ship the
+#   trigger name to the receiver is to hardcode it into the body of a
+#   dedicated template per trigger.
+#
+# retryWaitMin / retryWaitMax are deliberately omitted from the service
+# definition:
+#
+#   argocd-notifications' WebhookOptions struct uses bare time.Duration
+#   for those fields, and stdlib JSON refuses to unmarshal "1s" / "10s"
+#   into Duration. Adding them as strings causes the controller to fail
+#   every api-context fetch with "Failed to get api: errors getting
+#   apis: [json: cannot unmarshal string into Go struct field
+#   WebhookOptions.retryWaitMax of type time.Duration]", which blocks
+#   delivery for every subscribed Application, not just this service.
+#   retryMax alone is fine; the controller applies internal defaults
+#   for the wait intervals.
 
 ---
 # ──────────────────────────────────────────────────────────────────────────
@@ -41,13 +66,10 @@ data:
     - name: Content-Type
       value: application/json
     retryMax: 3
-    retryWaitMin: 1s
-    retryWaitMax: 10s
 
-  # The template body is what the receiver actually parses. Field names match
-  # internal/argocd/payload.go in the deploy-bot repo. Unknown fields are
-  # ignored on decode, so you can add diagnostic fields here without breaking
-  # the receiver.
+  # One template per trigger. Field names match internal/argocd/payload.go
+  # in the deploy-bot repo; unknown fields are ignored on decode, so you
+  # can add diagnostic fields here without breaking the receiver.
   #
   # Notes on the template syntax:
   #   - The `{{end}}` separator on `resources` is intentional — Go templates
@@ -56,13 +78,15 @@ data:
   #   - `?.` style optional chaining is not native to Go templates; we guard
   #     `.app.status.operationState` and `.app.status.health` checks with
   #     `if` so a payload missing them does not crash the template engine.
-  template.deploybot-event: |
+  #   - The `trigger` field is hardcoded per template. See the header
+  #     comment for why.
+  template.deploybot-sync-succeeded: |
     webhook:
       deploybot:
         method: POST
         body: |
           {
-            "trigger": "{{.context.eventType}}",
+            "trigger": "on-sync-succeeded",
             "argocdApp": "{{.app.metadata.name}}",
             "namespace": "{{.app.metadata.namespace}}",
             "repoURL": "{{.app.spec.source.repoURL}}",
@@ -88,41 +112,97 @@ data:
             ]
           }
 
-  # Wire the new template into each of the four triggers we care about. The
-  # default catalog ships these triggers; if you have other recipients
-  # (Slack, email), preserve them in the `send:` list and add `deploybot-event`.
+  template.deploybot-sync-failed: |
+    webhook:
+      deploybot:
+        method: POST
+        body: |
+          {
+            "trigger": "on-sync-failed",
+            "argocdApp": "{{.app.metadata.name}}",
+            "namespace": "{{.app.metadata.namespace}}",
+            "repoURL": "{{.app.spec.source.repoURL}}",
+            "revision": "{{.app.status.sync.revision}}",
+            "syncResultRevision": "{{if .app.status.operationState}}{{if .app.status.operationState.syncResult}}{{.app.status.operationState.syncResult.revision}}{{end}}{{end}}",
+            "syncStatus": "{{.app.status.sync.status}}",
+            "healthStatus": "{{.app.status.health.status}}",
+            "phase": "{{if .app.status.operationState}}{{.app.status.operationState.phase}}{{end}}",
+            "message": "{{if .app.status.operationState}}{{.app.status.operationState.message}}{{end}}",
+            "finishedAt": "{{if .app.status.operationState}}{{.app.status.operationState.finishedAt}}{{end}}",
+            "resources": [
+              {{- range $i, $r := .app.status.resources}}
+              {{- if $i}},{{end}}
+              {
+                "kind": "{{$r.kind}}",
+                "name": "{{$r.name}}",
+                "namespace": "{{$r.namespace}}",
+                "syncStatus": "{{$r.status}}",
+                "healthStatus": "{{if $r.health}}{{$r.health.status}}{{end}}",
+                "healthMessage": "{{if $r.health}}{{$r.health.message}}{{end}}"
+              }
+              {{- end}}
+            ]
+          }
+
+  template.deploybot-health-degraded: |
+    webhook:
+      deploybot:
+        method: POST
+        body: |
+          {
+            "trigger": "on-health-degraded",
+            "argocdApp": "{{.app.metadata.name}}",
+            "namespace": "{{.app.metadata.namespace}}",
+            "repoURL": "{{.app.spec.source.repoURL}}",
+            "revision": "{{.app.status.sync.revision}}",
+            "syncResultRevision": "{{if .app.status.operationState}}{{if .app.status.operationState.syncResult}}{{.app.status.operationState.syncResult.revision}}{{end}}{{end}}",
+            "syncStatus": "{{.app.status.sync.status}}",
+            "healthStatus": "{{.app.status.health.status}}",
+            "phase": "{{if .app.status.operationState}}{{.app.status.operationState.phase}}{{end}}",
+            "message": "{{if .app.status.operationState}}{{.app.status.operationState.message}}{{end}}",
+            "finishedAt": "{{if .app.status.operationState}}{{.app.status.operationState.finishedAt}}{{end}}",
+            "resources": [
+              {{- range $i, $r := .app.status.resources}}
+              {{- if $i}},{{end}}
+              {
+                "kind": "{{$r.kind}}",
+                "name": "{{$r.name}}",
+                "namespace": "{{$r.namespace}}",
+                "syncStatus": "{{$r.status}}",
+                "healthStatus": "{{if $r.health}}{{$r.health.status}}{{end}}",
+                "healthMessage": "{{if $r.health}}{{$r.health.message}}{{end}}"
+              }
+              {{- end}}
+            ]
+          }
+
+  # Wire each trigger to its matching template. If your install uses the
+  # upstream notifications_catalog/install.yaml and you already have
+  # recipients on these triggers (Slack, email), merge the send: lists
+  # instead of replacing them.
   #
-  # If your install uses the upstream notifications_catalog/install.yaml, the
-  # easiest way to apply this is to override the `trigger.on-*` keys entirely
-  # with the blocks below — the only difference from the catalog defaults is
-  # the `send:` list.
+  # on-sync-running is intentionally not wired here: the receiver accepts
+  # it (to keep the controller from logging "no recipient") but drops it
+  # without enqueueing, so subscribing just wastes network. Add it
+  # yourself with a fourth `template.deploybot-sync-running` if you want
+  # to exercise the dead-path for observability.
   trigger.on-sync-succeeded: |
     - description: Application syncing has succeeded
       oncePer: app.status.operationState?.syncResult?.revision
-      send: [app-sync-succeeded, deploybot-event]
+      send: [deploybot-sync-succeeded]
       when: app.status.operationState != nil and app.status.operationState.phase in ['Succeeded']
 
   trigger.on-sync-failed: |
     - description: Application syncing has failed
       oncePer: app.status.operationState?.syncResult?.revision
-      send: [app-sync-failed, deploybot-event]
+      send: [deploybot-sync-failed]
       when: app.status.operationState != nil and app.status.operationState.phase in ['Error', 'Failed']
 
   trigger.on-health-degraded: |
     - description: Application has degraded
       oncePer: app.status.operationState?.syncResult?.revision
-      send: [app-health-degraded, deploybot-event]
+      send: [deploybot-health-degraded]
       when: app.status.health.status == 'Degraded'
-
-  # on-sync-running is currently dropped by the receiver (it returns 200 with
-  # enqueued=false). Subscribing is harmless and lets you flip the bot
-  # behaviour later without an ArgoCD-side change. Comment this trigger out
-  # if you want to avoid the wire traffic entirely.
-  trigger.on-sync-running: |
-    - description: Application is being synced
-      oncePer: app.status.operationState?.syncResult?.revision
-      send: [app-sync-running, deploybot-event]
-      when: app.status.operationState != nil and app.status.operationState.phase in ['Running']
 ---
 # ──────────────────────────────────────────────────────────────────────────
 # Patch 2 — argocd-notifications-secret

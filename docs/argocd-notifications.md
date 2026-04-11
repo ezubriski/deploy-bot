@@ -190,10 +190,13 @@ Apply it to your `argocd` namespace alongside the rest of the
 
 - A custom `service.webhook.deploybot` pointing at the receiver URL with the
   `X-Deploybot-Secret` header sourced from `argocd-notifications-secret`.
-- A custom `template.deploybot-event` whose `body:` renders deploy-bot's
-  expected JSON shape (see below).
-- A wiring section showing how to add the new template to each of the four
-  triggers we care about.
+- Three custom templates — `template.deploybot-sync-succeeded`,
+  `template.deploybot-sync-failed`, and `template.deploybot-health-degraded`
+  — each of which renders deploy-bot's expected JSON shape with the
+  matching trigger name hardcoded in the body. See the
+  [one-template-per-trigger gotcha](#one-template-per-trigger) below for
+  why this is structured as three templates rather than one shared one.
+- A wiring section pointing each trigger at its matching template.
 
 ### Subscribing an Application
 
@@ -297,3 +300,41 @@ against older releases will land once the homelab cluster upgrades.
 - **No HMAC.** The argocd-notifications template engine cannot compute HMAC,
   so authentication is shared-secret-in-header. Terminate at an internal
   ingress that adds mTLS if you need stronger transport security.
+
+### One template per trigger
+
+argocd-notifications does not expose the current trigger name inside a
+template. There is no `{{.trigger}}`, and `{{.context.eventType}}` is only
+populated if the operator explicitly defines it under a top-level
+`context:` key in `argocd-notifications-cm` (Go templates render a missing
+map key as the literal string `<no value>`). That literal string slips
+past the receiver's non-empty-trigger check and then fails its
+recognized-trigger gate, so every notification silently drops with
+`recognized:false, enqueued:false` even though the HTTP hop returns 200.
+
+The only reliable way to ship the trigger name into the body is to
+hardcode it per template — hence the three distinct `template.deploybot-*`
+definitions in the reference patch, and the `send:` list on each trigger
+pointing at exactly one of them. If you find yourself wanting a shared
+template, you'll hit this bug.
+
+### `retryWaitMin` / `retryWaitMax` crash the controller
+
+Do not add `retryWaitMin` / `retryWaitMax` to the webhook service
+definition, even though the upstream argocd-notifications service
+examples sometimes show them. Those fields are modeled as bare
+`time.Duration` on `WebhookOptions`, and the controller decodes the
+service config with stdlib JSON, which refuses to unmarshal `"1s"` /
+`"10s"` strings into `Duration`. The resulting error is fatal for the
+whole controller — not just the misconfigured service — because it
+fires on every api-context fetch:
+
+```
+Failed to get api: errors getting apis: [json: cannot unmarshal string
+into Go struct field WebhookOptions.retryWaitMax of type time.Duration]
+```
+
+…which blocks delivery for every subscribed Application. The reference
+patch sets only `retryMax: 3` and leaves the wait intervals to the
+controller's internal defaults. This has been reported upstream but is
+not fixed as of Argo CD v3.3.6.
