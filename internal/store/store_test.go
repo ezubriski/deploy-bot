@@ -272,6 +272,184 @@ func TestPRNumberFromKey(t *testing.T) {
 	}
 }
 
+// TestPendingDeploy_RoundTripPreservesSlackHandle verifies that the
+// SlackChannel and SlackMessageTS fields survive a Set/Get round trip
+// through Redis. These fields are populated after the approval post
+// succeeds, and downstream features (ArgoCD notification correlation)
+// depend on them being preserved across reads.
+func TestPendingDeploy_RoundTripPreservesSlackHandle(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	d := &PendingDeploy{
+		App:            "myapp",
+		Environment:    "prod",
+		Tag:            "v1.0.0",
+		PRNumber:       77,
+		PRURL:          "https://github.com/org/repo/pull/77",
+		State:          StatePending,
+		ExpiresAt:      time.Now().Add(time.Hour),
+		SlackChannel:   "C_DEPLOY",
+		SlackMessageTS: "1700000000.123456",
+	}
+	if err := s.Set(ctx, d, time.Hour); err != nil {
+		t.Fatalf("set deploy: %v", err)
+	}
+
+	got, err := s.Get(ctx, 77)
+	if err != nil {
+		t.Fatalf("get deploy: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected deploy, got nil")
+	}
+	if got.SlackChannel != "C_DEPLOY" {
+		t.Errorf("SlackChannel = %q, want %q", got.SlackChannel, "C_DEPLOY")
+	}
+	if got.SlackMessageTS != "1700000000.123456" {
+		t.Errorf("SlackMessageTS = %q, want %q", got.SlackMessageTS, "1700000000.123456")
+	}
+}
+
+// TestPendingDeploy_OmitemptyAllowsLegacyDecode verifies that records written
+// before the enrichment fields existed (or written by paths that haven't
+// populated them yet) decode correctly with empty defaults. This protects
+// against in-flight Redis records breaking on bot restart after upgrade.
+func TestPendingDeploy_OmitemptyAllowsLegacyDecode(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	// A minimal record matching the pre-enrichment shape.
+	d := &PendingDeploy{
+		App:         "myapp",
+		Environment: "dev",
+		Tag:         "v0.1",
+		PRNumber:    1,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}
+	if err := s.Set(ctx, d, time.Hour); err != nil {
+		t.Fatalf("set deploy: %v", err)
+	}
+	got, err := s.Get(ctx, 1)
+	if err != nil || got == nil {
+		t.Fatalf("get deploy: got=%v err=%v", got, err)
+	}
+	if got.SlackChannel != "" || got.SlackMessageTS != "" {
+		t.Errorf("expected empty enrichment fields on legacy decode, got ch=%q ts=%q",
+			got.SlackChannel, got.SlackMessageTS)
+	}
+}
+
+// TestSetSlackHandle_PreservesOtherFieldsAndState is the key race-safety
+// test: a concurrent writer transitions state to "merging" between our
+// Get and Set, and SetSlackHandle must pick up the new state rather than
+// clobber it back to "pending". This is the scenario described in the
+// SetSlackHandle doc comment: a fast-clicking approver triggers the
+// state transition before the write-back completes.
+func TestSetSlackHandle_PreservesOtherFieldsAndState(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	d := &PendingDeploy{
+		App:         "myapp",
+		Environment: "prod",
+		Tag:         "v1.0.0",
+		PRNumber:    42,
+		PRURL:       "https://github.com/org/repo/pull/42",
+		Requester:   "gh-user",
+		State:       StatePending,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}
+	if err := s.Set(ctx, d, time.Hour); err != nil {
+		t.Fatalf("set deploy: %v", err)
+	}
+
+	// Simulate a concurrent approval transition before our write-back
+	// runs. In production this is the handleApprove path calling
+	// UpdateState(StateMerging).
+	if err := s.UpdateState(ctx, 42, StateMerging); err != nil {
+		t.Fatalf("concurrent state update: %v", err)
+	}
+
+	if err := s.SetSlackHandle(ctx, 42, "C_DEPLOY", "1700000000.999999"); err != nil {
+		t.Fatalf("set slack handle: %v", err)
+	}
+
+	got, err := s.Get(ctx, 42)
+	if err != nil || got == nil {
+		t.Fatalf("get deploy: got=%v err=%v", got, err)
+	}
+	if got.State != StateMerging {
+		t.Errorf("state = %q, want %q — SetSlackHandle clobbered concurrent UpdateState",
+			got.State, StateMerging)
+	}
+	if got.SlackChannel != "C_DEPLOY" || got.SlackMessageTS != "1700000000.999999" {
+		t.Errorf("slack handle = (%q, %q), want (C_DEPLOY, 1700000000.999999)",
+			got.SlackChannel, got.SlackMessageTS)
+	}
+	if got.App != "myapp" || got.Requester != "gh-user" {
+		t.Errorf("other fields clobbered: app=%q requester=%q", got.App, got.Requester)
+	}
+}
+
+// TestSetSlackHandle_NoOpWhenRecordGone verifies that SetSlackHandle returns
+// nil (not an error) when the pending record has already been deleted —
+// e.g. because the deploy was approved and the pending record removed
+// before the Slack post wrote back. Callers treat a missing handle as
+// "not correlatable" rather than a failure; this test pins that contract.
+func TestSetSlackHandle_NoOpWhenRecordGone(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	if err := s.SetSlackHandle(ctx, 999, "C_DEPLOY", "1700000000.000000"); err != nil {
+		t.Errorf("expected nil error for missing record, got %v", err)
+	}
+}
+
+// TestHistoryEntry_RoundTripPreservesEnrichmentFields verifies the same
+// fields survive a PushHistory/GetHistory round trip on the history list.
+// The bot populates these on the approved/merged history push so the
+// ArgoCD handler can correlate a synced revision back to the deploy that
+// produced it after the entry has aged out of the pending set.
+func TestHistoryEntry_RoundTripPreservesEnrichmentFields(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	e := HistoryEntry{
+		EventType:       "approved",
+		App:             "myapp",
+		Environment:     "prod",
+		Tag:             "v1.2.3",
+		PRNumber:        99,
+		PRURL:           "https://github.com/org/repo/pull/99",
+		RequesterID:     "U123",
+		CompletedAt:     time.Now().UTC().Truncate(time.Second),
+		GitopsCommitSHA: "deadbeef00000000",
+		SlackChannel:    "C_DEPLOY",
+		SlackMessageTS:  "1700000123.456789",
+	}
+	if err := s.PushHistory(ctx, e); err != nil {
+		t.Fatalf("push history: %v", err)
+	}
+
+	entries, err := s.GetHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	got := entries[0]
+	if got.GitopsCommitSHA != "deadbeef00000000" {
+		t.Errorf("GitopsCommitSHA = %q, want %q", got.GitopsCommitSHA, "deadbeef00000000")
+	}
+	if got.SlackChannel != "C_DEPLOY" {
+		t.Errorf("SlackChannel = %q, want %q", got.SlackChannel, "C_DEPLOY")
+	}
+	if got.SlackMessageTS != "1700000123.456789" {
+		t.Errorf("SlackMessageTS = %q, want %q", got.SlackMessageTS, "1700000123.456789")
+	}
+}
+
 func TestPushHistory_AppFilter(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()

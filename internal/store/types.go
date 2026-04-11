@@ -21,6 +21,16 @@ type PendingDeploy struct {
 	RequestedAt time.Time `json:"requested_at"`
 	ExpiresAt   time.Time `json:"expires_at"`
 	State       string    `json:"state"`
+
+	// SlackChannel and SlackMessageTS identify the Slack message the bot
+	// posted when announcing this deploy request. Populated by
+	// SetSlackHandle after the approval post succeeds, and copied onto the
+	// HistoryEntry at completion time so that follow-up notifications (e.g.
+	// ArgoCD lifecycle updates) can reference the original message in
+	// context — either as a threaded reply or as a permalink — after the
+	// per-environment thread TTL has expired.
+	SlackChannel   string `json:"slack_channel,omitempty"`
+	SlackMessageTS string `json:"slack_message_ts,omitempty"`
 }
 
 // HistoryEntry is an immutable record of a completed deployment event,
@@ -34,4 +44,18 @@ type HistoryEntry struct {
 	PRURL       string    `json:"pr_url"`
 	RequesterID string    `json:"requester_id"` // Slack user ID for @mention
 	CompletedAt time.Time `json:"completed_at"`
+
+	// GitopsCommitSHA is the merge commit SHA in the gitops repo for an
+	// approved/merged deploy. Empty for rejected, expired, or cancelled
+	// entries (no merge happened). Used to correlate ArgoCD notifications
+	// back to the deploy that produced the synced revision.
+	GitopsCommitSHA string `json:"gitops_commit_sha,omitempty"`
+
+	// SlackChannel and SlackMessageTS point to the Slack message that
+	// announced the original deploy request, copied from the PendingDeploy
+	// at completion time. Used by follow-up notifications that need to
+	// reference the deploy in context after the entry has been pushed to
+	// history.
+	SlackChannel   string `json:"slack_channel,omitempty"`
+	SlackMessageTS string `json:"slack_message_ts,omitempty"`
 }

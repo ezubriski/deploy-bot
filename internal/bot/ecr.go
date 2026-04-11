@@ -117,7 +117,7 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 	env := appCfg.Environment
 	deployChannel := cfg.Slack.DeployChannel
 
-	mergeErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
+	mergeSHA, mergeErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
 	if mergeErr != nil {
 		if !errors.Is(mergeErr, githubPkg.ErrMergeConflict) {
 			b.log.Error("ecr auto-deploy: merge failed", zap.Int("pr", prNumber), zap.Error(mergeErr))
@@ -162,11 +162,13 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 		case <-time.After(3 * time.Second):
 		}
 
-		if retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod); retryErr != nil {
+		retrySHA, retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
+		if retryErr != nil {
 			b.log.Error("ecr auto-deploy: merge failed after rebase", zap.Int("pr", prNumber), zap.Error(retryErr))
 			b.notifyECRAutoDeployFailed(ctx, evt, appCfg, cfg, prNumber, prURL, retryErr)
 			return
 		}
+		mergeSHA = retrySHA
 	}
 
 	var wg sync.WaitGroup
@@ -211,15 +213,21 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 	}()
 	go func() {
 		defer wg.Done()
+		// SlackChannel/SlackMessageTS are intentionally unset here: the
+		// auto-deploy path posts a "merged" notification rather than an
+		// approval request with buttons, so there is no deploy-request
+		// message to correlate ArgoCD lifecycle events against. The
+		// GitopsCommitSHA is still captured for revision-based correlation.
 		if err := b.store.PushHistory(ctx, store.HistoryEntry{
-			EventType:   audit.EventApproved,
-			App:         evt.App,
-			Environment: env,
-			Tag:         evt.Tag,
-			PRNumber:    prNumber,
-			PRURL:       prURL,
-			RequesterID: ecrRequesterID,
-			CompletedAt: time.Now(),
+			EventType:       audit.EventApproved,
+			App:             evt.App,
+			Environment:     env,
+			Tag:             evt.Tag,
+			PRNumber:        prNumber,
+			PRURL:           prURL,
+			RequesterID:     ecrRequesterID,
+			CompletedAt:     time.Now(),
+			GitopsCommitSHA: mergeSHA,
 		}); err != nil {
 			b.log.Warn("store: push history", zap.Error(err))
 		}
@@ -256,6 +264,13 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 		b.log.Error("ecr push: store deploy", zap.Error(err))
 	}
 
+	// slackChannel/slackTS are written by the approval-post goroutine and
+	// read after wg.Wait. The wait group provides happens-before, so the
+	// read is race-free. Persisted via SetSlackHandle (WATCH-based) so a
+	// fast concurrent approval that has already transitioned state to
+	// "merging" is not clobbered by the write-back.
+	var slackChannel, slackTS string
+
 	var wg sync.WaitGroup
 	wg.Add(4)
 	go func() {
@@ -272,7 +287,7 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	go func() {
 		defer wg.Done()
 		// Post approval request to the appropriate channel.
-		b.postECRApprovalRequest(ctx, cfg, pendingInfo{
+		slackChannel, slackTS = b.postECRApprovalRequest(ctx, cfg, pendingInfo{
 			App:         evt.App,
 			Environment: env,
 			Tag:         evt.Tag,
@@ -299,12 +314,21 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	}()
 	b.metrics.RecordDeploy(evt.App, audit.EventRequested)
 	wg.Wait()
+
+	if slackTS != "" {
+		if err := b.store.SetSlackHandle(ctx, prNumber, slackChannel, slackTS); err != nil {
+			b.log.Warn("store: update deploy with slack handle", zap.Error(err))
+		}
+	}
+
 	b.updatePendingGauge(ctx)
 	b.log.Info("ecr push: approval requested", zap.String("app", evt.App), zap.String("tag", evt.Tag), zap.Int("pr", prNumber))
 }
 
-// postECRApprovalRequest posts an approval message to the deploy channel.
-func (b *Bot) postECRApprovalRequest(ctx context.Context, cfg *config.Config, deploy pendingInfo) {
+// postECRApprovalRequest posts an approval message to the deploy channel and
+// returns the (channel, message timestamp) pair so the caller can persist it
+// on the PendingDeploy for later correlation.
+func (b *Bot) postECRApprovalRequest(ctx context.Context, cfg *config.Config, deploy pendingInfo) (channel, ts string) {
 	text := fmt.Sprintf(
 		"*ECR Deploy Request*\n\nNew image `%s:%s` detected in ECR.\n*App:* %s\n*Environment:* %s\n*PR:* <%s|#%d>",
 		deploy.App, deploy.Tag, deploy.App, deploy.Environment, deploy.PRURL, deploy.PRNumber,
@@ -328,7 +352,7 @@ func (b *Bot) postECRApprovalRequest(ctx context.Context, cfg *config.Config, de
 		),
 	}
 	opts = append(opts, threadOption(b.getThreadTS(ctx, deploy.Environment))...)
-	b.postSlack(ctx, cfg.Slack.DeployChannel, "notice", opts...)
+	return b.postSlackWithHandle(ctx, cfg.Slack.DeployChannel, "notice", opts...)
 }
 
 // notifyECRAutoDeployFailed posts a failure notice to the deploy channel,

@@ -23,7 +23,7 @@ type githubClient interface {
 	GetDefaultBranch(ctx context.Context) (string, error)
 	CreateDeployPR(ctx context.Context, params githubpkg.CreatePRParams) (int, string, error)
 	RebaseDeployBranch(ctx context.Context, params githubpkg.CreatePRParams) error
-	MergePR(ctx context.Context, prNumber int, mergeMethod string) error
+	MergePR(ctx context.Context, prNumber int, mergeMethod string) (string, error)
 	ClosePR(ctx context.Context, prNumber int) error
 	DeleteBranch(ctx context.Context, branch string) error
 	CommentRequested(ctx context.Context, prNumber int, requester, app, tag, reason string) error

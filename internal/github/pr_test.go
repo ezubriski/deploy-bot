@@ -332,6 +332,38 @@ func TestCreateDeployPR_NoChange(t *testing.T) {
 	}
 }
 
+// TestMergePR_SuccessReturnsCommitSHA verifies that on a 200 merge response,
+// MergePR returns the merge commit SHA from the GitHub API. The SHA is
+// downstream-critical: it is persisted on history entries so ArgoCD
+// notifications carrying a synced gitops revision can be correlated back
+// to the deploy that produced it.
+func TestMergePR_SuccessReturnsCommitSHA(t *testing.T) {
+	const wantSHA = "feedfacecafebeef0123456789abcdef01234567"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") && strings.HasSuffix(r.URL.Path, "/merge") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"sha":     wantSHA,
+				"merged":  true,
+				"message": "Pull Request successfully merged",
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
+	gotSHA, err := client.MergePR(context.Background(), 1, "squash")
+	if err != nil {
+		t.Fatalf("MergePR: %v", err)
+	}
+	if gotSHA != wantSHA {
+		t.Errorf("merge SHA = %q, want %q", gotSHA, wantSHA)
+	}
+}
+
 // TestMergePR_ConflictReturnsErrMergeConflict verifies that MergePR wraps a
 // GitHub 405 response as ErrMergeConflict.
 func TestMergePR_ConflictReturnsErrMergeConflict(t *testing.T) {
@@ -349,7 +381,7 @@ func TestMergePR_ConflictReturnsErrMergeConflict(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
-	err := client.MergePR(context.Background(), 1, "squash")
+	_, err := client.MergePR(context.Background(), 1, "squash")
 	if !errors.Is(err, ErrMergeConflict) {
 		t.Errorf("expected ErrMergeConflict, got %v", err)
 	}
@@ -386,7 +418,7 @@ func TestMergePR_405MessageParsing(t *testing.T) {
 			t.Cleanup(server.Close)
 
 			client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
-			err := client.MergePR(context.Background(), 1, "squash")
+			_, err := client.MergePR(context.Background(), 1, "squash")
 			if !errors.Is(err, tc.wantErr) {
 				t.Errorf("message %q: expected %v, got %v", tc.message, tc.wantErr, err)
 			}
@@ -411,7 +443,7 @@ func TestMergePR_409ReturnsErrHeadModified(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client, _ := NewClientWithHTTP(&http.Client{}, server.URL+"/", "org", "repo")
-	err := client.MergePR(context.Background(), 1, "squash")
+	_, err := client.MergePR(context.Background(), 1, "squash")
 	if !errors.Is(err, ErrHeadModified) {
 		t.Errorf("expected ErrHeadModified, got %v", err)
 	}

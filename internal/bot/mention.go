@@ -349,14 +349,16 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 	go func() {
 		defer wg.Done()
 		if err := b.store.PushHistory(ctx, store.HistoryEntry{
-			EventType:   audit.EventCancelled,
-			App:         d.App,
-			Environment: d.Environment,
-			Tag:         d.Tag,
-			PRNumber:    prNumber,
-			PRURL:       d.PRURL,
-			RequesterID: d.RequesterID,
-			CompletedAt: time.Now(),
+			EventType:      audit.EventCancelled,
+			App:            d.App,
+			Environment:    d.Environment,
+			Tag:            d.Tag,
+			PRNumber:       prNumber,
+			PRURL:          d.PRURL,
+			RequesterID:    d.RequesterID,
+			CompletedAt:    time.Now(),
+			SlackChannel:   d.SlackChannel,
+			SlackMessageTS: d.SlackMessageTS,
 		}); err != nil {
 			b.log.Warn("store: push history", zap.Error(err))
 		}
@@ -539,7 +541,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 	b.warnIfErr("github: comment requested", b.gh.CommentRequested(ctx, prNumber, requesterGH, appName, tag, reason), zap.Int("pr", prNumber))
 
 	deployChannel := cfg.Slack.DeployChannel
-	b.postSlack(ctx, deployChannel, "notice",
+	slackChannel, slackTS := b.postSlackWithHandle(ctx, deployChannel, "notice",
 		buildApproverMessage(pendingInfo{
 			App:         appName,
 			Environment: env,
@@ -551,6 +553,11 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 			Reason:      reason,
 		})...,
 	)
+	if slackTS != "" {
+		if err := b.store.SetSlackHandle(ctx, prNumber, slackChannel, slackTS); err != nil {
+			b.log.Warn("mention deploy: update deploy with slack handle", zap.Error(err))
+		}
+	}
 
 	if err := b.auditLog.Log(ctx, audit.AuditEvent{
 		EventType:   audit.EventRequested,

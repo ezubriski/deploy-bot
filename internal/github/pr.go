@@ -142,11 +142,16 @@ func (c *Client) CreateDeployPR(ctx context.Context, params CreatePRParams) (int
 	return prNumber, prURL, nil
 }
 
-// MergePR merges a pull request using the configured merge method. Returns
-// ErrMergeConflict if GitHub reports the PR is not mergeable (HTTP 405).
-func (c *Client) MergePR(ctx context.Context, prNumber int, mergeMethod string) error {
-	return c.retryOnRateLimit(ctx, func() error {
-		_, _, err := c.gh.PullRequests.Merge(ctx, c.org, c.repo, prNumber, "", &gh.PullRequestOptions{
+// MergePR merges a pull request using the configured merge method. On success
+// it returns the merge commit SHA, which callers persist on history entries
+// so downstream signals (e.g. ArgoCD notifications carrying a synced
+// revision) can be correlated back to the deploy that produced them. Returns
+// an empty SHA and ErrMergeConflict if GitHub reports the PR is not mergeable
+// (HTTP 405).
+func (c *Client) MergePR(ctx context.Context, prNumber int, mergeMethod string) (string, error) {
+	var sha string
+	err := c.retryOnRateLimit(ctx, func() error {
+		result, _, err := c.gh.PullRequests.Merge(ctx, c.org, c.repo, prNumber, "", &gh.PullRequestOptions{
 			MergeMethod: mergeMethod,
 		})
 		if err != nil {
@@ -169,8 +174,15 @@ func (c *Client) MergePR(ctx context.Context, prNumber int, mergeMethod string) 
 			}
 			return fmt.Errorf("merge PR: %w", err)
 		}
+		if result != nil {
+			sha = result.GetSHA()
+		}
 		return nil
 	})
+	if err != nil {
+		return "", err
+	}
+	return sha, nil
 }
 
 // RebaseDeployBranch re-applies params.Tag onto the current HEAD of

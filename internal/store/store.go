@@ -124,6 +124,59 @@ func (s *Store) Delete(ctx context.Context, prNumber int) error {
 	return s.rdb.Del(ctx, key(prNumber)).Err()
 }
 
+// SetSlackHandle atomically stores the (channel, message timestamp) pair on
+// the pending deploy record for prNumber, preserving all other fields and
+// the current TTL. Uses WATCH/MULTI so a concurrent writer (e.g. the
+// approval handler transitioning state from pending to merging) is not
+// clobbered by this update.
+//
+// If the record no longer exists (the deploy was already approved,
+// rejected, cancelled, or expired by the time the Slack post completed),
+// this is a no-op rather than an error: the caller is expected to treat
+// a missing handle as "not correlatable" rather than a failure.
+func (s *Store) SetSlackHandle(ctx context.Context, prNumber int, channel, ts string) error {
+	k := key(prNumber)
+	const maxRetries = 5
+	for range maxRetries {
+		err := s.rdb.Watch(ctx, func(tx *redis.Tx) error {
+			data, err := tx.Get(ctx, k).Bytes()
+			if err == redis.Nil {
+				return nil // record gone — no-op
+			}
+			if err != nil {
+				return err
+			}
+			var d PendingDeploy
+			if err := json.Unmarshal(data, &d); err != nil {
+				return fmt.Errorf("unmarshal deploy: %w", err)
+			}
+			d.SlackChannel = channel
+			d.SlackMessageTS = ts
+			newData, err := json.Marshal(&d)
+			if err != nil {
+				return fmt.Errorf("marshal deploy: %w", err)
+			}
+			ttl := time.Until(d.ExpiresAt)
+			if ttl <= 0 {
+				return nil // already expired — no-op
+			}
+			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				pipe.Set(ctx, k, newData, ttl)
+				return nil
+			})
+			return err
+		}, k)
+		if err == nil {
+			return nil
+		}
+		if err != redis.TxFailedErr {
+			return fmt.Errorf("set slack handle: %w", err)
+		}
+		// WATCH aborted because another writer touched the key; retry.
+	}
+	return fmt.Errorf("set slack handle: %d retries exhausted", maxRetries)
+}
+
 func (s *Store) UpdateState(ctx context.Context, prNumber int, state string) error {
 	d, err := s.Get(ctx, prNumber)
 	if err != nil {
