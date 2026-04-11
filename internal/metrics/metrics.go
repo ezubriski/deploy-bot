@@ -54,7 +54,7 @@ func New(reg prometheus.Registerer) *Metrics {
 
 		ArgoCDNotificationsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "deploybot_argocd_notifications_total",
-			Help: "ArgoCD lifecycle notifications processed by the worker, labeled by trigger and outcome. Result values: matched (correlated to history, posted), unmatched (no history entry for sha), lookup_error (redis lookup failed), no_handle_skipped (sync-succeeded dropped because history entry has no slack handle), unhandled_trigger (trigger name not wired in bot).",
+			Help: "ArgoCD lifecycle notifications processed by the worker, labeled by trigger and outcome. Result values: matched (correlated to history, posted), unmatched (no history entry for sha), lookup_error (redis lookup failed), no_handle_skipped (sync-succeeded dropped because history entry has no slack handle), unhandled_trigger (trigger name not wired in bot), transient_rollout_skipped (health-degraded dropped for a fresh deploy whose payload had no actually-degraded sub-resources — assumed to be an argocd-reconciler roll-up artifact during a healthy rollout).",
 		}, []string{"trigger", "result"}),
 	}
 
@@ -116,6 +116,14 @@ const (
 	ArgoCDResultLookupError      = "lookup_error"
 	ArgoCDResultNoHandleSkipped  = "no_handle_skipped"
 	ArgoCDResultUnhandledTrigger = "unhandled_trigger"
+	// ArgoCDResultTransientRolloutSkipped is recorded when an
+	// on-health-degraded notification is dropped because it arrived for
+	// a freshly-completed deploy with no actually-degraded sub-resources
+	// in the payload — the fingerprint of an argocd-reconciler
+	// roll-up artifact during a healthy Deployment rollout. See
+	// internal/bot/argocd.go isTransientRolloutDegraded for the exact
+	// gate and docs/argocd-notifications.md for operator tuning notes.
+	ArgoCDResultTransientRolloutSkipped = "transient_rollout_skipped"
 )
 
 // RecordArgoCDNotification increments the ArgoCD notification outcome

@@ -300,6 +300,29 @@ against older releases will land once the homelab cluster upgrades.
 - **No HMAC.** The argocd-notifications template engine cannot compute HMAC,
   so authentication is shared-secret-in-header. Terminate at an internal
   ingress that adds mTLS if you need stronger transport security.
+- **Transient health-degraded during healthy rollouts.** During a
+  rollout (including rollbacks), argocd briefly reports
+  `.status.health.status = Degraded` at the app level *before* its
+  resource-health reconciler has had a chance to re-run on the new
+  revision. If the `on-health-degraded` notification fires during that
+  tick, the payload's per-resource `healthStatus`/`healthMessage`
+  fields will all be empty, because argocd hasn't computed them yet.
+  The worker treats this pattern as a reconciler roll-up artifact and
+  **drops** the notification instead of alarming a freshly-healthy
+  deploy: if the matched history entry's `CompletedAt` is within
+  `transientGraceWindow` (10m, not currently config-driven) *and* the
+  payload carries zero entries with a non-empty, non-`Healthy` health
+  status, the handler records a `transient_rollout_skipped` result on
+  `deploybot_argocd_notifications_total` and returns without posting.
+  Outside the window, or when any sub-resource reports an actual
+  Degraded health with a populated `healthMessage`, the alert posts as
+  usual. If you see the suppression metric firing on *real* failures,
+  the reference template is probably missing the `.health.message`
+  rendering under `.app.status.resources[]` — re-check
+  `deploy/argocd-notifications/templates.yaml`. A longer-term fix that
+  sources the "workload is stuck" signal directly from
+  `kube_deployment_status_condition{reason="ProgressDeadlineExceeded"}`
+  via AlertManager is tracked in `TODO.md`.
 
 ### One template per trigger
 

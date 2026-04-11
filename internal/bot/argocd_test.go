@@ -326,6 +326,203 @@ func TestArgoCDHandler_LateArrival_Reframed(t *testing.T) {
 	}
 }
 
+// TestArgoCDHandler_HealthDegraded_SuppressesTransientRollout verifies
+// the argocd-reconciler roll-up race workaround: on-health-degraded
+// notifications for fresh deploys whose payload has no
+// actually-degraded sub-resources are dropped silently, on the
+// assumption that .status.health.status flipped to Degraded for a
+// reconcile tick during a healthy RollingUpdate while per-resource
+// health was stale. See isTransientRolloutDegraded for the fingerprint
+// and the motivating homelab incident on 2026-04-11.
+func TestArgoCDHandler_HealthDegraded_SuppressesTransientRollout(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	entry := seedHistoryForArgoCD(t, st) // fresh CompletedAt (now)
+
+	// Payload shape the reconciler produced in the real incident:
+	// app-level health Degraded, per-resource health uniformly empty.
+	resources := resourcesJSON(t,
+		argocdResource{Kind: "Service", Name: "nginx", Namespace: "dev", SyncStatus: "Synced"},
+		argocdResource{Kind: "Deployment", Name: "nginx", Namespace: "dev", SyncStatus: "OutOfSync"},
+	)
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-health-degraded",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: entry.GitopsCommitSHA,
+		HealthStatus:    "Degraded",
+		Message:         "successfully synced (all tasks run)",
+		Resources:       resources,
+	})
+
+	if len(sl.posts) != 0 {
+		t.Errorf("expected transient rollout to be suppressed (0 posts), got %d: %+v", len(sl.posts), sl.posts)
+	}
+	if got := argocdCounter(t, b, "on-health-degraded", metrics.ArgoCDResultTransientRolloutSkipped); got != 1 {
+		t.Errorf("expected transient_rollout_skipped=1, got %v", got)
+	}
+	if got := argocdCounter(t, b, "on-health-degraded", metrics.ArgoCDResultMatched); got != 0 {
+		t.Errorf("expected matched=0 (not posted), got %v", got)
+	}
+}
+
+// TestArgoCDHandler_HealthDegraded_PostsWhenResourcesActuallyDegraded
+// verifies the symmetric case to the suppress test above: a fresh
+// deploy with at least one *genuinely* degraded resource in the
+// payload must still post the alarming alert. Filters by-resource
+// health — argocd's Lua health check populates healthMessage on real
+// Deployment failures (e.g., "ReplicaSet has timed out progressing"),
+// and the presence of any such resource bypasses the transient gate.
+func TestArgoCDHandler_HealthDegraded_PostsWhenResourcesActuallyDegraded(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	entry := seedHistoryForArgoCD(t, st) // fresh
+
+	resources := resourcesJSON(t,
+		argocdResource{Kind: "Service", Name: "nginx", SyncStatus: "Synced", HealthStatus: "Healthy"},
+		argocdResource{
+			Kind:          "Deployment",
+			Name:          "nginx",
+			SyncStatus:    "Synced",
+			HealthStatus:  "Degraded",
+			HealthMessage: "ReplicaSet 'nginx-7d4' has timed out progressing",
+		},
+	)
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-health-degraded",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: entry.GitopsCommitSHA,
+		HealthStatus:    "Degraded",
+		Resources:       resources,
+	})
+
+	if len(sl.posts) != 1 {
+		t.Fatalf("expected 1 post (real degraded), got %d", len(sl.posts))
+	}
+	if got := argocdCounter(t, b, "on-health-degraded", metrics.ArgoCDResultMatched); got != 1 {
+		t.Errorf("expected matched=1, got %v", got)
+	}
+	if got := argocdCounter(t, b, "on-health-degraded", metrics.ArgoCDResultTransientRolloutSkipped); got != 0 {
+		t.Errorf("expected transient_rollout_skipped=0, got %v", got)
+	}
+}
+
+// TestArgoCDHandler_HealthDegraded_PostsWhenOldDeployEvenWithEmptyResources
+// verifies the time gate on the transient-suppression path: a deploy
+// older than transientGraceWindow must post on empty-resources
+// degraded events. Rationale — a deploy that has been healthy for 10+
+// minutes and is NOW reporting Degraded with no per-resource detail is
+// much more likely to be a real bug (argocd wedged, resource health
+// reconciler crashed) than a transient rollout artifact, and
+// suppressing it would swallow a signal worth investigating. The
+// existing late-arrival reframing (>2h) still applies separately when
+// the deploy is very old.
+func TestArgoCDHandler_HealthDegraded_PostsWhenOldDeployEvenWithEmptyResources(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	// Deploy older than transientGraceWindow (10m) but younger than
+	// lateArrivalThreshold (2h). Hits the alarming-framing branch.
+	entry := seedHistoryForArgoCD(t, st, func(e *store.HistoryEntry) {
+		e.CompletedAt = time.Now().Add(-30 * time.Minute)
+	})
+
+	resources := resourcesJSON(t,
+		argocdResource{Kind: "Service", Name: "nginx", SyncStatus: "Synced"},
+		argocdResource{Kind: "Deployment", Name: "nginx", SyncStatus: "Synced"},
+	)
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-health-degraded",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: entry.GitopsCommitSHA,
+		HealthStatus:    "Degraded",
+		Resources:       resources,
+	})
+
+	if len(sl.posts) != 1 {
+		t.Fatalf("expected 1 post (old deploy), got %d", len(sl.posts))
+	}
+	if got := argocdCounter(t, b, "on-health-degraded", metrics.ArgoCDResultMatched); got != 1 {
+		t.Errorf("expected matched=1, got %v", got)
+	}
+	if got := argocdCounter(t, b, "on-health-degraded", metrics.ArgoCDResultTransientRolloutSkipped); got != 0 {
+		t.Errorf("expected transient_rollout_skipped=0, got %v", got)
+	}
+}
+
+// TestIsTransientRolloutDegraded_Unit exercises the helper directly
+// across its truth table so the semantic gates are locked in even
+// without a full Bot + Store + Slack scaffold.
+func TestIsTransientRolloutDegraded_Unit(t *testing.T) {
+	fresh := time.Now()
+	old := time.Now().Add(-30 * time.Minute)
+
+	emptyResources := resourcesJSON(t,
+		argocdResource{Kind: "Deployment", Name: "nginx"},
+	)
+	degradedResources := resourcesJSON(t,
+		argocdResource{Kind: "Deployment", Name: "nginx", HealthStatus: "Degraded", HealthMessage: "timed out"},
+	)
+
+	tests := []struct {
+		name  string
+		entry *store.HistoryEntry
+		evt   queue.ArgoCDNotificationEvent
+		want  bool
+	}{
+		{
+			name:  "nil entry — conservative pass-through",
+			entry: nil,
+			evt:   queue.ArgoCDNotificationEvent{Resources: emptyResources},
+			want:  false,
+		},
+		{
+			name:  "zero CompletedAt — conservative pass-through",
+			entry: &store.HistoryEntry{},
+			evt:   queue.ArgoCDNotificationEvent{Resources: emptyResources},
+			want:  false,
+		},
+		{
+			name:  "fresh deploy + empty resources — transient",
+			entry: &store.HistoryEntry{CompletedAt: fresh},
+			evt:   queue.ArgoCDNotificationEvent{Resources: emptyResources},
+			want:  true,
+		},
+		{
+			name:  "fresh deploy + degraded resource — real failure",
+			entry: &store.HistoryEntry{CompletedAt: fresh},
+			evt:   queue.ArgoCDNotificationEvent{Resources: degradedResources},
+			want:  false,
+		},
+		{
+			name:  "old deploy + empty resources — outside time gate",
+			entry: &store.HistoryEntry{CompletedAt: old},
+			evt:   queue.ArgoCDNotificationEvent{Resources: emptyResources},
+			want:  false,
+		},
+		{
+			name:  "old deploy + degraded resource — real failure",
+			entry: &store.HistoryEntry{CompletedAt: old},
+			evt:   queue.ArgoCDNotificationEvent{Resources: degradedResources},
+			want:  false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTransientRolloutDegraded(tc.evt, tc.entry); got != tc.want {
+				t.Errorf("isTransientRolloutDegraded: got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // --- unit tests for pure helpers (no Bot, no Slack) ---
 
 func TestParseAndFilterResources(t *testing.T) {

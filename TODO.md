@@ -37,6 +37,62 @@ release; they're tracked here so they don't get lost.
   rewrite `RecentTags`/`Tags` to read from the richer slice). Removes a
   drift hazard introduced by the tag-timestamp commit.
 
+- [ ] **Alternative failure-signal source: AlertManager webhook receiver.**
+  Today `on-health-degraded` is sourced exclusively from
+  argocd-notifications, which is inherently susceptible to transient
+  false positives: argocd rolls the app-level
+  `.status.health.status` to `Degraded` for a reconcile tick during
+  healthy RollingUpdates while per-resource health on the new
+  revision is being recomputed. The current mitigation
+  (`isTransientRolloutDegraded` in `internal/bot/argocd.go`) gates on
+  deploy age + per-resource health emptiness — see the 2026-04-11
+  homelab incident notes in chat/commit history and the Gotchas
+  section in `docs/argocd-notifications.md`. That heuristic is a
+  patch on top of a fundamentally noisy signal.
+
+  The *correct* source of truth for "a Deployment is genuinely stuck"
+  is `kube_deployment_status_condition{condition="Progressing",
+  status="false", reason="ProgressDeadlineExceeded"} == 1` exposed by
+  kube-state-metrics. An AlertManager webhook receiver on deploy-bot
+  would:
+
+  - Source from Prometheus, not argocd's async Lua health check, so
+    no transient state window.
+  - Work identically whether deploy-bot is in-cluster or remote —
+    AlertManager just POSTs to a URL, same shape as
+    argocd-notifications does now.
+  - Decouple deploy-bot from argocd's notification pipeline, so a
+    multi-cluster / multi-argocd deployment lives behind one
+    webhook endpoint instead of requiring per-cluster
+    argocd-notifications wiring.
+  - Degrade gracefully: clusters that don't run Prometheus fall back
+    to the argocd-notifications path (same as today).
+
+  Required work: (1) new receiver endpoint at
+  `/v1/webhooks/alertmanager` with AlertManager's payload shape, (2)
+  new config section `alertmanager_notifications` + shared-secret
+  field in secrets, (3) deploy-bot to stamp
+  `deploy.bot/gitops-sha` and `deploy.bot/env` labels on Deployments
+  at kustomize-patch time so AlertManager rules can join on them
+  (via `kube_deployment_labels`) for correlation back to history,
+  (4) worker dispatch that feeds the AlertManager alert into the
+  same `postArgoCDFailure` rendering path, (5) docs + integration
+  test.
+
+  Tradeoffs: requires Prometheus + kube-state-metrics + AlertManager
+  in every cluster deploy-bot is watching. Most prod clusters have
+  this; the homelab currently does not. AlertManager is still
+  cleaner than metric-backend-specific direct queries — it bridges
+  Prometheus, VictoriaMetrics, Mimir, Cortex, etc. behind a common
+  webhook protocol, insulating deploy-bot from per-vendor
+  differences in PromQL dialects, auth schemes, and label support.
+
+  **Recommended as the long-term preferred shape for failure
+  notifications**, with the argocd-notifications `on-health-degraded`
+  path kept as a fallback for clusters without Prometheus. Not
+  urgent — the `isTransientRolloutDegraded` gate handles the
+  observed failure mode for now.
+
 - [ ] **Disable self-approval by default.** Self-approval (requester == approver)
   should be disabled by default; it's useful for testing but questionable in
   production. When disabled: (1) filter the requesting user out of the approver
