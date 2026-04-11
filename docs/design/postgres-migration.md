@@ -117,6 +117,8 @@ CREATE TABLE history (
     tag                 TEXT         NOT NULL,
     pr_number           INTEGER,                 -- NULL for direct-deploy paths if any
     pr_url              TEXT,
+    github_org          TEXT,                    -- NULL-tolerant for 1.x → 2.0 migration; required going forward
+    github_repo         TEXT,                    -- NULL-tolerant for 1.x → 2.0 migration; required going forward
     requester_id        TEXT         NOT NULL,
     approver_id         TEXT,                    -- NULL for non-approved events
     completed_at        TIMESTAMPTZ  NOT NULL,
@@ -147,9 +149,19 @@ CREATE INDEX history_completed_at_idx
 
 ### `pending_deploys`
 
+Primary key is a composite `(github_org, github_repo, pr_number)` so
+deploy-bot can manage apps across multiple gitops repos in a single
+bot instance without PR numbers colliding. Today the code has an
+implicit single-repo assumption in its `pending:<pr>` Redis key; the
+composite PK removes that assumption at near-zero cost and without
+requiring any callers to think about it until they want to wire up
+multi-repo tenancy.
+
 ```sql
 CREATE TABLE pending_deploys (
-    pr_number         INTEGER      PRIMARY KEY,
+    github_org        TEXT         NOT NULL,
+    github_repo       TEXT         NOT NULL,
+    pr_number         INTEGER      NOT NULL,
     app               TEXT         NOT NULL,
     environment       TEXT         NOT NULL,
     tag               TEXT         NOT NULL,
@@ -163,7 +175,8 @@ CREATE TABLE pending_deploys (
     expires_at        TIMESTAMPTZ  NOT NULL,
     state             TEXT         NOT NULL DEFAULT 'pending' CHECK (state IN (
                                      'pending', 'approved', 'rejected', 'expired', 'cancelled'
-                                  ))
+                                  )),
+    PRIMARY KEY (github_org, github_repo, pr_number)
 );
 
 -- Sweeper expiration scan. Partial index keeps it tight since terminal-
@@ -177,6 +190,15 @@ CREATE INDEX pending_deploys_app_env_idx
     ON pending_deploys (app, environment)
     WHERE state = 'pending';
 ```
+
+The 1.x → 2.0 data migration populates `github_org` and `github_repo`
+from the top-level `github` config section, since 1.x is
+single-repo-by-definition. Operators starting on 2.0 with multi-repo
+tenancy get those values from whichever config path wired the deploy
+— each repo-sourced app discovery record or operator config entry
+must then carry the `(github_org, github_repo)` it originated from.
+Multi-repo tenancy beyond that is a follow-up; the schema just
+doesn't block it.
 
 Terminal-state rows (approved/rejected/expired/cancelled) stay in this
 table briefly for idempotency (so a late button-click on an already-closed
@@ -376,12 +398,38 @@ secrets level.
 ergonomic middle ground — file-based migrations with up/down directions,
 tracks state in a `goose_db_version` table, no runtime DSL to learn.
 
-**Invocation:** at bot startup, run `goose.Up()` automatically against
-the configured Postgres. Migrations are small, fast, and idempotent; no
-reason to make operators run a separate step. A feature-flag
-`postgres.auto_migrate: false` lets operators disable this and run
-migrations out-of-band for stricter change control, but the default is
-auto-migrate for operational simplicity.
+**Invocation:**
+
+- **Default: `postgres.auto_migrate: false`.** Migrations do not run
+  automatically. An operator upgrading to a release that ships a new
+  migration must explicitly flip the flag on in config, restart the
+  bot, and then flip it back off — a deliberate, logged, one-time
+  action per upgrade window. Release notes for any release with a
+  new migration will call this out as an upgrade requirement.
+- **Startup-only, never hot-reload.** Migrations run exactly once per
+  process, during startup, *before* the bot or receiver begins
+  accepting events. Config hot-reload (via `config.Watch`, mtime
+  polling + SIGHUP) explicitly does NOT re-run migrations on change;
+  changes to the `postgres` section of config are logged as
+  "requires restart to take effect." Rationale: a schema migration
+  is stateful infrastructure change that can't be safely undone or
+  retried mid-flight, and holding config and schema state in sync
+  requires bouncing the process anyway.
+- **Advisory-locked.** Before calling `goose.Up()`, the bot acquires
+  a Postgres session-scoped advisory lock via
+  `pg_advisory_lock(<fixed-constant>)` to prevent multi-replica
+  races during a rolling restart. Only one replica runs migrations;
+  others block on the lock until migration completes, then re-enter
+  the startup path and find the schema already at head. The lock
+  constant is fixed (e.g., `2026_04_11_deploybot_migrate_lock` → a
+  deterministic `bigint`), shared across all replicas of the same
+  bot/database pair. `pg_advisory_lock` is session-scoped, so if a
+  replica crashes mid-migration the server releases the lock
+  automatically when the connection drops — no stale-lock recovery
+  logic needed. Whether or not goose's own internal locking is
+  sufficient on the target Postgres version, we take this lock
+  ourselves: the operational cost is ~1 RTT and the correctness
+  guarantee is absolute.
 
 **File layout:**
 
@@ -464,21 +512,13 @@ review:
    row-level filtering? Leaning "one per environment, mirrors how Redis
    is deployed today." Decide during implementation.
 
-2. **`pr_number` as primary key.** It's unique within a given GitHub repo,
-   but if deploy-bot ever manages apps across multiple gitops repos in
-   the same bot instance, PR numbers can collide. Today's code has the
-   same assumption in its `pending:<pr>` Redis key, so this is not a
-   regression — but adding a `(pr_number, github_org, github_repo)`
-   composite primary key from day one costs nothing and future-proofs
-   against multi-repo tenancy. Mild lean toward composite.
-
-3. **JSONB sidecar for unknown fields.** Should `history` carry a `metadata
+2. **JSONB sidecar for unknown fields.** Should `history` carry a `metadata
    JSONB` column for future-additive fields we haven't thought of yet?
    Argument for: cheap, saves one migration per new field. Argument
    against: it's an attractive nuisance for schemaless drift. Lean
    against — we use `ALTER TABLE ADD COLUMN` when we need a new field.
 
-4. **Long-running `SELECT FOR UPDATE SKIP LOCKED` in the sweeper.**
+3. **Long-running `SELECT FOR UPDATE SKIP LOCKED` in the sweeper.**
    The sweeper currently runs every 5 minutes. `FOR UPDATE SKIP LOCKED`
    is right for multi-worker safety, but holds row locks for the
    duration of the handler. Handler is fast (a few Slack posts + a
@@ -486,18 +526,13 @@ review:
    Worth confirming the handler is genuinely fast and not accidentally
    synchronous on anything slow. Quick audit at implementation time.
 
-5. **Multi-version table schemas during the rolling upgrade.** None of
+4. **Multi-version table schemas during the rolling upgrade.** None of
    the existing 2.0 work requires it because we're doing a hard cut, but
    the next schema change (2.1 or whatever) will. Worth defining the
    policy now — additive changes only, `ADD COLUMN NULLABLE` or `ADD
    COLUMN ... DEFAULT ...`, no destructive changes in the same release
    as code that stops writing the column. Standard stuff, just document
    it.
-
-6. **`auto_migrate` on by default or off?** I'm defaulting to on because
-   it reduces operator friction, but stricter shops might want
-   out-of-band migrations. Gated behind a config flag. Default decision
-   stands unless operator feedback says otherwise.
 
 ## Cost / effort estimate
 
@@ -514,24 +549,36 @@ Back-of-envelope sizing:
   `internal/store/pending.go`, update callers): ~-300 LoC net.
 
 Total: **somewhere around 1400-1600 LoC net new**, most of it in the
-postgres package and its tests. Small doc prose churn. Probably 3-4
-reviewable PRs:
+postgres package and its tests. Small doc prose churn.
 
-1. `feat(store): add postgres package behind feature flag` — schema,
-   pool, one method each for history + pending, no cutover yet, tests
-   for the new code only. Bot still reads/writes Redis.
-2. `feat(store): cut history over to postgres, remove redis list` —
-   removes `internal/store/history.go`, updates callers, gates behind
-   `postgres.enabled` until the release.
-3. `feat(store): cut pending over to postgres, update sweeper` — same
-   shape, for pending.
-4. `feat: require postgres (deploy-bot 2.0)` — flips defaults, removes
-   the feature flag, includes `cmd/migrate-redis-to-postgres`, updates
-   docs, bumps the module version.
+**Delivered as a single mega-PR** against a `feat/postgres-2.0`
+branch. One reviewable artifact, one atomic merge. The staged
+approach I originally considered (feature-flagged intermediate
+states landing behind `postgres.enabled: false`, cutover in a final
+PR) buys nothing for a solo-maintained repo where the reviewer is
+an AI session that prefers to see the whole shape at once — and
+costs extra review cycles plus the drift risk of flagged code
+sitting on main. The mega PR contains:
 
-Each is independently reviewable and the middle two can land on main
-without breaking 1.x behaviour (the feature flag defaults off). Only the
-last PR is the breaking change.
+- Schema + goose migrations
+- `internal/store/postgres/` package (pool, history, pending,
+  retention, migration invocation with `pg_advisory_lock` gate)
+- Removal of `internal/store/history.go` and `internal/store/pending.go`
+- Updates to every caller (`cmd/bot/main.go`, `cmd/receiver/main.go`,
+  sweeper, argocd handler, commands, actions)
+- `cmd/migrate-redis-to-postgres/main.go` standalone one-shot
+- Config surface additions (`postgres: {host, port, database, user,
+  sslmode, auto_migrate}`) + secrets additions (`postgres_password`,
+  `postgres_iam_auth`)
+- Test updates: `internal/store/postgres/*_test.go` with
+  testcontainers, integ harness updates, CI service container
+- Doc updates: new `docs/postgres-setup.md`, updates to
+  `docs/production-setup.md`, `docs/configuration.md`,
+  `docs/quickstart.md`, and 2.0 release notes
+- Module major-version bump
+
+This doc itself (landing separately as PR #53) is the design-review
+gate; the mega PR can cite it to keep its own description terse.
 
 ## What this doc is not
 
@@ -562,3 +609,21 @@ last PR is the breaking change.
   table with a `state` column.
 - **Hard cut** on a major version bump, not dual-write. One `cmd/migrate-
   redis-to-postgres` command, run once during the 1.x → 2.0 upgrade.
+- **Composite primary key** on `pending_deploys`:
+  `(github_org, github_repo, pr_number)`. Both tables carry
+  `github_org` / `github_repo` columns to future-proof multi-repo
+  tenancy at near-zero cost.
+- **`auto_migrate` default is OFF.** Operators explicitly flip it on
+  in config to run a new migration during an upgrade window, then
+  flip it back off. Release notes for any release shipping a new
+  migration will call this out.
+- **Migrations run at startup only**, never on config hot-reload.
+  Changes to the `postgres` section of config require a process
+  restart to take effect; the config watcher logs a warning
+  otherwise.
+- **Migration invocation is gated by `pg_advisory_lock`** before
+  calling `goose.Up()`, to defend against multi-replica rolling-restart
+  races regardless of goose's own internal locking semantics.
+- **Single mega-PR delivery** against a `feat/postgres-2.0` branch,
+  reviewed as one atomic artifact. No feature-flag-gated intermediate
+  states on main.
