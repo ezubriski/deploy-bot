@@ -35,6 +35,14 @@ const (
 	ActionApprove = "action_approve"
 	ActionReject  = "action_reject"
 
+	// Phase 4 ArgoCD rollback prompt — the two buttons attached to the
+	// separate top-level message posted alongside a sync-failed /
+	// health-degraded alert. Both buttons carry the same JSON-encoded
+	// payload in their Value field so each handler can decode the
+	// failing deploy's app/env/tags without re-reading Redis state.
+	ActionArgoCDRollback = "action_argocd_rollback"
+	ActionArgoCDDismiss  = "action_argocd_dismiss"
+
 	// Deprecated: kept for backward compatibility during rollout.
 	BlockApp  = "block_app"
 	ActionApp = "action_app"

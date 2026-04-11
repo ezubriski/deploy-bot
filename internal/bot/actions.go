@@ -46,6 +46,10 @@ func (b *Bot) handleBlockAction(ctx context.Context, callback slack.InteractionC
 		case ActionTagManual:
 			b.handleManualTagValidation(ctx, callback)
 			return
+		case ActionArgoCDRollback:
+			b.handleArgoCDRollbackClick(ctx, callback, action)
+		case ActionArgoCDDismiss:
+			b.handleArgoCDDismissClick(ctx, callback, action)
 		}
 	}
 }

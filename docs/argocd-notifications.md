@@ -13,21 +13,29 @@ The current scope:
 | Argo trigger          | What the bot does                                                                  |
 | --------------------- | ---------------------------------------------------------------------------------- |
 | `on-sync-succeeded`   | Quiet threaded reply under the original deploy message: "synced and healthy"       |
-| `on-sync-failed`      | **Top-level alarming message** in the deploy channel with failing-resource detail  |
-| `on-health-degraded`  | **Top-level alarming message** with failing-resource detail                        |
+| `on-sync-failed`      | **Top-level alarming message** with failing-resource detail, plus a separate rollback-prompt message with `[Roll back]` / `[Dismiss]` buttons |
+| `on-health-degraded`  | Same as `on-sync-failed`                                                           |
 | `on-sync-running`     | _Subscribed but currently dropped._ See "Future work" below                        |
 
-> **Phase 3 status (this commit):** receiver webhook + queue plumbing + dedupe
-> + worker-side correlation + failure posting are all live. Failure messages
-> land top-level in the deploy channel with siren framing, requester ping,
-> per-resource detail, and a permalink back to the original deploy. Late-
-> arriving notifications (deploy > 2h old) use calmer framing with an
-> "investigate before rolling back" note.
+> **Phase 4 status (this commit):** alongside every phase-3 failure status
+> message, the bot now posts a **separate top-level "suggested action"
+> message** carrying `[Roll back]` and `[Dismiss]` buttons. The rollback
+> target is the previous known-good tag for the same app/env, resolved
+> from deploy history at post time and baked into the button payload so
+> clicks stay deterministic. Late-arriving failures (deploy > 2h old) and
+> first-ever deploys (no prior approved history entry) suppress the
+> prompt entirely — the status message still lands.
 >
-> **Still deferred to phase 4:** the separate rollback-prompt message with
-> [Roll back] and [Dismiss] buttons, and the late-arrival suppression of
-> the rollback prompt specifically (the phase-3 status message still
-> surfaces, the prompt does not).
+> **Buttons:**
+>
+> - `[Roll back]` opens the standard deploy approval modal in rollback
+>   mode with the app, environment, and previous tag pre-filled. The
+>   submission goes through the normal approval flow, so the usual
+>   per-app lock, tag validation, and approver authorization apply.
+> - `[Dismiss]` replaces the prompt buttons in place with a
+>   ":no_entry_sign: *Dismissed* by @user" line. Only members of the
+>   authorized team can dismiss — other users get an ephemeral refusal
+>   and the prompt stays clickable.
 
 ## Architecture
 
@@ -79,6 +87,40 @@ note. The rationale (from the planning discussion): a sync that was healthy
 for hours and then degrades is almost certainly a runtime issue, not a
 bad deploy, and rolling back a hours-old stable deploy is rarely the right
 first response.
+
+### Rollback prompt (phase 4)
+
+The rollback target is resolved from deploy history at prompt-post time,
+not at click time. The handler scans history newest-first for the most
+recent `approved` entry for the same composite `app-env` FullName whose
+`CompletedAt` is **strictly before** the failing deploy's `CompletedAt`,
+and embeds the resulting tag in the button's JSON payload. This handles
+the race where a newer deploy has already completed by the time an
+ArgoCD notification arrives: we still want to roll back past the
+failing deploy, not past an unrelated newer one.
+
+Suppression conditions (logged at info level, no prompt posted):
+
+- **Late arrival** (failing deploy > `lateArrivalThreshold`, default 2h).
+  A hours-old deploy that has been healthy for hours is almost never
+  the right thing to roll back.
+- **No prior approved history entry** for this app/env. This is the
+  first-ever deploy, so there is no known-good tag to offer.
+- **History lookup failure**. Redis blip during the notification
+  handler — the status message has already posted, and dropping the
+  prompt is safer than offering a `[Roll back]` button that can't
+  resolve its target.
+
+Authorization:
+
+- **`[Roll back]`** requires the clicker to be a member of the
+  authorized team (same bar as `/deploy rollback`). On click, the
+  standard deploy modal opens in rollback mode — the subsequent
+  submit, approval, and merge all go through the normal flow.
+- **`[Dismiss]`** also requires team membership. On click the prompt
+  message is updated in place: buttons are replaced with a
+  ":no_entry_sign: *Dismissed* by @user" line. The underlying failure
+  status message is left untouched.
 
 ### Resource detail
 
@@ -228,13 +270,6 @@ against older releases will land once the homelab cluster upgrades.
 
 ## Future work
 
-- **Rollback button + Dismiss**: phase 4. A separate top-level message
-  posted alongside the phase-3 status message, carrying the previous
-  known-good tag and a `[Roll back]` button that opens the standard
-  deploy-approval modal, plus a `[Dismiss]` button an authorized approver
-  can use to clear the prompt when fixing forward. Late-arriving
-  notifications will post the status message but suppress the rollback
-  prompt — a hours-old deploy is rarely the right thing to roll back.
 - **`on-sync-running` watchdog**: rather than echoing every "sync started"
   notification (low signal), use the absence of a `sync-succeeded` within
   N minutes of a merge to detect stuck ArgoCD or unsubscribed apps. Tracked

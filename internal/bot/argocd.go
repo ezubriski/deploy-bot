@@ -136,9 +136,13 @@ func (b *Bot) postArgoCDSuccess(ctx context.Context, evt queue.ArgoCDNotificatio
 		)
 		return
 	}
+	// entry.App is already the composite "app-env" FullName written by
+	// handleApprove from PendingDeploy.App. Rendering it as-is avoids
+	// the double-env artefact ("myapp-prod-prod") a naive `%s-%s`
+	// concat would produce.
 	text := fmt.Sprintf(
-		":white_check_mark: ArgoCD synced *%s-%s* at `%s` — healthy.",
-		entry.App, entry.Environment, entry.Tag,
+		":white_check_mark: ArgoCD synced *%s* at `%s` — healthy.",
+		entry.App, entry.Tag,
 	)
 	b.postSlack(ctx, entry.SlackChannel, "argocd sync-succeeded reply",
 		slack.MsgOptionText(text, false),
@@ -192,6 +196,12 @@ func (b *Bot) postArgoCDFailure(
 	// deploy channel so they can't be missed by someone scanning the
 	// channel view.
 	b.postSlack(ctx, channel, "argocd failure notice", slack.MsgOptionText(text, false))
+
+	// Phase 4: alongside the alarming status message, post a separate
+	// top-level prompt carrying [Roll back] and [Dismiss] buttons. The
+	// prompt self-suppresses on late arrivals and on deploys with no
+	// prior known-good tag to roll back to.
+	b.postArgoCDRollbackPrompt(ctx, channel, entry, lateArrival)
 }
 
 // buildArgoCDFailureMessage renders the alarming Slack message body. Kept
@@ -205,12 +215,15 @@ func buildArgoCDFailureMessage(
 ) string {
 	var sb strings.Builder
 
+	// entry.App carries the composite "app-env" FullName — do not
+	// re-concatenate entry.Environment here, or the rendered label
+	// comes out as "myapp-prod-prod".
 	if lateArrival {
 		// Calmer framing: this is almost certainly a runtime failure,
 		// not a bad deploy. The subject is the app, not the deploy.
 		fmt.Fprintf(&sb,
-			":warning: *Health issue on previously-deployed `%s-%s` (`%s`)*\n",
-			entry.App, entry.Environment, entry.Tag,
+			":warning: *Health issue on previously-deployed `%s` (`%s`)*\n",
+			entry.App, entry.Tag,
 		)
 		fmt.Fprintf(&sb,
 			"Deployed %s by %s.\n\n",
@@ -225,8 +238,8 @@ func buildArgoCDFailureMessage(
 			heading,
 		)
 		fmt.Fprintf(&sb,
-			"*%s-%s* — tag `%s` — deployed by %s\n\n",
-			entry.App, entry.Environment, entry.Tag,
+			"*%s* — tag `%s` — deployed by %s\n\n",
+			entry.App, entry.Tag,
 			slackMention(entry.RequesterID),
 		)
 	}
