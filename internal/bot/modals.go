@@ -3,6 +3,7 @@ package bot
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/slack-go/slack"
 
@@ -43,6 +44,7 @@ const (
 type DeployModalState struct {
 	SelectedApp string `json:"app,omitempty"`
 	SelectedEnv string `json:"env,omitempty"`
+	IsRollback  bool   `json:"rollback,omitempty"`
 }
 
 func (s DeployModalState) Marshal() string {
@@ -76,6 +78,14 @@ type DeployModalParams struct {
 	Approver       string
 	StaleDuration  string
 	CommandName    string
+
+	// Rollback fields — populated when the modal is opened via /deploy rollback.
+	IsRollback          bool
+	RollbackCurrent     string
+	RollbackCurrentDate time.Time
+	RollbackTarget      string
+	RollbackTargetDate  time.Time
+	ExcludeTag          string // tag to filter out of TagOptions (the current version)
 }
 
 // ModalValues provides safe access to Slack modal view state values,
@@ -134,6 +144,7 @@ func buildDeployModal(p DeployModalParams) slack.ModalViewRequest {
 	state := DeployModalState{
 		SelectedApp: p.SelectedApp,
 		SelectedEnv: p.SelectedEnv,
+		IsRollback:  p.IsRollback,
 	}
 
 	// App Name select with dispatch_action
@@ -180,27 +191,61 @@ func buildDeployModal(p DeployModalParams) slack.ModalViewRequest {
 
 	blocks := []slack.Block{appBlock, envBlock}
 
-	// Tag select — only shown when both app and env are selected
-	if len(p.TagOptions) > 0 {
+	// Rollback info section — shown when rollback mode has history data.
+	if p.IsRollback && p.RollbackCurrent != "" {
+		appLabel := p.SelectedApp
+		if p.SelectedEnv != "" {
+			appLabel = p.SelectedApp + "-" + p.SelectedEnv
+		}
+		info := fmt.Sprintf(
+			":rewind: *Rolling back %s*\nCurrent:  `%s` (deployed %s)\nTarget:   `%s` (deployed %s)",
+			appLabel,
+			p.RollbackCurrent, p.RollbackCurrentDate.Format("Jan 2"),
+			p.RollbackTarget, p.RollbackTargetDate.Format("Jan 2"),
+		)
+		blocks = append(blocks, slack.NewSectionBlock(
+			slack.NewTextBlockObject("mrkdwn", info, false, false),
+			nil, nil,
+		))
+	}
+
+	// Filter out excluded tag (e.g. current version during rollback).
+	tagOptions := p.TagOptions
+	if p.ExcludeTag != "" {
+		var filtered []*slack.OptionBlockObject
+		for _, opt := range p.TagOptions {
+			if opt.Value != p.ExcludeTag {
+				filtered = append(filtered, opt)
+			}
+		}
+		tagOptions = filtered
+	}
+
+	// Tag select — only shown when both app and env are selected.
+	if len(tagOptions) > 0 {
 		tagElement := slack.NewOptionsSelectBlockElement(
 			slack.OptTypeStatic,
 			slack.NewTextBlockObject("plain_text", "Select tag...", false, false),
 			ActionTag,
-			p.TagOptions...,
+			tagOptions...,
 		)
 		if p.SelectedTag != "" {
-			for _, opt := range p.TagOptions {
+			for _, opt := range tagOptions {
 				if opt.Value == p.SelectedTag {
 					tagElement.InitialOption = opt
 					break
 				}
 			}
-		} else if len(p.TagOptions) > 0 {
-			tagElement.InitialOption = p.TagOptions[0]
+		} else if len(tagOptions) > 0 {
+			tagElement.InitialOption = tagOptions[0]
+		}
+		tagHint := "5 most recent matching tags"
+		if p.ExcludeTag != "" {
+			tagHint = fmt.Sprintf("5 most recent matching tags (%s excluded — current version)", p.ExcludeTag)
 		}
 		blocks = append(blocks, slack.NewInputBlock(BlockTag,
 			slack.NewTextBlockObject("plain_text", "Image Tag", false, false),
-			slack.NewTextBlockObject("plain_text", "5 most recent matching tags", false, false),
+			slack.NewTextBlockObject("plain_text", tagHint, false, false),
 			tagElement,
 		))
 	} else {
@@ -276,9 +321,14 @@ func buildDeployModal(p DeployModalParams) slack.ModalViewRequest {
 		nil, nil,
 	))
 
+	title := "Request Deployment"
+	if p.IsRollback {
+		title = "Rollback Deployment"
+	}
+
 	return slack.ModalViewRequest{
 		Type:            slack.VTModal,
-		Title:           slack.NewTextBlockObject("plain_text", "Request Deployment", false, false),
+		Title:           slack.NewTextBlockObject("plain_text", title, false, false),
 		Submit:          slack.NewTextBlockObject("plain_text", "Submit", false, false),
 		Close:           slack.NewTextBlockObject("plain_text", "Cancel", false, false),
 		CallbackID:      ModalCallbackDeploy,

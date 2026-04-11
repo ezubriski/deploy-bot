@@ -53,11 +53,12 @@ func (b *Bot) handleBlockAction(ctx context.Context, callback slack.InteractionC
 func (b *Bot) handleDeployFilter(ctx context.Context, callback slack.InteractionCallback) {
 	vals := ModalValues(callback.View.State.Values)
 
+	state := ParseDeployModalState(callback.View.PrivateMetadata)
 	selectedApp := vals.SelectedOption(BlockAppName, ActionAppName)
 	selectedEnv := vals.SelectedOption(BlockEnv, ActionEnv)
 
 	cfg := b.cfg.Load()
-	params := b.buildFilteredModalParams(cfg, selectedApp, selectedEnv, "")
+	params := b.buildFilteredModalParams(ctx, cfg, selectedApp, selectedEnv, "", state.IsRollback)
 	params.StaleDuration = cfg.StaleDuration().String()
 
 	// Preserve user-entered values across the view update.
