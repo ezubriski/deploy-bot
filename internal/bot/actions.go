@@ -610,8 +610,9 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 
 	// slackChannel/slackTS are written by the approval-post goroutine and
 	// read after wg.Wait. The wait group provides happens-before, so the
-	// read is race-free. Captured here so we can persist the message handle
-	// on the PendingDeploy for later correlation by ArgoCD lifecycle events.
+	// read is race-free. Persisted via SetSlackHandle (WATCH-based) so a
+	// fast concurrent approval that has already transitioned state to
+	// "merging" is not clobbered by the write-back.
 	var slackChannel, slackTS string
 
 	var wg sync.WaitGroup
@@ -664,14 +665,12 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	wg.Wait()
 
 	// If the approval post succeeded, write the message handle back onto
-	// the PendingDeploy. Done after wg.Wait so the goroutine's writes are
-	// visible. A failed Slack post is non-fatal — the deploy still proceeds
-	// without a stored handle, and ArgoCD correlation falls back to the
-	// per-environment thread.
+	// the PendingDeploy via an atomic field update. Done after wg.Wait so
+	// the goroutine's writes are visible. A failed Slack post is non-fatal
+	// — the deploy still proceeds without a stored handle, and ArgoCD
+	// correlation falls back to the per-environment thread.
 	if slackTS != "" {
-		d.SlackChannel = slackChannel
-		d.SlackMessageTS = slackTS
-		if err := b.store.Set(ctx, d, staleDuration); err != nil {
+		if err := b.store.SetSlackHandle(ctx, prNumber, slackChannel, slackTS); err != nil {
 			b.log.Warn("store: update deploy with slack handle", zap.Error(err))
 		}
 	}

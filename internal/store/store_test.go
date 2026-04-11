@@ -272,27 +272,25 @@ func TestPRNumberFromKey(t *testing.T) {
 	}
 }
 
-// TestPendingDeploy_RoundTripPreservesEnrichmentFields verifies that the
-// GitopsCommitSHA, SlackChannel, and SlackMessageTS fields survive a Set/Get
-// round trip through Redis. These fields are populated incrementally over
-// the deploy lifecycle (slack handle at request time, sha at merge time)
-// and downstream features (ArgoCD notification correlation) depend on them
-// being preserved across reads.
-func TestPendingDeploy_RoundTripPreservesEnrichmentFields(t *testing.T) {
+// TestPendingDeploy_RoundTripPreservesSlackHandle verifies that the
+// SlackChannel and SlackMessageTS fields survive a Set/Get round trip
+// through Redis. These fields are populated after the approval post
+// succeeds, and downstream features (ArgoCD notification correlation)
+// depend on them being preserved across reads.
+func TestPendingDeploy_RoundTripPreservesSlackHandle(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()
 
 	d := &PendingDeploy{
-		App:             "myapp",
-		Environment:     "prod",
-		Tag:             "v1.0.0",
-		PRNumber:        77,
-		PRURL:           "https://github.com/org/repo/pull/77",
-		State:           StatePending,
-		ExpiresAt:       time.Now().Add(time.Hour),
-		GitopsCommitSHA: "abcdef1234567890",
-		SlackChannel:    "C_DEPLOY",
-		SlackMessageTS:  "1700000000.123456",
+		App:            "myapp",
+		Environment:    "prod",
+		Tag:            "v1.0.0",
+		PRNumber:       77,
+		PRURL:          "https://github.com/org/repo/pull/77",
+		State:          StatePending,
+		ExpiresAt:      time.Now().Add(time.Hour),
+		SlackChannel:   "C_DEPLOY",
+		SlackMessageTS: "1700000000.123456",
 	}
 	if err := s.Set(ctx, d, time.Hour); err != nil {
 		t.Fatalf("set deploy: %v", err)
@@ -304,9 +302,6 @@ func TestPendingDeploy_RoundTripPreservesEnrichmentFields(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("expected deploy, got nil")
-	}
-	if got.GitopsCommitSHA != "abcdef1234567890" {
-		t.Errorf("GitopsCommitSHA = %q, want %q", got.GitopsCommitSHA, "abcdef1234567890")
 	}
 	if got.SlackChannel != "C_DEPLOY" {
 		t.Errorf("SlackChannel = %q, want %q", got.SlackChannel, "C_DEPLOY")
@@ -339,9 +334,74 @@ func TestPendingDeploy_OmitemptyAllowsLegacyDecode(t *testing.T) {
 	if err != nil || got == nil {
 		t.Fatalf("get deploy: got=%v err=%v", got, err)
 	}
-	if got.GitopsCommitSHA != "" || got.SlackChannel != "" || got.SlackMessageTS != "" {
-		t.Errorf("expected empty enrichment fields on legacy decode, got sha=%q ch=%q ts=%q",
-			got.GitopsCommitSHA, got.SlackChannel, got.SlackMessageTS)
+	if got.SlackChannel != "" || got.SlackMessageTS != "" {
+		t.Errorf("expected empty enrichment fields on legacy decode, got ch=%q ts=%q",
+			got.SlackChannel, got.SlackMessageTS)
+	}
+}
+
+// TestSetSlackHandle_PreservesOtherFieldsAndState is the key race-safety
+// test: a concurrent writer transitions state to "merging" between our
+// Get and Set, and SetSlackHandle must pick up the new state rather than
+// clobber it back to "pending". This is the scenario described in the
+// SetSlackHandle doc comment: a fast-clicking approver triggers the
+// state transition before the write-back completes.
+func TestSetSlackHandle_PreservesOtherFieldsAndState(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	d := &PendingDeploy{
+		App:         "myapp",
+		Environment: "prod",
+		Tag:         "v1.0.0",
+		PRNumber:    42,
+		PRURL:       "https://github.com/org/repo/pull/42",
+		Requester:   "gh-user",
+		State:       StatePending,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}
+	if err := s.Set(ctx, d, time.Hour); err != nil {
+		t.Fatalf("set deploy: %v", err)
+	}
+
+	// Simulate a concurrent approval transition before our write-back
+	// runs. In production this is the handleApprove path calling
+	// UpdateState(StateMerging).
+	if err := s.UpdateState(ctx, 42, StateMerging); err != nil {
+		t.Fatalf("concurrent state update: %v", err)
+	}
+
+	if err := s.SetSlackHandle(ctx, 42, "C_DEPLOY", "1700000000.999999"); err != nil {
+		t.Fatalf("set slack handle: %v", err)
+	}
+
+	got, err := s.Get(ctx, 42)
+	if err != nil || got == nil {
+		t.Fatalf("get deploy: got=%v err=%v", got, err)
+	}
+	if got.State != StateMerging {
+		t.Errorf("state = %q, want %q — SetSlackHandle clobbered concurrent UpdateState",
+			got.State, StateMerging)
+	}
+	if got.SlackChannel != "C_DEPLOY" || got.SlackMessageTS != "1700000000.999999" {
+		t.Errorf("slack handle = (%q, %q), want (C_DEPLOY, 1700000000.999999)",
+			got.SlackChannel, got.SlackMessageTS)
+	}
+	if got.App != "myapp" || got.Requester != "gh-user" {
+		t.Errorf("other fields clobbered: app=%q requester=%q", got.App, got.Requester)
+	}
+}
+
+// TestSetSlackHandle_NoOpWhenRecordGone verifies that SetSlackHandle returns
+// nil (not an error) when the pending record has already been deleted —
+// e.g. because the deploy was approved and the pending record removed
+// before the Slack post wrote back. Callers treat a missing handle as
+// "not correlatable" rather than a failure; this test pins that contract.
+func TestSetSlackHandle_NoOpWhenRecordGone(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+	if err := s.SetSlackHandle(ctx, 999, "C_DEPLOY", "1700000000.000000"); err != nil {
+		t.Errorf("expected nil error for missing record, got %v", err)
 	}
 }
 

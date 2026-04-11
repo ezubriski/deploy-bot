@@ -22,17 +22,13 @@ type PendingDeploy struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 	State       string    `json:"state"`
 
-	// GitopsCommitSHA is the merge commit SHA in the gitops repo, populated
-	// when the deploy PR is merged. Used to correlate ArgoCD notifications
-	// (which carry the synced revision) back to the deploy that produced it.
-	// Empty until merge.
-	GitopsCommitSHA string `json:"gitops_commit_sha,omitempty"`
-
 	// SlackChannel and SlackMessageTS identify the Slack message the bot
-	// posted when announcing this deploy request. They are persisted so that
-	// follow-up notifications (e.g. ArgoCD lifecycle updates) can post in
-	// context — either as a threaded reply or as a permalink reference —
-	// after the per-environment thread TTL has expired.
+	// posted when announcing this deploy request. Populated by
+	// SetSlackHandle after the approval post succeeds, and copied onto the
+	// HistoryEntry at completion time so that follow-up notifications (e.g.
+	// ArgoCD lifecycle updates) can reference the original message in
+	// context — either as a threaded reply or as a permalink — after the
+	// per-environment thread TTL has expired.
 	SlackChannel   string `json:"slack_channel,omitempty"`
 	SlackMessageTS string `json:"slack_message_ts,omitempty"`
 }

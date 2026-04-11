@@ -554,9 +554,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		})...,
 	)
 	if slackTS != "" {
-		d.SlackChannel = slackChannel
-		d.SlackMessageTS = slackTS
-		if err := b.store.Set(ctx, d, staleDuration); err != nil {
+		if err := b.store.SetSlackHandle(ctx, prNumber, slackChannel, slackTS); err != nil {
 			b.log.Warn("mention deploy: update deploy with slack handle", zap.Error(err))
 		}
 	}

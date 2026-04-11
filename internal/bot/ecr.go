@@ -213,6 +213,11 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 	}()
 	go func() {
 		defer wg.Done()
+		// SlackChannel/SlackMessageTS are intentionally unset here: the
+		// auto-deploy path posts a "merged" notification rather than an
+		// approval request with buttons, so there is no deploy-request
+		// message to correlate ArgoCD lifecycle events against. The
+		// GitopsCommitSHA is still captured for revision-based correlation.
 		if err := b.store.PushHistory(ctx, store.HistoryEntry{
 			EventType:       audit.EventApproved,
 			App:             evt.App,
@@ -261,8 +266,9 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 
 	// slackChannel/slackTS are written by the approval-post goroutine and
 	// read after wg.Wait. The wait group provides happens-before, so the
-	// read is race-free. Captured here so we can persist the message handle
-	// on the PendingDeploy for later correlation by ArgoCD lifecycle events.
+	// read is race-free. Persisted via SetSlackHandle (WATCH-based) so a
+	// fast concurrent approval that has already transitioned state to
+	// "merging" is not clobbered by the write-back.
 	var slackChannel, slackTS string
 
 	var wg sync.WaitGroup
@@ -310,9 +316,7 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	wg.Wait()
 
 	if slackTS != "" {
-		d.SlackChannel = slackChannel
-		d.SlackMessageTS = slackTS
-		if err := b.store.Set(ctx, d, staleDuration); err != nil {
+		if err := b.store.SetSlackHandle(ctx, prNumber, slackChannel, slackTS); err != nil {
 			b.log.Warn("store: update deploy with slack handle", zap.Error(err))
 		}
 	}
