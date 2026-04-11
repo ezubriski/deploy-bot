@@ -112,6 +112,10 @@ type captureSlack struct {
 	mu       sync.Mutex
 	channels []string
 	posts    []capturedPost
+	// updates is populated by UpdateMessageContext; phase 4 tests for
+	// the dismiss button assert on the re-rendered message text so the
+	// update path can't silently regress.
+	updates []capturedPost
 }
 
 // capturedPost holds the parts of a PostMessageContext call that tests
@@ -146,8 +150,17 @@ func (c *captureSlack) PostMessageContext(_ context.Context, channelID string, o
 func (c *captureSlack) PostEphemeralContext(_ context.Context, _, _ string, _ ...slack.MsgOption) (string, error) {
 	return "", nil
 }
-func (c *captureSlack) UpdateMessageContext(_ context.Context, _, _ string, _ ...slack.MsgOption) (string, string, string, error) {
-	return "", "", "", nil
+func (c *captureSlack) UpdateMessageContext(_ context.Context, channelID, ts string, options ...slack.MsgOption) (string, string, string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	post := capturedPost{Channel: channelID}
+	if _, vals, err := slack.UnsafeApplyMsgOptions("xoxb-test", channelID, "http://test/", options...); err == nil {
+		post.Text = vals.Get("text")
+		post.ThreadTS = vals.Get("thread_ts")
+		post.Blocks = vals.Get("blocks")
+	}
+	c.updates = append(c.updates, post)
+	return channelID, ts, "", nil
 }
 func (c *captureSlack) OpenViewContext(_ context.Context, _ string, _ slack.ModalViewRequest) (*slack.ViewResponse, error) {
 	return nil, nil

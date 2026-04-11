@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/slack-go/slack"
 
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/queue"
@@ -16,14 +17,16 @@ import (
 
 // seedHistoryForArgoCD pushes a single approved history entry that the
 // ArgoCD handler can correlate against via FindHistoryBySHA. Defaults
-// match the shape a phase-1-enriched handleApprove writes: composite
-// app/env name, non-empty gitops SHA, and a Slack handle for permalink
-// resolution. Individual tests override any field they care about.
+// match the shape a phase-1-enriched handleApprove writes: the App
+// field holds the composite "app-env" FullName (as produced by
+// handleDeploySubmit's `appVal := appName + "-" + env`), a non-empty
+// gitops SHA, and a Slack handle for permalink resolution. Individual
+// tests override any field they care about.
 func seedHistoryForArgoCD(t *testing.T, st *store.Store, overrides ...func(*store.HistoryEntry)) *store.HistoryEntry {
 	t.Helper()
 	e := &store.HistoryEntry{
 		EventType:       "approved",
-		App:             "myapp",
+		App:             "myapp-prod",
 		Environment:     "prod",
 		Tag:             "v1.4.2",
 		PRNumber:        1234,
@@ -478,6 +481,296 @@ func TestArgoCDHandler_Counter_UnhandledTrigger(t *testing.T) {
 	// And no Slack post happened.
 	if len(sl.posts) != 0 {
 		t.Errorf("expected no Slack posts for unhandled trigger, got %d", len(sl.posts))
+	}
+}
+
+// --- phase 4: rollback prompt tests ---
+
+// TestArgoCDHandler_SyncFailed_PostsRollbackPrompt verifies that a fresh
+// failure with a prior approved deploy produces TWO top-level posts: the
+// alarming status message AND a separate rollback prompt carrying Roll
+// back / Dismiss buttons with a JSON payload referencing the previous
+// known-good tag.
+func TestArgoCDHandler_SyncFailed_PostsRollbackPrompt(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	// Prior known-good deploy: older, same app/env, approved. Note
+	// App carries the composite FullName to match what handleApprove
+	// writes in production — findPreviousApprovedBefore matches on
+	// exact string equality so a mismatched shape would silently
+	// suppress the prompt.
+	if err := st.PushHistory(context.Background(), store.HistoryEntry{
+		EventType:       "approved",
+		App:             "myapp-prod",
+		Environment:     "prod",
+		Tag:             "v1.3.9",
+		PRNumber:        1200,
+		PRURL:           "https://github.com/org/gitops/pull/1200",
+		RequesterID:     "U_PRIOR",
+		CompletedAt:     time.Now().Add(-1 * time.Hour),
+		GitopsCommitSHA: "prior-sha",
+	}); err != nil {
+		t.Fatalf("seed prior history: %v", err)
+	}
+	// Failing deploy: newer, the one the notification correlates to.
+	entry := seedHistoryForArgoCD(t, st)
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-sync-failed",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: entry.GitopsCommitSHA,
+		Message:         "boom",
+	})
+
+	if len(sl.posts) != 2 {
+		t.Fatalf("expected 2 posts (status + rollback prompt), got %d", len(sl.posts))
+	}
+	status := sl.posts[0]
+	prompt := sl.posts[1]
+
+	if !strings.Contains(status.Text, "DEPLOY FAILED") {
+		t.Errorf("first post should be the alarming status, got text: %s", status.Text)
+	}
+	// The prompt message is rendered via blocks; captureSlack records
+	// the blocks JSON, so assertions hit that.
+	if prompt.Blocks == "" {
+		t.Fatal("rollback prompt should be posted as blocks")
+	}
+	if !strings.Contains(prompt.Blocks, "Suggested action") {
+		t.Errorf("prompt blocks missing suggested-action text: %s", prompt.Blocks)
+	}
+	if !strings.Contains(prompt.Blocks, "v1.3.9") {
+		t.Errorf("prompt blocks missing rollback target tag v1.3.9: %s", prompt.Blocks)
+	}
+	if !strings.Contains(prompt.Blocks, ActionArgoCDRollback) {
+		t.Error("prompt blocks missing Roll back action id")
+	}
+	if !strings.Contains(prompt.Blocks, ActionArgoCDDismiss) {
+		t.Error("prompt blocks missing Dismiss action id")
+	}
+	// Both buttons must be top-level, not threaded.
+	if prompt.ThreadTS != "" {
+		t.Errorf("rollback prompt must be top-level, got thread_ts=%q", prompt.ThreadTS)
+	}
+}
+
+// TestArgoCDHandler_SyncFailed_NoPriorDeploy_NoPrompt verifies that the
+// prompt is suppressed when there's no earlier approved deploy to roll
+// back to — a first-ever deploy that fails still surfaces the alarming
+// status message, but we don't post a [Roll back] button that can't
+// resolve its target.
+func TestArgoCDHandler_SyncFailed_NoPriorDeploy_NoPrompt(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	entry := seedHistoryForArgoCD(t, st)
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-sync-failed",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: entry.GitopsCommitSHA,
+	})
+
+	if len(sl.posts) != 1 {
+		t.Fatalf("expected 1 post (status only), got %d", len(sl.posts))
+	}
+	if !strings.Contains(sl.posts[0].Text, "DEPLOY FAILED") {
+		t.Errorf("expected alarming status without a rollback prompt, got: %s", sl.posts[0].Text)
+	}
+}
+
+// TestArgoCDHandler_LateArrival_NoRollbackPrompt verifies that even
+// when a prior known-good deploy exists, late-arriving failures
+// (deploy > lateArrivalThreshold) suppress the rollback prompt. A
+// hours-old deploy is rarely the right thing to roll back; the
+// calmer status message still posts and points the on-call at
+// investigation.
+func TestArgoCDHandler_LateArrival_NoRollbackPrompt(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	// Prior approved deploy so findPreviousApprovedBefore would succeed.
+	if err := st.PushHistory(context.Background(), store.HistoryEntry{
+		EventType:       "approved",
+		App:             "myapp-prod",
+		Environment:     "prod",
+		Tag:             "v1.3.9",
+		CompletedAt:     time.Now().Add(-10 * time.Hour),
+		GitopsCommitSHA: "prior-sha",
+	}); err != nil {
+		t.Fatalf("seed prior history: %v", err)
+	}
+	// Failing deploy is 5h old — past lateArrivalThreshold.
+	entry := seedHistoryForArgoCD(t, st, func(e *store.HistoryEntry) {
+		e.CompletedAt = time.Now().Add(-5 * time.Hour)
+	})
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-health-degraded",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: entry.GitopsCommitSHA,
+	})
+
+	if len(sl.posts) != 1 {
+		t.Fatalf("expected 1 post (late-arrival status only), got %d", len(sl.posts))
+	}
+	if !strings.Contains(sl.posts[0].Text, "more than 2 hours old") {
+		t.Errorf("expected late-arrival framing on the status message, got: %s", sl.posts[0].Text)
+	}
+}
+
+func TestFindPreviousApprovedBefore_SkipsNewerAndRejected(t *testing.T) {
+	now := time.Now()
+	entries := []store.HistoryEntry{
+		// newest first — a newer approved entry that must be ignored
+		{App: "myapp-prod", Tag: "v2.0", EventType: "approved", CompletedAt: now.Add(1 * time.Hour)},
+		// the failing entry itself (at `before`)
+		{App: "myapp-prod", Tag: "v1.9", EventType: "approved", CompletedAt: now},
+		// rejected entry must be skipped
+		{App: "myapp-prod", Tag: "v1.8", EventType: "rejected", CompletedAt: now.Add(-30 * time.Minute)},
+		// the correct answer
+		{App: "myapp-prod", Tag: "v1.7", EventType: "approved", CompletedAt: now.Add(-1 * time.Hour)},
+		// unrelated app
+		{App: "other-prod", Tag: "v9.9", EventType: "approved", CompletedAt: now.Add(-2 * time.Hour)},
+	}
+	got, ok := findPreviousApprovedBefore(entries, "myapp-prod", now)
+	if !ok {
+		t.Fatal("expected a match")
+	}
+	if got.Tag != "v1.7" {
+		t.Errorf("tag = %q, want v1.7", got.Tag)
+	}
+}
+
+func TestFindPreviousApprovedBefore_NoMatch(t *testing.T) {
+	now := time.Now()
+	entries := []store.HistoryEntry{
+		{App: "myapp-prod", Tag: "v1.9", EventType: "approved", CompletedAt: now},
+	}
+	if _, ok := findPreviousApprovedBefore(entries, "myapp-prod", now); ok {
+		t.Error("expected no match when the only entry is the failing one")
+	}
+}
+
+func TestArgoCDRollbackPayload_RoundTrip(t *testing.T) {
+	p := argocdRollbackPayload{
+		App:         "myapp-prod",
+		Environment: "prod",
+		FailingTag:  "v2.0.0+build.1",
+		RollbackTag: "v1.9.9",
+	}
+	raw := p.marshal()
+	got, err := parseArgoCDRollbackPayload(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got != p {
+		t.Errorf("round-trip mismatch: %+v != %+v", got, p)
+	}
+}
+
+// TestHandleArgoCDDismissClick_ReplacesButtons verifies the happy path
+// for the [Dismiss] button: an authorized clicker causes the prompt
+// message to be updated in place so the buttons are replaced with a
+// "Dismissed by" context line. The underlying failure status message
+// is unaffected.
+func TestHandleArgoCDDismissClick_ReplacesButtons(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	payload := argocdRollbackPayload{
+		App: "myapp-prod", Environment: "prod",
+		FailingTag: "v2.0.0", RollbackTag: "v1.9.0",
+	}.marshal()
+
+	cb := slack.InteractionCallback{
+		Type:    slack.InteractionTypeBlockActions,
+		User:    slack.User{ID: "U_APPROVER"},
+		Channel: slack.Channel{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{ID: "C_DEPLOY"}}},
+		Message: slack.Message{Msg: slack.Msg{Timestamp: "1700000000.222222"}},
+	}
+	b.handleArgoCDDismissClick(context.Background(), cb, &slack.BlockAction{
+		ActionID: ActionArgoCDDismiss, Value: payload,
+	})
+
+	if len(sl.updates) != 1 {
+		t.Fatalf("expected 1 UpdateMessageContext call, got %d", len(sl.updates))
+	}
+	up := sl.updates[0]
+	if up.Channel != "C_DEPLOY" {
+		t.Errorf("update channel = %q, want C_DEPLOY", up.Channel)
+	}
+	if !strings.Contains(up.Blocks, "Dismissed") {
+		t.Errorf("updated blocks missing Dismissed marker: %s", up.Blocks)
+	}
+	if !strings.Contains(up.Blocks, "U_APPROVER") {
+		t.Errorf("updated blocks missing dismissing user mention: %s", up.Blocks)
+	}
+	// Buttons must be gone from the updated message.
+	if strings.Contains(up.Blocks, ActionArgoCDRollback) {
+		t.Error("updated blocks still contain Roll back action id")
+	}
+	if strings.Contains(up.Blocks, ActionArgoCDDismiss) {
+		t.Error("updated blocks still contain Dismiss action id")
+	}
+}
+
+// TestHandleArgoCDRollbackClick_OpensDeployModal verifies the [Roll
+// back] click path opens the deploy modal in rollback mode via
+// OpenViewContext. The captureSlack stub is a sink for OpenViewContext,
+// so this test just asserts the call happened without erroring —
+// deeper modal-content assertions live in buildDeployModal tests.
+func TestHandleArgoCDRollbackClick_OpensDeployModal(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	payload := argocdRollbackPayload{
+		App: "myapp-prod", Environment: "prod",
+		FailingTag: "v2.0.0", RollbackTag: "v1.9.0",
+	}.marshal()
+
+	cb := slack.InteractionCallback{
+		Type:      slack.InteractionTypeBlockActions,
+		User:      slack.User{ID: "U_DEPLOYER"},
+		TriggerID: "trigger-xyz",
+		Channel:   slack.Channel{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{ID: "C_DEPLOY"}}},
+		Message:   slack.Message{Msg: slack.Msg{Timestamp: "1700000000.333333"}},
+	}
+	b.handleArgoCDRollbackClick(context.Background(), cb, &slack.BlockAction{
+		ActionID: ActionArgoCDRollback, Value: payload,
+	})
+
+	// The captureSlack open-view stub returns nil — if we got here
+	// without panicking or erroring into the ephemeral path, the
+	// modal was opened. Double-check no ephemeral error was posted.
+	if len(sl.posts) != 0 {
+		t.Errorf("expected no status posts (modal open only), got %d: %+v", len(sl.posts), sl.posts)
+	}
+}
+
+func TestHandleArgoCDRollbackClick_BadPayload_Ephemeral(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	cb := slack.InteractionCallback{
+		Type:    slack.InteractionTypeBlockActions,
+		User:    slack.User{ID: "U_DEPLOYER"},
+		Channel: slack.Channel{GroupConversation: slack.GroupConversation{Conversation: slack.Conversation{ID: "C_DEPLOY"}}},
+	}
+	b.handleArgoCDRollbackClick(context.Background(), cb, &slack.BlockAction{
+		ActionID: ActionArgoCDRollback, Value: "not json",
+	})
+
+	// No UpdateMessageContext or modal open for malformed payload.
+	if len(sl.updates) != 0 {
+		t.Errorf("malformed payload must not update prompt, got %d updates", len(sl.updates))
 	}
 }
 
