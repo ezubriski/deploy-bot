@@ -272,6 +272,33 @@ func (s *Store) GetHistory(ctx context.Context, limit int) ([]HistoryEntry, erro
 	return entries, nil
 }
 
+// FindHistoryBySHA returns the most recent history entry whose
+// GitopsCommitSHA matches sha, or nil if no entry in the retained window
+// (HistoryMaxLen) matches. Used by the ArgoCD notification handler to
+// correlate a synced gitops revision back to the deploy that produced it.
+//
+// Returns nil without error when sha is empty — callers often feed this
+// straight from an upstream payload where the field may be absent, and a
+// missing SHA is "not matched", not an infrastructure error.
+func (s *Store) FindHistoryBySHA(ctx context.Context, sha string) (*HistoryEntry, error) {
+	if sha == "" {
+		return nil, nil
+	}
+	entries, err := s.GetHistory(ctx, HistoryMaxLen)
+	if err != nil {
+		return nil, fmt.Errorf("find history by sha: %w", err)
+	}
+	for i := range entries {
+		if entries[i].GitopsCommitSHA == sha {
+			// Copy to a fresh value so the caller cannot mutate the slice's
+			// backing array via the returned pointer.
+			e := entries[i]
+			return &e, nil
+		}
+	}
+	return nil, nil
+}
+
 // GetByEnvApp returns the first pending deploy found for the given environment
 // and app, or nil if none exists. Used to surface the existing PR link when a
 // lock is contested.

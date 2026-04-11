@@ -12,16 +12,22 @@ The current scope:
 
 | Argo trigger          | What the bot does                                                                  |
 | --------------------- | ---------------------------------------------------------------------------------- |
-| `on-sync-succeeded`   | Threaded reply under the original deploy message: "synced and healthy"             |
-| `on-sync-failed`      | **Top-level alarming message** in the deploy channel + separate rollback prompt    |
-| `on-health-degraded`  | **Top-level alarming message** with failing-resource detail + rollback prompt      |
+| `on-sync-succeeded`   | Quiet threaded reply under the original deploy message: "synced and healthy"       |
+| `on-sync-failed`      | **Top-level alarming message** in the deploy channel with failing-resource detail  |
+| `on-health-degraded`  | **Top-level alarming message** with failing-resource detail                        |
 | `on-sync-running`     | _Subscribed but currently dropped._ See "Future work" below                        |
 
-> **Phase 2 status (this commit):** the receiver-side webhook endpoint, queue
-> plumbing, dedupe, and config flag are all live. The worker-side handler is a
-> logging stub — operators can wire ArgoCD up and confirm end-to-end delivery,
-> but no Slack post happens yet. Phase 3 lands the failure messages, rollback
-> prompt, and dismiss button.
+> **Phase 3 status (this commit):** receiver webhook + queue plumbing + dedupe
+> + worker-side correlation + failure posting are all live. Failure messages
+> land top-level in the deploy channel with siren framing, requester ping,
+> per-resource detail, and a permalink back to the original deploy. Late-
+> arriving notifications (deploy > 2h old) use calmer framing with an
+> "investigate before rolling back" note.
+>
+> **Still deferred to phase 4:** the separate rollback-prompt message with
+> [Roll back] and [Dismiss] buttons, and the late-arrival suppression of
+> the rollback prompt specifically (the phase-3 status message still
+> surfaces, the prompt does not).
 
 ## Architecture
 
@@ -50,13 +56,39 @@ on stream-write errors (the in-memory buffer absorbs them).
 ArgoCD's notification carries the **gitops repo commit SHA**
 (`.app.status.operationState.syncResult.revision`). deploy-bot persists the
 same SHA on every `HistoryEntry` (since #47 / phase 1) when it merges a deploy
-PR. The worker matches on that SHA to find the originating deploy and the
-Slack message it posted, so follow-up notifications can post in context.
+PR. The worker matches on that SHA via `store.FindHistoryBySHA` to find the
+originating deploy and the Slack message it posted, so follow-up
+notifications can post in the right context.
 
 No annotation or naming convention on the ArgoCD `Application` is required —
 correlation is purely by SHA. If a notification arrives for a SHA the bot has
-no history entry for (e.g. a deploy made via another tool), it is logged and
-dropped.
+no history entry for (e.g. a deploy made via another tool, or an entry that
+has aged out of the 100-entry retained window), it is logged at info level
+and dropped. The whole value proposition of the handler is "deploy-bot
+knows who deployed what" — without a matching history entry there's nothing
+actionable to say.
+
+### Late-arriving notifications
+
+If the matched history entry's `CompletedAt` is more than **2 hours** ago
+when a `sync-failed` or `health-degraded` notification arrives, the handler
+re-frames the message: no siren emojis, no ALL-CAPS banner, and an
+":information_source: _This deploy is more than 2 hours old. The current
+failure may not be caused by this deploy — investigate before rolling back._"
+note. The rationale (from the planning discussion): a sync that was healthy
+for hours and then degrades is almost certainly a runtime issue, not a
+bad deploy, and rolling back a hours-old stable deploy is rarely the right
+first response.
+
+### Resource detail
+
+The webhook template includes `.app.status.resources` as a JSON array in the
+payload. On `sync-failed` / `health-degraded` the handler parses this,
+filters to entries with a non-empty non-`Healthy` `healthStatus`, and
+renders the first 10 as a bullet list in the alert. Resources with no
+health status (ConfigMaps, Secrets, Services) are filtered out — they
+don't report health and would just be visual noise. Overflow beyond 10
+renders as "_…and N more_".
 
 ### Dedupe
 
@@ -196,6 +228,13 @@ against older releases will land once the homelab cluster upgrades.
 
 ## Future work
 
+- **Rollback button + Dismiss**: phase 4. A separate top-level message
+  posted alongside the phase-3 status message, carrying the previous
+  known-good tag and a `[Roll back]` button that opens the standard
+  deploy-approval modal, plus a `[Dismiss]` button an authorized approver
+  can use to clear the prompt when fixing forward. Late-arriving
+  notifications will post the status message but suppress the rollback
+  prompt — a hours-old deploy is rarely the right thing to roll back.
 - **`on-sync-running` watchdog**: rather than echoing every "sync started"
   notification (low signal), use the absence of a `sync-succeeded` within
   N minutes of a merge to detect stuck ArgoCD or unsubscribed apps. Tracked
@@ -204,7 +243,6 @@ against older releases will land once the homelab cluster upgrades.
   the original failure when a degraded app self-heals. Requires a custom
   `on-app-healthy` trigger whose `oncePer` semantics need empirical
   verification against v3.3.6 — gated on the homelab cluster upgrade.
-- **Rollback button + Dismiss**: phase 3.
 
 ## Gotchas
 

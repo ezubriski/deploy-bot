@@ -450,6 +450,92 @@ func TestHistoryEntry_RoundTripPreservesEnrichmentFields(t *testing.T) {
 	}
 }
 
+// TestFindHistoryBySHA_Found verifies the ArgoCD-correlation lookup path:
+// push a few history entries with distinct GitopsCommitSHA values and
+// assert the correct one comes back.
+func TestFindHistoryBySHA_Found(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	base := time.Now().UTC().Truncate(time.Second)
+	for i, sha := range []string{"sha-oldest", "sha-middle", "sha-newest"} {
+		if err := s.PushHistory(ctx, HistoryEntry{
+			EventType:       "approved",
+			App:             "myapp",
+			Environment:     "prod",
+			Tag:             "v1.0." + string(rune('0'+i)),
+			PRNumber:        i + 1,
+			RequesterID:     "U1",
+			CompletedAt:     base.Add(time.Duration(i) * time.Second),
+			GitopsCommitSHA: sha,
+		}); err != nil {
+			t.Fatalf("push %d: %v", i, err)
+		}
+	}
+
+	got, err := s.FindHistoryBySHA(ctx, "sha-middle")
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected match, got nil")
+	}
+	if got.GitopsCommitSHA != "sha-middle" {
+		t.Errorf("sha = %q, want sha-middle", got.GitopsCommitSHA)
+	}
+	if got.PRNumber != 2 {
+		t.Errorf("pr = %d, want 2", got.PRNumber)
+	}
+}
+
+// TestFindHistoryBySHA_NotFound verifies the unmatched case returns
+// (nil, nil) — no error, no entry. The bot treats this as "this deploy
+// was not made by deploy-bot" and drops the notification.
+func TestFindHistoryBySHA_NotFound(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	_ = s.PushHistory(ctx, HistoryEntry{
+		App:             "myapp",
+		Tag:             "v1",
+		CompletedAt:     time.Now(),
+		GitopsCommitSHA: "sha-a",
+	})
+
+	got, err := s.FindHistoryBySHA(ctx, "sha-does-not-exist")
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil, got %+v", got)
+	}
+}
+
+// TestFindHistoryBySHA_EmptySHAIsNoMatch verifies that passing an empty
+// sha short-circuits to (nil, nil) without scanning — the bot passes
+// incoming payload fields directly, and an empty sha means "ArgoCD did
+// not carry a revision," which is not an error.
+func TestFindHistoryBySHA_EmptySHAIsNoMatch(t *testing.T) {
+	s, _ := newTestStore(t)
+	ctx := context.Background()
+
+	// Seed an entry that also has an empty sha — the lookup must NOT
+	// match against it, because "empty matches empty" would silently
+	// pair every no-sha notification with the most recent legacy entry.
+	_ = s.PushHistory(ctx, HistoryEntry{
+		App:         "legacy",
+		CompletedAt: time.Now(),
+	})
+
+	got, err := s.FindHistoryBySHA(ctx, "")
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if got != nil {
+		t.Errorf("empty sha must not match, got %+v", got)
+	}
+}
+
 func TestPushHistory_AppFilter(t *testing.T) {
 	s, _ := newTestStore(t)
 	ctx := context.Background()

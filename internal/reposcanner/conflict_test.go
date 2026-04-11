@@ -37,6 +37,9 @@ func (c *captureSlack) OpenViewContext(_ context.Context, _ string, _ slackPkg.M
 func (c *captureSlack) UpdateViewContext(_ context.Context, _ slackPkg.ModalViewRequest, _, _, _ string) (*slackPkg.ViewResponse, error) {
 	return nil, nil
 }
+func (c *captureSlack) GetPermalinkContext(_ context.Context, _ *slackPkg.PermalinkParameters) (string, error) {
+	return "", nil
+}
 
 func newTestTracker() *conflictTracker {
 	ct := newConflictTracker(nil)
