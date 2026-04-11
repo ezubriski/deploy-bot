@@ -18,6 +18,7 @@ type Poster interface {
 	UpdateMessageContext(ctx context.Context, channelID, timestamp string, options ...slack.MsgOption) (string, string, string, error)
 	OpenViewContext(ctx context.Context, triggerID string, view slack.ModalViewRequest) (*slack.ViewResponse, error)
 	UpdateViewContext(ctx context.Context, view slack.ModalViewRequest, externalID, hash, viewID string) (*slack.ViewResponse, error)
+	GetPermalinkContext(ctx context.Context, params *slack.PermalinkParameters) (string, error)
 }
 
 // Client wraps *slack.Client and retries on Slack 429 rate-limit responses.
@@ -113,6 +114,21 @@ func (c *Client) OpenViewContext(ctx context.Context, triggerID string, view sla
 func (c *Client) UpdateViewContext(ctx context.Context, view slack.ModalViewRequest, externalID, hash, viewID string) (resp *slack.ViewResponse, err error) {
 	if retryErr := c.retryOnRateLimit(ctx, func() error {
 		resp, err = c.Client.UpdateViewContext(ctx, view, externalID, hash, viewID)
+		return err
+	}); retryErr != nil {
+		err = retryErr
+	}
+	return
+}
+
+// GetPermalinkContext resolves a Slack permalink URL for the given
+// channel + message timestamp. Used by the ArgoCD notification handler
+// so top-level failure messages can link back to the original deploy
+// announcement in the thread that started it. Wrapped in the same
+// rate-limit retry envelope as the write methods.
+func (c *Client) GetPermalinkContext(ctx context.Context, params *slack.PermalinkParameters) (permalink string, err error) {
+	if retryErr := c.retryOnRateLimit(ctx, func() error {
+		permalink, err = c.Client.GetPermalinkContext(ctx, params)
 		return err
 	}); retryErr != nil {
 		err = retryErr

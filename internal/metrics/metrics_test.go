@@ -89,6 +89,42 @@ func TestSetPendingDeploys(t *testing.T) {
 	}
 }
 
+func TestRecordArgoCDNotification(t *testing.T) {
+	m := newTestMetrics(t)
+
+	// Known triggers preserve their label value.
+	m.RecordArgoCDNotification("on-sync-succeeded", ArgoCDResultMatched)
+	m.RecordArgoCDNotification("on-sync-failed", ArgoCDResultMatched)
+	m.RecordArgoCDNotification("on-health-degraded", ArgoCDResultUnmatched)
+	m.RecordArgoCDNotification("on-sync-succeeded", ArgoCDResultNoHandleSkipped)
+
+	// Unknown trigger collapses to "other" so label cardinality stays
+	// bounded regardless of what the upstream controller ships.
+	m.RecordArgoCDNotification("on-custom-weird-thing", ArgoCDResultUnhandledTrigger)
+	m.RecordArgoCDNotification("", ArgoCDResultLookupError)
+
+	cases := []struct {
+		trigger, result string
+		want            float64
+	}{
+		{"on-sync-succeeded", ArgoCDResultMatched, 1},
+		{"on-sync-failed", ArgoCDResultMatched, 1},
+		{"on-health-degraded", ArgoCDResultUnmatched, 1},
+		{"on-sync-succeeded", ArgoCDResultNoHandleSkipped, 1},
+		{"other", ArgoCDResultUnhandledTrigger, 1},
+		{"other", ArgoCDResultLookupError, 1},
+		// Label combinations that should NOT have been touched.
+		{"on-sync-failed", ArgoCDResultUnmatched, 0},
+		{"on-health-degraded", ArgoCDResultMatched, 0},
+	}
+	for _, tc := range cases {
+		got := testutil.ToFloat64(m.ArgoCDNotificationsTotal.WithLabelValues(tc.trigger, tc.result))
+		if got != tc.want {
+			t.Errorf("{trigger=%q, result=%q} = %v, want %v", tc.trigger, tc.result, got, tc.want)
+		}
+	}
+}
+
 func TestRegistrationDoesNotPanic(t *testing.T) {
 	// Registering twice on the same registry should panic; separate registries
 	// should be fine.

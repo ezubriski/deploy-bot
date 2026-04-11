@@ -102,17 +102,46 @@ func (stubECR) RecentTags(_ string) []string                             { retur
 func (stubECR) RecentTagsWithTime(_ string) []ecr.TagWithTime            { return nil }
 func (stubECR) Tags(_ string, _ int) []string                            { return nil }
 
-// captureSlack records channels that receive PostMessageContext calls.
+// captureSlack records channels (and full post details) that receive
+// PostMessageContext calls. Existing tests use hasMessageTo which only
+// needs the channel list; newer tests (internal/bot/argocd_test.go)
+// assert against posts[] which carries rendered text, thread_ts, and
+// blocks so behaviour like "top-level vs. threaded" and "siren in the
+// body" can be checked without a real Slack round trip.
 type captureSlack struct {
 	mu       sync.Mutex
 	channels []string
+	posts    []capturedPost
 }
 
-func (c *captureSlack) PostMessageContext(_ context.Context, channelID string, _ ...slack.MsgOption) (string, string, error) {
+// capturedPost holds the parts of a PostMessageContext call that tests
+// want to assert against. Populated via slack.UnsafeApplyMsgOptions
+// which renders the options into the url.Values Slack would normally
+// see — that's how the bot's message blocks, thread_ts, and text become
+// inspectable without a real Slack server.
+type capturedPost struct {
+	Channel  string
+	Text     string
+	ThreadTS string
+	Blocks   string // raw JSON of blocks, empty if none
+}
+
+func (c *captureSlack) PostMessageContext(_ context.Context, channelID string, options ...slack.MsgOption) (string, string, error) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.channels = append(c.channels, channelID)
-	c.mu.Unlock()
-	return "", "", nil
+	// Use UnsafeApplyMsgOptions to render the options into the url.Values
+	// Slack would see — the library is explicit that this is for
+	// testing. An error just means the options didn't render cleanly;
+	// record what we can.
+	post := capturedPost{Channel: channelID}
+	if _, vals, err := slack.UnsafeApplyMsgOptions("xoxb-test", channelID, "http://test/", options...); err == nil {
+		post.Text = vals.Get("text")
+		post.ThreadTS = vals.Get("thread_ts")
+		post.Blocks = vals.Get("blocks")
+	}
+	c.posts = append(c.posts, post)
+	return channelID, "1700000000.000001", nil
 }
 func (c *captureSlack) PostEphemeralContext(_ context.Context, _, _ string, _ ...slack.MsgOption) (string, error) {
 	return "", nil
@@ -125,6 +154,14 @@ func (c *captureSlack) OpenViewContext(_ context.Context, _ string, _ slack.Moda
 }
 func (c *captureSlack) UpdateViewContext(_ context.Context, _ slack.ModalViewRequest, _, _, _ string) (*slack.ViewResponse, error) {
 	return nil, nil
+}
+func (c *captureSlack) GetPermalinkContext(_ context.Context, params *slack.PermalinkParameters) (string, error) {
+	// Deterministic stub: build a permalink-looking URL from the params so
+	// tests can assert the bot called us with the expected channel/ts.
+	if params == nil {
+		return "", nil
+	}
+	return "https://slack.test/archives/" + params.Channel + "/p" + params.Ts, nil
 }
 
 func (c *captureSlack) hasMessageTo(channel string) bool {

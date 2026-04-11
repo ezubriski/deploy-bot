@@ -10,12 +10,13 @@ import (
 // with a custom registry (useful in tests) or NewDefault to register against
 // prometheus.DefaultRegisterer.
 type Metrics struct {
-	DeploysTotal         *prometheus.CounterVec
-	ECRCacheHits         *prometheus.CounterVec
-	ECRCacheMisses       *prometheus.CounterVec
-	ECRRefreshDuration   *prometheus.HistogramVec
-	PendingDeploys       prometheus.Gauge
-	WebhookRequestsTotal *prometheus.CounterVec
+	DeploysTotal             *prometheus.CounterVec
+	ECRCacheHits             *prometheus.CounterVec
+	ECRCacheMisses           *prometheus.CounterVec
+	ECRRefreshDuration       *prometheus.HistogramVec
+	PendingDeploys           prometheus.Gauge
+	WebhookRequestsTotal     *prometheus.CounterVec
+	ArgoCDNotificationsTotal *prometheus.CounterVec
 }
 
 func New(reg prometheus.Registerer) *Metrics {
@@ -50,6 +51,11 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name: "deploybot_webhook_requests_total",
 			Help: "Total inbound webhook requests by webhook source (ecr, argocd) and HTTP status.",
 		}, []string{"webhook", "status"}),
+
+		ArgoCDNotificationsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "deploybot_argocd_notifications_total",
+			Help: "ArgoCD lifecycle notifications processed by the worker, labeled by trigger and outcome. Result values: matched (correlated to history, posted), unmatched (no history entry for sha), lookup_error (redis lookup failed), no_handle_skipped (sync-succeeded dropped because history entry has no slack handle), unhandled_trigger (trigger name not wired in bot).",
+		}, []string{"trigger", "result"}),
 	}
 
 	reg.MustRegister(
@@ -59,6 +65,7 @@ func New(reg prometheus.Registerer) *Metrics {
 		m.ECRRefreshDuration,
 		m.PendingDeploys,
 		m.WebhookRequestsTotal,
+		m.ArgoCDNotificationsTotal,
 	)
 
 	return m
@@ -99,4 +106,35 @@ func (m *Metrics) SetPendingDeploys(n int) {
 // source (e.g. "ecr", "argocd") and HTTP status code.
 func (m *Metrics) RecordWebhookRequest(webhook, status string) {
 	m.WebhookRequestsTotal.WithLabelValues(webhook, status).Inc()
+}
+
+// Known ArgoCD notification result values for RecordArgoCDNotification. Kept
+// as constants so callers cannot typo a label value into a new series.
+const (
+	ArgoCDResultMatched          = "matched"
+	ArgoCDResultUnmatched        = "unmatched"
+	ArgoCDResultLookupError      = "lookup_error"
+	ArgoCDResultNoHandleSkipped  = "no_handle_skipped"
+	ArgoCDResultUnhandledTrigger = "unhandled_trigger"
+)
+
+// RecordArgoCDNotification increments the ArgoCD notification outcome
+// counter. trigger is normalized to one of the known trigger names
+// (on-sync-succeeded, on-sync-failed, on-health-degraded) or "other" —
+// an unbounded upstream trigger value would blow up label cardinality.
+func (m *Metrics) RecordArgoCDNotification(trigger, result string) {
+	m.ArgoCDNotificationsTotal.WithLabelValues(normalizeArgoCDTrigger(trigger), result).Inc()
+}
+
+// normalizeArgoCDTrigger coerces an arbitrary trigger string into one of
+// the fixed set the bot knows about, collapsing everything else to
+// "other". This keeps the trigger label cardinality bounded regardless
+// of what the upstream argocd-notifications controller ships.
+func normalizeArgoCDTrigger(trigger string) string {
+	switch trigger {
+	case "on-sync-succeeded", "on-sync-failed", "on-health-degraded":
+		return trigger
+	default:
+		return "other"
+	}
 }
