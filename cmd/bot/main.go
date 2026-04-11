@@ -251,8 +251,12 @@ func main() {
 		}
 	}()
 
-	// Initialise the consumer group before starting the worker loop.
+	// Initialise the consumer group before starting the worker loop. The
+	// ArgoCD stream is only consumed when the feature is enabled — otherwise
+	// the worker would spend ~1s per idle cycle blocking on an empty stream,
+	// measurably slowing interactive user events.
 	qw := queue.NewWorker(redisStore.Redis(), log)
+	qw.SetArgoCDEnabled(cfgHolder.Load().ArgoCDNotifications.Enabled)
 	if err := qw.Init(ctx); err != nil {
 		log.Fatal("init queue consumer group", zap.Error(err))
 	}

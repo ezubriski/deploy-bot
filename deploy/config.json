@@ -26,6 +26,9 @@
     "sqs_queue_url": "",
     "poll_interval": "30s"
   },
+  "argocd_notifications": {
+    "enabled": false
+  },
   "repo_discovery": {
     "enabled": false,
     "poll_interval": "5m",

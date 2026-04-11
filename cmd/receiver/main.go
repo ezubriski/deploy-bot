@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/ezubriski/deploy-bot/internal/approvers"
+	"github.com/ezubriski/deploy-bot/internal/argocd"
 	"github.com/ezubriski/deploy-bot/internal/bot"
 	"github.com/ezubriski/deploy-bot/internal/buffer"
 	"github.com/ezubriski/deploy-bot/internal/config"
@@ -187,6 +188,20 @@ func main() {
 			mux.Handle("/v1/webhooks/ecr", ecrpoller.NewWebhookHandler(webhookPoller, secrets.ECRWebhookAPIKey, m, log))
 			log.Info("ecr webhook endpoint registered", zap.String("path", "/v1/webhooks/ecr"))
 		}
+	}
+
+	// Optional inbound ArgoCD notifications webhook. When the feature is
+	// disabled (the default), no handler is mounted, no Redis stream is
+	// touched, and the receiver behaves identically to a standard install.
+	if cfg.ArgoCDNotifications.Enabled {
+		if len(secrets.ArgoCDWebhookAPIKey) < 32 {
+			log.Fatal("argocd_webhook_api_key must be at least 32 characters when argocd_notifications.enabled is true")
+		}
+		argoBuf := buffer.New(buffer.DefaultSize, rdb, queue.StreamKeyArgoCD, log)
+		go argoBuf.Run(ctx)
+		argoProcessor := argocd.NewProcessor(rdb, argoBuf, log)
+		mux.Handle("/v1/webhooks/argocd", argocd.NewWebhookHandler(argoProcessor, secrets.ArgoCDWebhookAPIKey, m, log))
+		log.Info("argocd webhook endpoint registered", zap.String("path", "/v1/webhooks/argocd"))
 	}
 
 	// Start repo scanner if configured.

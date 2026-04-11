@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -126,6 +127,68 @@ func TestDecode_ECRPushEvent(t *testing.T) {
 	}
 }
 
+func TestDecode_ArgoCDNotificationEvent(t *testing.T) {
+	evt := NewArgoCDNotificationEvent(ArgoCDNotificationEvent{
+		Trigger:         "on-health-degraded",
+		ArgoCDApp:       "myapp-prod",
+		Namespace:       "argocd",
+		RepoURL:         "https://github.com/org/gitops",
+		GitopsCommitSHA: "deadbeefcafe",
+		SyncStatus:      "Synced",
+		HealthStatus:    "Degraded",
+		Phase:           "Succeeded",
+		Message:         "ReplicaSet has timed out progressing",
+		Resources:       []byte(`[{"kind":"Deployment","name":"myapp"}]`),
+		ReceivedAt:      time.Unix(1700000000, 0).UTC(),
+	})
+
+	rdb := newTestClient(t)
+	ctx := context.Background()
+
+	if err := EnqueueArgoCD(ctx, rdb, evt); err != nil {
+		t.Fatalf("enqueue argocd: %v", err)
+	}
+
+	msgs, err := rdb.XRange(ctx, StreamKeyArgoCD, "-", "+").Result()
+	if err != nil || len(msgs) == 0 {
+		t.Fatalf("expected 1 message in argocd stream, got err=%v msgs=%d", err, len(msgs))
+	}
+
+	got, err := decode(msgs[0])
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Type != EventTypeArgoCDNotification {
+		t.Errorf("type = %q, want %q", got.Type, EventTypeArgoCDNotification)
+	}
+	argo, ok := got.Data.(ArgoCDNotificationEvent)
+	if !ok {
+		t.Fatal("Data is not ArgoCDNotificationEvent")
+	}
+	if argo.Trigger != "on-health-degraded" {
+		t.Errorf("trigger = %q", argo.Trigger)
+	}
+	if argo.GitopsCommitSHA != "deadbeefcafe" {
+		t.Errorf("sha = %q", argo.GitopsCommitSHA)
+	}
+	if argo.HealthStatus != "Degraded" {
+		t.Errorf("health = %q", argo.HealthStatus)
+	}
+	if string(argo.Resources) != `[{"kind":"Deployment","name":"myapp"}]` {
+		t.Errorf("resources lost in round trip: %s", string(argo.Resources))
+	}
+
+	// On-wire format sanity check: the stream payload must embed the
+	// resources array as raw JSON, not base64. A regression to []byte
+	// would produce a base64-encoded string like "W3sia2lu..." in the
+	// payload field, breaking greppability of the stream and bloating
+	// the on-disk size by ~33%.
+	rawPayload, _ := msgs[0].Values["payload"].(string)
+	if !strings.Contains(rawPayload, `"kind":"Deployment"`) {
+		t.Errorf("stream payload does not contain raw resources JSON (likely base64-encoded): %s", rawPayload)
+	}
+}
+
 func TestDecode_UnknownType(t *testing.T) {
 	rdb := newTestClient(t)
 	ctx := context.Background()
@@ -198,6 +261,80 @@ func TestWorker_Init_CreatesConsumerGroup(t *testing.T) {
 	// Calling Init again must not error (group already exists).
 	if err := w.Init(ctx); err != nil {
 		t.Fatalf("second Init: %v", err)
+	}
+}
+
+// TestWorker_ActiveStreams_GatedOnArgoCDFlag verifies that the worker only
+// includes StreamKeyArgoCD in its active stream set when SetArgoCDEnabled
+// has been called with true. This is the mechanism that keeps the idle
+// cycle at two 1s blocking reads instead of three when the ArgoCD
+// integration is off.
+func TestWorker_ActiveStreams_GatedOnArgoCDFlag(t *testing.T) {
+	rdb := newTestClient(t)
+
+	wOff := newTestWorker(t, rdb)
+	gotOff := wOff.activeStreams()
+	wantOff := []string{StreamKeyUser, StreamKeyECR}
+	if len(gotOff) != len(wantOff) || gotOff[0] != wantOff[0] || gotOff[1] != wantOff[1] {
+		t.Errorf("disabled: activeStreams() = %v, want %v", gotOff, wantOff)
+	}
+
+	wOn := newTestWorker(t, rdb)
+	wOn.SetArgoCDEnabled(true)
+	gotOn := wOn.activeStreams()
+	wantOn := []string{StreamKeyUser, StreamKeyECR, StreamKeyArgoCD}
+	if len(gotOn) != len(wantOn) {
+		t.Fatalf("enabled: activeStreams() = %v, want %v", gotOn, wantOn)
+	}
+	for i, s := range wantOn {
+		if gotOn[i] != s {
+			t.Errorf("enabled: activeStreams()[%d] = %q, want %q", i, gotOn[i], s)
+		}
+	}
+}
+
+// TestWorker_Init_SkipsArgoCDGroupWhenDisabled verifies that when the
+// ArgoCD flag is off, Init does not create a consumer group on
+// argocd:events. A stale group on a disabled-feature stream would
+// accumulate PEL entries from XAUTOCLAIM reclaims on restart, which is
+// exactly what we're trying to avoid.
+func TestWorker_Init_SkipsArgoCDGroupWhenDisabled(t *testing.T) {
+	rdb := newTestClient(t)
+	w := newTestWorker(t, rdb)
+	ctx := context.Background()
+
+	if err := w.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// User and ECR groups must exist.
+	if _, err := rdb.XInfoGroups(ctx, StreamKeyUser).Result(); err != nil {
+		t.Errorf("user stream group not created: %v", err)
+	}
+	if _, err := rdb.XInfoGroups(ctx, StreamKeyECR).Result(); err != nil {
+		t.Errorf("ecr stream group not created: %v", err)
+	}
+	// ArgoCD group must NOT exist — the stream itself doesn't exist so
+	// XInfoGroups returns an error referencing the missing key.
+	_, err := rdb.XInfoGroups(ctx, StreamKeyArgoCD).Result()
+	if err == nil {
+		t.Error("argocd stream group was created despite SetArgoCDEnabled(false)")
+	}
+}
+
+// TestWorker_Init_CreatesArgoCDGroupWhenEnabled is the inverse: with the
+// flag on, the argocd consumer group must be created.
+func TestWorker_Init_CreatesArgoCDGroupWhenEnabled(t *testing.T) {
+	rdb := newTestClient(t)
+	w := newTestWorker(t, rdb)
+	w.SetArgoCDEnabled(true)
+	ctx := context.Background()
+
+	if err := w.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := rdb.XInfoGroups(ctx, StreamKeyArgoCD).Result(); err != nil {
+		t.Errorf("argocd stream group not created when enabled: %v", err)
 	}
 }
 
