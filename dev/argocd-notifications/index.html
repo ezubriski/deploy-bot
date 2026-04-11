@@ -1373,6 +1373,29 @@ against older releases will land once the homelab cluster upgrades.</p>
 <li><strong>No HMAC.</strong> The argocd-notifications template engine cannot compute HMAC,
   so authentication is shared-secret-in-header. Terminate at an internal
   ingress that adds mTLS if you need stronger transport security.</li>
+<li><strong>Transient health-degraded during healthy rollouts.</strong> During a
+  rollout (including rollbacks), argocd briefly reports
+  <code>.status.health.status = Degraded</code> at the app level <em>before</em> its
+  resource-health reconciler has had a chance to re-run on the new
+  revision. If the <code>on-health-degraded</code> notification fires during that
+  tick, the payload's per-resource <code>healthStatus</code>/<code>healthMessage</code>
+  fields will all be empty, because argocd hasn't computed them yet.
+  The worker treats this pattern as a reconciler roll-up artifact and
+  <strong>drops</strong> the notification instead of alarming a freshly-healthy
+  deploy: if the matched history entry's <code>CompletedAt</code> is within
+  <code>transientGraceWindow</code> (10m, not currently config-driven) <em>and</em> the
+  payload carries zero entries with a non-empty, non-<code>Healthy</code> health
+  status, the handler records a <code>transient_rollout_skipped</code> result on
+  <code>deploybot_argocd_notifications_total</code> and returns without posting.
+  Outside the window, or when any sub-resource reports an actual
+  Degraded health with a populated <code>healthMessage</code>, the alert posts as
+  usual. If you see the suppression metric firing on <em>real</em> failures,
+  the reference template is probably missing the <code>.health.message</code>
+  rendering under <code>.app.status.resources[]</code> — re-check
+  <code>deploy/argocd-notifications/templates.yaml</code>. A longer-term fix that
+  sources the "workload is stuck" signal directly from
+  <code>kube_deployment_status_condition{reason="ProgressDeadlineExceeded"}</code>
+  via AlertManager is tracked in <code>TODO.md</code>.</li>
 </ul>
 <h3 id="one-template-per-trigger">One template per trigger<a class="headerlink" href="#one-template-per-trigger" title="Permanent link">&para;</a></h3>
 <p>argocd-notifications does not expose the current trigger name inside a
