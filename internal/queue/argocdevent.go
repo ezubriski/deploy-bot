@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -65,7 +66,12 @@ type ArgoCDNotificationEvent struct {
 	// payload, preserved verbatim so the worker can render per-resource
 	// status on health-degraded / sync-failed without coupling this package
 	// to the upstream schema. May be empty.
-	Resources []byte `json:"resources,omitempty"`
+	//
+	// Declared as json.RawMessage (not []byte) so the json encoder embeds
+	// the bytes as raw JSON on the stream rather than base64-encoding
+	// them, keeping the stream payload self-describing and ~33% smaller
+	// for the resources array.
+	Resources json.RawMessage `json:"resources,omitempty"`
 
 	// ReceivedAt is when the receiver accepted the webhook. Used by the
 	// worker to detect late-arriving degradations and reframe the rollback

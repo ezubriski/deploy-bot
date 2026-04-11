@@ -127,10 +127,12 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // recordStatus is a thin wrapper around metrics.RecordWebhookRequest that
 // no-ops when metrics are nil (lets tests construct a handler without a
-// full metrics registry).
+// full metrics registry). Always records against the "argocd" webhook
+// source, so operators can distinguish ArgoCD 401s from ECR 401s in the
+// shared deploybot_webhook_requests_total counter.
 func (h *WebhookHandler) recordStatus(status string) {
 	if h.metrics == nil {
 		return
 	}
-	h.metrics.RecordWebhookRequest(status)
+	h.metrics.RecordWebhookRequest("argocd", status)
 }

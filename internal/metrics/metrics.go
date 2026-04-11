@@ -48,8 +48,8 @@ func New(reg prometheus.Registerer) *Metrics {
 
 		WebhookRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "deploybot_webhook_requests_total",
-			Help: "Total ECR webhook requests by HTTP status.",
-		}, []string{"status"}),
+			Help: "Total inbound webhook requests by webhook source (ecr, argocd) and HTTP status.",
+		}, []string{"webhook", "status"}),
 	}
 
 	reg.MustRegister(
@@ -96,7 +96,7 @@ func (m *Metrics) SetPendingDeploys(n int) {
 }
 
 // RecordWebhookRequest increments the webhook request counter for the given
-// HTTP status code.
-func (m *Metrics) RecordWebhookRequest(status string) {
-	m.WebhookRequestsTotal.WithLabelValues(status).Inc()
+// source (e.g. "ecr", "argocd") and HTTP status code.
+func (m *Metrics) RecordWebhookRequest(webhook, status string) {
+	m.WebhookRequestsTotal.WithLabelValues(webhook, status).Inc()
 }

@@ -118,7 +118,7 @@ func (p *Processor) Process(ctx context.Context, payload WebhookPayload) (Proces
 		HealthStatus:    payload.HealthStatus,
 		Phase:           payload.Phase,
 		Message:         payload.Message,
-		Resources:       []byte(payload.Resources),
+		Resources:       payload.Resources,
 		ReceivedAt:      time.Now().UTC(),
 	})
 

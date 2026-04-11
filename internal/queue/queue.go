@@ -36,9 +36,11 @@ const (
 	batchSize     = 10
 )
 
-// AllStreams is the list of streams the worker reads from. User stream is
-// listed first so it has priority when both background streams have pending
-// messages; ECR and ArgoCD share the second tier.
+// AllStreams is the full list of streams the worker *can* read from. The
+// actual set is determined per-Worker via w.activeStreams() so optional
+// streams (currently just StreamKeyArgoCD) are only touched when the
+// corresponding feature is enabled. Kept exported so external callers that
+// want the full set for instrumentation still have it.
 var AllStreams = []string{StreamKeyUser, StreamKeyECR, StreamKeyArgoCD}
 
 // envelope carries the event type alongside the raw JSON payload so the
@@ -141,6 +143,7 @@ type Worker struct {
 	rdb            *redis.Client
 	consumer       string
 	ecrConcurrency int
+	argocdEnabled  bool
 	log            *zap.Logger
 }
 
@@ -170,10 +173,32 @@ func (w *Worker) SetECRConcurrency(n int) {
 	}
 }
 
-// Init creates the consumer group on all streams, tolerating the error if it
+// SetArgoCDEnabled toggles consumption of the argocd:events stream. When
+// false (the default), the worker does not create the argocd consumer
+// group, does not XREADGROUP from that stream, and does not reclaim stuck
+// messages on it. This keeps the worst-case idle cycle at two 1s blocking
+// reads (user + ECR) rather than three when the ArgoCD integration is
+// disabled. Must be called before Init/Run.
+func (w *Worker) SetArgoCDEnabled(enabled bool) {
+	w.argocdEnabled = enabled
+}
+
+// activeStreams returns the list of streams this worker reads from, in the
+// same order Init/reclaimStuck iterate them. StreamKeyArgoCD is only
+// included when argocdEnabled is true.
+func (w *Worker) activeStreams() []string {
+	streams := []string{StreamKeyUser, StreamKeyECR}
+	if w.argocdEnabled {
+		streams = append(streams, StreamKeyArgoCD)
+	}
+	return streams
+}
+
+// Init creates the consumer group on every stream this worker is
+// configured to consume (see activeStreams), tolerating the error if it
 // already exists.
 func (w *Worker) Init(ctx context.Context) error {
-	for _, stream := range AllStreams {
+	for _, stream := range w.activeStreams() {
 		err := w.rdb.XGroupCreateMkStream(ctx, stream, ConsumerGroup, "0").Err()
 		if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 			return fmt.Errorf("create consumer group on %s: %w", stream, err)
@@ -215,8 +240,11 @@ func (w *Worker) Run(ctx context.Context, handle func(context.Context, socketmod
 		// low (one notification per app per sync) and the worker-side
 		// handler does its own dedupe + lookups, so unbounded concurrency
 		// would only multiply Redis round trips for no real throughput
-		// gain.
-		w.readStream(ctx, StreamKeyArgoCD, handle, nil)
+		// gain. Skipped entirely when the feature flag is off so the idle
+		// cycle does not spend an extra 1s blocking on an empty stream.
+		if w.argocdEnabled {
+			w.readStream(ctx, StreamKeyArgoCD, handle, nil)
+		}
 	}
 }
 
@@ -284,7 +312,7 @@ func (w *Worker) process(ctx context.Context, streamKey string, msg redis.XMessa
 }
 
 func (w *Worker) reclaimStuck(ctx context.Context, handle func(context.Context, socketmode.Event)) {
-	for _, stream := range AllStreams {
+	for _, stream := range w.activeStreams() {
 		msgs, _, err := w.rdb.XAutoClaim(ctx, &redis.XAutoClaimArgs{
 			Stream:   stream,
 			Group:    ConsumerGroup,
