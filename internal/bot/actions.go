@@ -43,6 +43,9 @@ func (b *Bot) handleBlockAction(ctx context.Context, callback slack.InteractionC
 		case ActionAppName, ActionEnv:
 			b.handleDeployFilter(ctx, callback)
 			return // one view update per event
+		case ActionTagManual:
+			b.handleManualTagValidation(ctx, callback)
+			return
 		}
 	}
 }
@@ -70,6 +73,53 @@ func (b *Bot) handleDeployFilter(ctx context.Context, callback slack.Interaction
 	_, err := b.slack.UpdateViewContext(ctx, modal, "", callback.View.Hash, callback.View.ID)
 	if err != nil {
 		b.log.Warn("update deploy modal", zap.Error(err))
+	}
+}
+
+// handleManualTagValidation validates a manually entered tag against the ECR
+// cache and updates the modal with a validation result.
+func (b *Bot) handleManualTagValidation(ctx context.Context, callback slack.InteractionCallback) {
+	vals := ModalValues(callback.View.State.Values)
+	state := ParseDeployModalState(callback.View.PrivateMetadata)
+
+	selectedApp := vals.SelectedOption(BlockAppName, ActionAppName)
+	selectedEnv := vals.SelectedOption(BlockEnv, ActionEnv)
+	manualTag := vals.Text(BlockTagManual, ActionTagManual)
+
+	cfg := b.cfg.Load()
+	params := b.buildFilteredModalParams(ctx, cfg, selectedApp, selectedEnv, "", state.IsRollback)
+	params.StaleDuration = cfg.StaleDuration().String()
+	params.ManualTag = manualTag
+	params.Reason = vals.Text(BlockReason, ActionReason)
+	params.Approver = vals.SelectedUser(BlockApprover, ActionApprover)
+
+	if manualTag != "" && selectedApp != "" && selectedEnv != "" {
+		fullName := selectedApp + "-" + selectedEnv
+		exists, err := b.ecrCache.ValidateTag(ctx, fullName, manualTag)
+		if err != nil {
+			b.log.Warn("validate manual tag", zap.Error(err))
+		} else if exists {
+			params.TagValidation = fmt.Sprintf(":white_check_mark: Tag `%s` found.", manualTag)
+		} else {
+			params.TagValidation = fmt.Sprintf(
+				":x: Tag `%s` not found for *%s*. Use `%s tags %s` to list available tags.",
+				manualTag, fullName, params.CommandName, fullName,
+			)
+			if params.CommandName == "" {
+				params.TagValidation = fmt.Sprintf(
+					":x: Tag `%s` not found for *%s*. Use `/deploy tags %s` to list available tags.",
+					manualTag, fullName, fullName,
+				)
+			}
+		}
+	} else if manualTag != "" {
+		params.TagValidation = "_Select an app and environment to validate this tag._"
+	}
+
+	modal := buildDeployModal(params)
+	_, err := b.slack.UpdateViewContext(ctx, modal, "", callback.View.Hash, callback.View.ID)
+	if err != nil {
+		b.log.Warn("update deploy modal (tag validation)", zap.Error(err))
 	}
 }
 

@@ -14,14 +14,15 @@ const (
 	ModalCallbackDeploy = "deploy_modal"
 	ModalCallbackReject = "reject_modal"
 
-	BlockAppName   = "block_app_name"
-	BlockEnv       = "block_env"
-	BlockTag       = "block_tag"
-	BlockTagHint   = "block_tag_hint"
-	BlockTagManual = "block_tag_manual"
-	BlockReason    = "block_reason"
-	BlockApprover  = "block_approver"
-	BlockRejReason = "block_rej_reason"
+	BlockAppName       = "block_app_name"
+	BlockEnv           = "block_env"
+	BlockTag           = "block_tag"
+	BlockTagHint       = "block_tag_hint"
+	BlockTagManual     = "block_tag_manual"
+	BlockTagValidation = "block_tag_validation"
+	BlockReason        = "block_reason"
+	BlockApprover      = "block_approver"
+	BlockRejReason     = "block_rej_reason"
 
 	ActionAppName   = "action_app_name"
 	ActionEnv       = "action_env"
@@ -86,6 +87,8 @@ type DeployModalParams struct {
 	RollbackTarget      string
 	RollbackTargetDate  time.Time
 	ExcludeTag          string // tag to filter out of TagOptions (the current version)
+	HideManualTag       bool   // hide manual tag override (rollback mode)
+	TagValidation       string // validation result message for manual tag (mrkdwn)
 }
 
 // ModalValues provides safe access to Slack modal view state values,
@@ -259,25 +262,40 @@ func buildDeployModal(p DeployModalParams) slack.ModalViewRequest {
 		))
 	}
 
-	// Manual tag override
-	manualTagEl := slack.NewPlainTextInputBlockElement(
-		slack.NewTextBlockObject("plain_text", "e.g. v1.2.3", false, false),
-		ActionTagManual,
-	)
-	if p.ManualTag != "" {
-		manualTagEl.InitialValue = p.ManualTag
+	// Manual tag override — hidden in rollback mode.
+	if !p.HideManualTag {
+		manualTagEl := slack.NewPlainTextInputBlockElement(
+			slack.NewTextBlockObject("plain_text", "e.g. v1.2.3", false, false),
+			ActionTagManual,
+		)
+		if p.ManualTag != "" {
+			manualTagEl.InitialValue = p.ManualTag
+		}
+		manualTagEl.DispatchActionConfig = &slack.DispatchActionConfig{
+			TriggerActionsOn: []string{"on_character_entered"},
+		}
+		commandHint := p.CommandName
+		if commandHint == "" {
+			commandHint = "/deploy"
+		}
+		manualTagBlock := slack.NewInputBlock(BlockTagManual,
+			slack.NewTextBlockObject("plain_text", "Manual Tag Override", false, false),
+			slack.NewTextBlockObject("plain_text",
+				fmt.Sprintf("Leave blank to use selection above. If the tag is not found a message will be posted in the deploy channel — use %s tags <app> to list valid tags.", commandHint),
+				false, false),
+			manualTagEl,
+		).WithOptional(true).WithDispatchAction(true)
+		blocks = append(blocks, manualTagBlock)
+
+		// Tag validation result — shown after user types a manual tag.
+		if p.TagValidation != "" {
+			blocks = append(blocks, slack.NewSectionBlock(
+				slack.NewTextBlockObject("mrkdwn", p.TagValidation, false, false),
+				nil, nil,
+				slack.SectionBlockOptionBlockID(BlockTagValidation),
+			))
+		}
 	}
-	commandHint := p.CommandName
-	if commandHint == "" {
-		commandHint = "/deploy"
-	}
-	blocks = append(blocks, slack.NewInputBlock(BlockTagManual,
-		slack.NewTextBlockObject("plain_text", "Manual Tag Override", false, false),
-		slack.NewTextBlockObject("plain_text",
-			fmt.Sprintf("Leave blank to use selection above. If the tag is not found a message will be posted in the deploy channel — use %s tags <app> to list valid tags.", commandHint),
-			false, false),
-		manualTagEl,
-	).WithOptional(true))
 
 	// Reason
 	reasonEl := slack.NewPlainTextInputBlockElement(

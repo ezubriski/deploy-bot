@@ -141,44 +141,58 @@ func (b *Bot) buildFilteredModalParams(ctx context.Context, cfg *config.Config, 
 		)
 	}
 
-	// Only fetch tags when both app and env are selected.
-	var tagOptions []*slack.OptionBlockObject
-	if selectedApp != "" && selectedEnv != "" {
-		fullName := selectedApp + "-" + selectedEnv
-		for _, t := range b.ecrCache.RecentTags(fullName) {
-			tagOptions = append(tagOptions, slack.NewOptionBlockObject(
-				t,
-				slack.NewTextBlockObject("plain_text", t, false, false),
-				nil,
-			))
-		}
-	}
-
 	params := DeployModalParams{
 		AppNameOptions: appOptions,
 		EnvOptions:     envOptions,
-		TagOptions:     tagOptions,
 		SelectedApp:    selectedApp,
 		SelectedEnv:    selectedEnv,
 		SelectedTag:    preSelectedTag,
 		IsRollback:     isRollback,
+		HideManualTag:  isRollback,
 	}
 
-	// Populate rollback context when both app+env are known.
-	if isRollback && selectedApp != "" && selectedEnv != "" {
+	// Only fetch tags when both app and env are selected.
+	if selectedApp != "" && selectedEnv != "" {
 		fullName := selectedApp + "-" + selectedEnv
-		entries, err := b.store.GetHistory(ctx, 100)
-		if err == nil {
-			cur, prev, ok := findRollbackEntries(entries, fullName)
-			if ok {
-				params.RollbackCurrent = cur.Tag
-				params.RollbackCurrentDate = cur.CompletedAt
-				params.RollbackTarget = prev.Tag
-				params.RollbackTargetDate = prev.CompletedAt
-				params.ExcludeTag = cur.Tag
-				if preSelectedTag == "" {
-					params.SelectedTag = prev.Tag
+
+		if isRollback {
+			// Rollback: source tags from deployment history with deployed dates.
+			entries, err := b.store.GetHistory(ctx, 100)
+			if err == nil {
+				cur, prev, ok := findRollbackEntries(entries, fullName)
+				if ok {
+					params.RollbackCurrent = cur.Tag
+					params.RollbackCurrentDate = cur.CompletedAt
+					params.RollbackTarget = prev.Tag
+					params.RollbackTargetDate = prev.CompletedAt
+					params.ExcludeTag = cur.Tag
+					if preSelectedTag == "" {
+						params.SelectedTag = prev.Tag
+					}
 				}
+				// Build tag options from all unique approved deploys.
+				seen := map[string]bool{}
+				for _, e := range entries {
+					if e.App == fullName && e.EventType == "approved" && !seen[e.Tag] {
+						seen[e.Tag] = true
+						label := fmt.Sprintf("%s (deployed %s)", e.Tag, e.CompletedAt.Format("Jan 2 15:04"))
+						params.TagOptions = append(params.TagOptions, slack.NewOptionBlockObject(
+							e.Tag,
+							slack.NewTextBlockObject("plain_text", label, false, false),
+							nil,
+						))
+					}
+				}
+			}
+		} else {
+			// Regular deploy: source tags from ECR cache with published dates.
+			for _, t := range b.ecrCache.RecentTagsWithTime(fullName) {
+				label := fmt.Sprintf("%s (published %s)", t.Tag, t.PushedAt.Format("Jan 2 15:04"))
+				params.TagOptions = append(params.TagOptions, slack.NewOptionBlockObject(
+					t.Tag,
+					slack.NewTextBlockObject("plain_text", label, false, false),
+					nil,
+				))
 			}
 		}
 	}

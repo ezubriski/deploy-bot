@@ -16,6 +16,7 @@ import (
 
 	"github.com/ezubriski/deploy-bot/internal/audit"
 	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/ecr"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/store"
@@ -98,6 +99,7 @@ type stubECR struct{}
 
 func (stubECR) ValidateTag(_ context.Context, _, _ string) (bool, error) { return true, nil }
 func (stubECR) RecentTags(_ string) []string                             { return nil }
+func (stubECR) RecentTagsWithTime(_ string) []ecr.TagWithTime            { return nil }
 func (stubECR) Tags(_ string, _ int) []string                            { return nil }
 
 // captureSlack records channels that receive PostMessageContext calls.
