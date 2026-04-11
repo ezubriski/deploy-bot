@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
@@ -344,6 +347,137 @@ func TestParseAndFilterResources_EmptyAndInvalid(t *testing.T) {
 	}
 	if got := parseAndFilterResources(json.RawMessage(`not json`)); got != nil {
 		t.Errorf("invalid JSON should yield nil, got %+v", got)
+	}
+}
+
+// argocdCounter is a small helper that reads the current value of the
+// argocd notifications counter for a (trigger, result) pair on the bot's
+// metrics registry. Used by the counter-assertion tests below.
+func argocdCounter(t *testing.T, b *Bot, trigger, result string) float64 {
+	t.Helper()
+	return testutil.ToFloat64(b.metrics.ArgoCDNotificationsTotal.WithLabelValues(trigger, result))
+}
+
+// TestArgoCDHandler_Counter_Matched_OnFailure verifies the matched label
+// fires on the failure path. This is the load-bearing success case for
+// the observability feature: if this counter doesn't move when phase 3
+// is working as intended, monitoring the feature is broken.
+func TestArgoCDHandler_Counter_Matched_OnFailure(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	entry := seedHistoryForArgoCD(t, st)
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-sync-failed",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: entry.GitopsCommitSHA,
+	})
+
+	if got := argocdCounter(t, b, "on-sync-failed", metrics.ArgoCDResultMatched); got != 1 {
+		t.Errorf("matched counter = %v, want 1", got)
+	}
+	// And no other label combinations were touched.
+	if got := argocdCounter(t, b, "on-sync-failed", metrics.ArgoCDResultUnmatched); got != 0 {
+		t.Errorf("unmatched counter = %v, want 0", got)
+	}
+}
+
+// TestArgoCDHandler_Counter_Matched_OnSuccess verifies the matched label
+// also fires for the quiet sync-succeeded happy path when a slack handle
+// is available.
+func TestArgoCDHandler_Counter_Matched_OnSuccess(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	entry := seedHistoryForArgoCD(t, st)
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-sync-succeeded",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: entry.GitopsCommitSHA,
+	})
+
+	if got := argocdCounter(t, b, "on-sync-succeeded", metrics.ArgoCDResultMatched); got != 1 {
+		t.Errorf("matched counter = %v, want 1", got)
+	}
+}
+
+// TestArgoCDHandler_Counter_NoHandleSkipped verifies that sync-succeeded
+// arriving for a history entry with no slack handle (ECR auto-deploy
+// shape) increments the no_handle_skipped counter rather than matched —
+// the notification was correlated but we deliberately chose not to post.
+func TestArgoCDHandler_Counter_NoHandleSkipped(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	_ = seedHistoryForArgoCD(t, st, func(e *store.HistoryEntry) {
+		e.SlackChannel = ""
+		e.SlackMessageTS = ""
+	})
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-sync-succeeded",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: "abc123deadbeef",
+	})
+
+	if got := argocdCounter(t, b, "on-sync-succeeded", metrics.ArgoCDResultNoHandleSkipped); got != 1 {
+		t.Errorf("no_handle_skipped counter = %v, want 1", got)
+	}
+	if got := argocdCounter(t, b, "on-sync-succeeded", metrics.ArgoCDResultMatched); got != 0 {
+		t.Errorf("matched counter = %v, want 0 (the skipped case must not increment matched)", got)
+	}
+}
+
+// TestArgoCDHandler_Counter_Unmatched verifies the unmatched label fires
+// when FindHistoryBySHA returns (nil, nil). Operators can alert on a
+// sustained non-zero rate to catch deploys that somehow bypass deploy-bot.
+func TestArgoCDHandler_Counter_Unmatched(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	// No history seeded — every lookup misses.
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-health-degraded",
+		ArgoCDApp:       "unknown-app",
+		GitopsCommitSHA: "never-seen-sha",
+	})
+
+	if got := argocdCounter(t, b, "on-health-degraded", metrics.ArgoCDResultUnmatched); got != 1 {
+		t.Errorf("unmatched counter = %v, want 1", got)
+	}
+}
+
+// TestArgoCDHandler_Counter_UnhandledTrigger verifies that a trigger name
+// the bot doesn't know about increments the unhandled_trigger label (and
+// is collapsed to the "other" trigger bucket for cardinality safety).
+// This is the signal operators should use to catch "upstream added a new
+// trigger we haven't wired yet."
+func TestArgoCDHandler_Counter_UnhandledTrigger(t *testing.T) {
+	st := newTestStore(t)
+	sl := &captureSlack{}
+	b := newTestBot(t, &stubGH{}, sl, st)
+
+	entry := seedHistoryForArgoCD(t, st)
+
+	b.handleArgoCDNotification(context.Background(), queue.ArgoCDNotificationEvent{
+		Trigger:         "on-something-new-from-upstream",
+		ArgoCDApp:       "myapp-prod",
+		GitopsCommitSHA: entry.GitopsCommitSHA,
+	})
+
+	// Trigger label collapses to "other" — bounded cardinality.
+	if got := argocdCounter(t, b, "other", metrics.ArgoCDResultUnhandledTrigger); got != 1 {
+		t.Errorf("unhandled_trigger counter = %v, want 1", got)
+	}
+	// And no Slack post happened.
+	if len(sl.posts) != 0 {
+		t.Errorf("expected no Slack posts for unhandled trigger, got %d", len(sl.posts))
 	}
 }
 

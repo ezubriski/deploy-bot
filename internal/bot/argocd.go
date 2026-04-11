@@ -10,6 +10,7 @@ import (
 	"github.com/slack-go/slack"
 	"go.uber.org/zap"
 
+	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/sanitize"
 	"github.com/ezubriski/deploy-bot/internal/store"
@@ -72,7 +73,11 @@ func (b *Bot) handleArgoCDNotification(ctx context.Context, evt queue.ArgoCDNoti
 	if err != nil {
 		// Redis lookup failed — treat as unmatched rather than retrying.
 		// The dedupe cache has already absorbed this notification, so a
-		// retry from ArgoCD would just be suppressed anyway.
+		// retry from ArgoCD would just be suppressed anyway. Recorded as
+		// lookup_error so operators can alert on a non-zero rate: a
+		// transient blip is expected, a sustained rate means correlation
+		// is broken and every incident alert is being silently eaten.
+		b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultLookupError)
 		b.log.Warn("argocd handler: find history by sha",
 			zap.String("trigger", evt.Trigger),
 			zap.String("argocd_app", evt.ArgoCDApp),
@@ -82,6 +87,7 @@ func (b *Bot) handleArgoCDNotification(ctx context.Context, evt queue.ArgoCDNoti
 		return
 	}
 	if entry == nil {
+		b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultUnmatched)
 		b.log.Info("argocd notification unmatched, dropping",
 			zap.String("trigger", evt.Trigger),
 			zap.String("argocd_app", evt.ArgoCDApp),
@@ -92,15 +98,21 @@ func (b *Bot) handleArgoCDNotification(ctx context.Context, evt queue.ArgoCDNoti
 
 	switch evt.Trigger {
 	case "on-sync-succeeded":
+		// postArgoCDSuccess may drop silently when the history entry has
+		// no slack handle to thread under — it records the right result
+		// label (matched vs no_handle_skipped) from inside the function.
 		b.postArgoCDSuccess(ctx, evt, entry)
 	case "on-sync-failed":
 		b.postArgoCDFailure(ctx, evt, entry, "DEPLOY FAILED", "sync failed")
+		b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultMatched)
 	case "on-health-degraded":
 		b.postArgoCDFailure(ctx, evt, entry, "HEALTH DEGRADED", "degraded")
+		b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultMatched)
 	default:
 		// on-sync-running is accepted by the receiver but never enqueued,
 		// so reaching this branch implies a new trigger was added upstream
 		// and we haven't wired handling for it yet. Log rather than panic.
+		b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultUnhandledTrigger)
 		b.log.Warn("argocd handler: unhandled trigger, dropping",
 			zap.String("trigger", evt.Trigger),
 			zap.String("argocd_app", evt.ArgoCDApp),
@@ -116,6 +128,7 @@ func (b *Bot) handleArgoCDNotification(ctx context.Context, evt queue.ArgoCDNoti
 // standalone channel post.
 func (b *Bot) postArgoCDSuccess(ctx context.Context, evt queue.ArgoCDNotificationEvent, entry *store.HistoryEntry) {
 	if entry.SlackChannel == "" || entry.SlackMessageTS == "" {
+		b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultNoHandleSkipped)
 		b.log.Debug("argocd success: no slack handle on history entry, dropping quiet reply",
 			zap.String("app", entry.App),
 			zap.String("env", entry.Environment),
@@ -131,6 +144,7 @@ func (b *Bot) postArgoCDSuccess(ctx context.Context, evt queue.ArgoCDNotificatio
 		slack.MsgOptionText(text, false),
 		slack.MsgOptionTS(entry.SlackMessageTS),
 	)
+	b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultMatched)
 }
 
 // postArgoCDFailure posts an unmissable top-level alert for sync-failed
