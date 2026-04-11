@@ -55,10 +55,11 @@ func TestPendingLabel(t *testing.T) {
 
 func TestSecretsValidate(t *testing.T) {
 	valid := Secrets{
-		SlackBotToken: "xoxb-valid-token",
-		SlackAppToken: "xapp-valid-token",
-		GitHubToken:   "github_pat_abc123",
-		RedisAddr:     "redis:6379",
+		SlackBotToken:    "xoxb-valid-token",
+		SlackAppToken:    "xapp-valid-token",
+		GitHubToken:      "github_pat_abc123",
+		RedisAddr:        "redis:6379",
+		PostgresPassword: "pw",
 	}
 
 	t.Run("valid secrets pass", func(t *testing.T) {
@@ -205,6 +206,54 @@ func TestSecretsValidate(t *testing.T) {
 		s.GitHubAppID = 12345
 		if !s.UseGitHubApp() {
 			t.Error("expected UseGitHubApp true with app ID set")
+		}
+	})
+
+	t.Run("missing postgres password without IAM auth", func(t *testing.T) {
+		s := valid
+		s.PostgresPassword = ""
+		err := s.Validate()
+		if err == nil {
+			t.Fatal("expected error for missing postgres_password")
+		}
+		if !strings.Contains(err.Error(), "postgres_password is required") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("postgres IAM auth requires rds_region", func(t *testing.T) {
+		s := valid
+		s.PostgresPassword = ""
+		s.PostgresIAMAuth = true
+		err := s.Validate()
+		if err == nil {
+			t.Fatal("expected error for missing postgres_rds_region")
+		}
+		if !strings.Contains(err.Error(), "postgres_rds_region is required") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("postgres IAM auth and password are mutually exclusive", func(t *testing.T) {
+		s := valid // has password set
+		s.PostgresIAMAuth = true
+		s.PostgresRDSRegion = "us-west-2"
+		err := s.Validate()
+		if err == nil {
+			t.Fatal("expected error for both password and IAM auth set")
+		}
+		if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("postgres IAM auth with rds_region and no password passes", func(t *testing.T) {
+		s := valid
+		s.PostgresPassword = ""
+		s.PostgresIAMAuth = true
+		s.PostgresRDSRegion = "us-west-2"
+		if err := s.Validate(); err != nil {
+			t.Errorf("expected no error with IAM auth configured, got: %v", err)
 		}
 	})
 }
@@ -386,10 +435,15 @@ func TestMergeApps_DeduplicatesDiscovered(t *testing.T) {
 	}
 }
 
+// postgresJSON returns the minimal "postgres" block needed for Load()
+// to accept a config fixture. Tests that don't care about postgres
+// specifically should embed this into their JSON.
+const postgresJSON = `"postgres":{"host":"localhost","database":"d","user":"u"}`
+
 func TestLoad_InvalidTagPattern(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/config.json"
-	writeFile(t, path, `{"apps":[{"app":"a","environment":"dev","tag_pattern":"[invalid"}]}`)
+	writeFile(t, path, `{`+postgresJSON+`,"apps":[{"app":"a","environment":"dev","tag_pattern":"[invalid"}]}`)
 
 	_, err := Load(path)
 	if err == nil {
@@ -403,7 +457,7 @@ func TestLoad_InvalidTagPattern(t *testing.T) {
 func TestLoad_ValidTagPattern(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/config.json"
-	writeFile(t, path, `{"apps":[{"app":"a","environment":"dev","tag_pattern":"^v\\d+$"}]}`)
+	writeFile(t, path, `{`+postgresJSON+`,"apps":[{"app":"a","environment":"dev","tag_pattern":"^v\\d+$"}]}`)
 
 	cfg, err := Load(path)
 	if err != nil {
@@ -414,10 +468,54 @@ func TestLoad_ValidTagPattern(t *testing.T) {
 	}
 }
 
+func TestLoad_MissingPostgres_Fails(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	writeFile(t, path, `{"apps":[{"app":"a","environment":"dev"}]}`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for missing postgres block")
+	}
+	if !strings.Contains(err.Error(), "postgres.host is required") {
+		t.Errorf("error = %v, want postgres.host required message", err)
+	}
+}
+
+func TestLoad_PostgresRetentionBelowFloor_Fails(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	// 300 days — below the 390-day audit-compliance floor.
+	writeFile(t, path, `{"postgres":{"host":"h","database":"d","user":"u","retention_history":"7200h"},"apps":[{"app":"a","environment":"dev"}]}`)
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for retention below audit floor")
+	}
+	if !strings.Contains(err.Error(), "audit compliance") {
+		t.Errorf("error = %v, want mention of audit compliance", err)
+	}
+}
+
+func TestLoad_PostgresRetentionAtFloor_Succeeds(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.json"
+	// Exactly 390 days.
+	writeFile(t, path, `{"postgres":{"host":"h","database":"d","user":"u","retention_history":"9360h"},"apps":[{"app":"a","environment":"dev"}]}`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("expected retention at exactly the floor to pass: %v", err)
+	}
+	if cfg.Postgres.HistoryRetentionDuration() < minPostgresRetentionHistory {
+		t.Error("retention duration resolved below floor")
+	}
+}
+
 func TestLoadWithDiscovered_NoFile(t *testing.T) {
 	dir := t.TempDir()
 	primaryPath := dir + "/config.json"
-	writeFile(t, primaryPath, `{"deployment":{"merge_method":"squash"},"apps":[{"app":"a","environment":"dev"}]}`)
+	writeFile(t, primaryPath, `{`+postgresJSON+`,"deployment":{"merge_method":"squash"},"apps":[{"app":"a","environment":"dev"}]}`)
 
 	cfg, err := LoadWithDiscovered(primaryPath, dir+"/nonexistent.json")
 	if err != nil {
@@ -433,7 +531,7 @@ func TestLoadWithDiscovered_MergesApps(t *testing.T) {
 	primaryPath := dir + "/config.json"
 	discoveredPath := dir + "/discovered.json"
 
-	writeFile(t, primaryPath, `{"deployment":{"merge_method":"squash"},"apps":[{"app":"a","environment":"dev"}]}`)
+	writeFile(t, primaryPath, `{`+postgresJSON+`,"deployment":{"merge_method":"squash"},"apps":[{"app":"a","environment":"dev"}]}`)
 	writeFile(t, discoveredPath, `{"apps":[{"app":"b","environment":"prod","kustomize_path":"p","ecr_repo":"r","_source_repo":"org/b"}]}`)
 
 	cfg, err := LoadWithDiscovered(primaryPath, discoveredPath)

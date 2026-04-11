@@ -15,6 +15,7 @@ func TestValidateConfig_Valid(t *testing.T) {
 		Slack:         SlackConfig{DeployChannel: "C123"},
 		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m", MergeMethod: "squash"},
 		AWS:           AWSConfig{ECRRegion: "us-east-1"},
+		Postgres:      PostgresConfig{Host: "localhost", Database: "d", User: "u"},
 		Apps: []AppConfig{
 			{App: "myapp", Environment: "dev", KustomizePath: "apps/myapp", ECRRepo: "123.dkr.ecr.us-east-1.amazonaws.com/myapp", TagPattern: "^v[0-9]+$"},
 		},
@@ -185,4 +186,85 @@ func TestValidateConfig_SameKustomizePathDifferentAppsIsConflict(t *testing.T) {
 		}
 	}
 	t.Error("expected conflicting kustomize_path error for same path across environments")
+}
+
+func TestValidateConfig_PostgresMissingFields(t *testing.T) {
+	cfg := &Config{
+		GitHub:        GitHubConfig{Org: "o", Repo: "r"},
+		Authorization: []AuthorizationEntry{authEntry(AuthSlackEmails, "u@e.com")},
+		Slack:         SlackConfig{DeployChannel: "C1"},
+		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
+		// Postgres deliberately unset — all three required fields should error.
+		Apps: []AppConfig{{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r"}},
+	}
+
+	errs := ValidateConfig(cfg)
+	wanted := map[string]bool{
+		"postgres.host":     false,
+		"postgres.database": false,
+		"postgres.user":     false,
+	}
+	for _, e := range errs {
+		key := e.Section + "." + e.Field
+		if _, ok := wanted[key]; ok {
+			wanted[key] = true
+		}
+	}
+	for k, found := range wanted {
+		if !found {
+			t.Errorf("expected %s validation error", k)
+		}
+	}
+}
+
+func TestValidateConfig_PostgresRetentionBelowFloor(t *testing.T) {
+	cfg := &Config{
+		GitHub:        GitHubConfig{Org: "o", Repo: "r"},
+		Authorization: []AuthorizationEntry{authEntry(AuthSlackEmails, "u@e.com")},
+		Slack:         SlackConfig{DeployChannel: "C1"},
+		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
+		Postgres: PostgresConfig{
+			Host:     "h",
+			Database: "d",
+			User:     "u",
+			// 1 year — below the 390-day audit floor.
+			RetentionHistory: "8760h",
+		},
+		Apps: []AppConfig{{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r"}},
+	}
+
+	errs := ValidateConfig(cfg)
+	for _, e := range errs {
+		if e.Section == "postgres" && e.Field == "retention_history" {
+			return
+		}
+	}
+	t.Error("expected postgres.retention_history audit-floor error")
+}
+
+func TestValidateConfig_PostgresRetentionAtFloorOK(t *testing.T) {
+	cfg := &Config{
+		GitHub:        GitHubConfig{Org: "o", Repo: "r"},
+		Authorization: []AuthorizationEntry{authEntry(AuthSlackEmails, "u@e.com")},
+		Slack:         SlackConfig{DeployChannel: "C1"},
+		Deployment:    DeploymentConfig{StaleDuration: "2h", LockTTL: "5m"},
+		AWS:           AWSConfig{ECRRegion: "us-east-1"},
+		Postgres: PostgresConfig{
+			Host:     "h",
+			Database: "d",
+			User:     "u",
+			// Exactly 390 days in hours: 390*24 = 9360.
+			RetentionHistory: "9360h",
+		},
+		Apps: []AppConfig{{App: "a", Environment: "dev", KustomizePath: "p", ECRRepo: "r"}},
+	}
+
+	errs := ValidateConfig(cfg)
+	for _, e := range errs {
+		if e.Section == "postgres" && e.Field == "retention_history" {
+			t.Errorf("did not expect retention_history error at exactly the floor, got %v", e)
+		}
+	}
 }

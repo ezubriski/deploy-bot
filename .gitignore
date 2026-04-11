@@ -9,3 +9,4 @@ tests/integration/cpu.prof
 .env.integration
 .venv/
 site/
+.claude/
