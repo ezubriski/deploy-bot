@@ -23,6 +23,30 @@ import (
 // long enough that runtime issues on stable deploys are clearly distinct.
 const lateArrivalThreshold = 2 * time.Hour
 
+// transientGraceWindow is the age-of-deploy ceiling under which an
+// on-health-degraded notification is treated as a possible argocd
+// reconciler roll-up artifact rather than a real failure. Inside this
+// window, the handler additionally requires at least one sub-resource
+// in the payload to report a non-empty, non-Healthy health status
+// before posting the alarming alert. Outside the window, the content
+// gate is bypassed and any on-health-degraded posts as usual.
+//
+// The value is deliberately generous. argocd Deployments can spend
+// several minutes in their Progressing window before health settles,
+// especially on clusters where image pulls are slow (cold nodes, cold
+// layer caches) or where multiple rolling replicas have to come up in
+// sequence. 10m covers the fast-path rollout case without silencing
+// genuinely stuck deploys — a deploy that fails hard still produces
+// payloads with populated resource health (the argocd Lua health
+// check writes "ReplicaSet has timed out progressing" to
+// health.message), which bypasses the content gate regardless of
+// deploy age.
+//
+// Not currently config-driven. If operators need to tune it per
+// cluster, pull it into config.argocd_notifications.transient_grace
+// as a follow-up.
+const transientGraceWindow = 10 * time.Minute
+
 // maxFailingResources caps the number of non-healthy resources we render
 // inline in the alarming Slack message. Sized so a worst-case many-pod
 // CrashLoopBackOff doesn't blow past Slack's 3000-char section text
@@ -103,9 +127,31 @@ func (b *Bot) handleArgoCDNotification(ctx context.Context, evt queue.ArgoCDNoti
 		// label (matched vs no_handle_skipped) from inside the function.
 		b.postArgoCDSuccess(ctx, evt, entry)
 	case "on-sync-failed":
+		// Not gated by isTransientRolloutDegraded: sync-failed fires on
+		// apply-step failures (invalid manifests, immutable-field
+		// changes, etc.), which are not a transitional state — if argo
+		// says the sync failed, it genuinely failed.
 		b.postArgoCDFailure(ctx, evt, entry, "DEPLOY FAILED", "sync failed")
 		b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultMatched)
 	case "on-health-degraded":
+		if isTransientRolloutDegraded(evt, entry) {
+			// Drop alarming alert. This is the argocd reconciler
+			// roll-up race where .status.health.status is Degraded for
+			// a tick before per-resource health is recomputed on the
+			// freshly-synced revision. Observed 2026-04-11 on a healthy
+			// rollback that the user saw alerted minutes after the app
+			// was back to Healthy. See transientGraceWindow +
+			// isTransientRolloutDegraded for the exact fingerprint.
+			b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultTransientRolloutSkipped)
+			b.log.Info("argocd handler: dropping transient health-degraded for fresh deploy",
+				zap.String("argocd_app", evt.ArgoCDApp),
+				zap.String("gitops_sha", evt.GitopsCommitSHA),
+				zap.String("app", entry.App),
+				zap.String("tag", entry.Tag),
+				zap.Duration("deploy_age", time.Since(entry.CompletedAt)),
+			)
+			return
+		}
 		b.postArgoCDFailure(ctx, evt, entry, "HEALTH DEGRADED", "degraded")
 		b.metrics.RecordArgoCDNotification(evt.Trigger, metrics.ArgoCDResultMatched)
 	default:
@@ -273,6 +319,57 @@ func buildArgoCDFailureMessage(
 	}
 
 	return sb.String()
+}
+
+// isTransientRolloutDegraded decides whether an on-health-degraded
+// notification is (probably) an argocd reconciler roll-up artifact
+// from a healthy Deployment rollout, and therefore should be dropped.
+//
+// The fingerprint, observed live on 2026-04-11 during a healthy
+// rollback of nginx-01-dev, is:
+//
+//   - The matched history entry's CompletedAt is very recent
+//     (within transientGraceWindow — the rollout hasn't had time to
+//     settle from argocd's point of view).
+//   - The app-level .status.health.status is Degraded, but zero
+//     sub-resources in the payload report any meaningful Degraded
+//     health of their own. Every resource in the payload has either
+//     an empty health status (argocd hasn't re-run its Lua health
+//     check on the new revision yet) or Healthy. This is the tell —
+//     a genuine Degraded always carries at least one resource
+//     reporting Degraded with a populated health.message like
+//     "ReplicaSet 'foo' has timed out progressing" or "waiting for
+//     rollout to finish: 0 of 1 updated replicas are available".
+//
+// Either condition alone is insufficient: a stuck rollout caught at
+// exactly its progressDeadline transition could have a fresh
+// CompletedAt but populated resource health (handled: content gate
+// lets it through), and a genuinely broken deploy that got argocd's
+// resource-health reconciler wedged could have stale-empty resource
+// health but be hours old (handled: time gate lets it through). Both
+// gates together match the reconciler-roll-up race specifically.
+//
+// A nil entry (caller never looked it up or explicitly passed nil)
+// conservatively falls through as "not transient" — without a
+// CompletedAt to range against we cannot evaluate the time gate, so
+// we pessimistically assume the caller wants the alert.
+func isTransientRolloutDegraded(evt queue.ArgoCDNotificationEvent, entry *store.HistoryEntry) bool {
+	if entry == nil {
+		return false
+	}
+	if entry.CompletedAt.IsZero() || time.Since(entry.CompletedAt) >= transientGraceWindow {
+		return false
+	}
+	// Content gate: any resource in the payload reporting a
+	// non-empty, non-Healthy health status disqualifies the
+	// transient-suppression path. parseAndFilterResources already
+	// does exactly that filter — non-empty length means "at least
+	// one real Degraded/Progressing/Missing/Suspended resource
+	// signal" and we should post.
+	if len(parseAndFilterResources(evt.Resources)) > 0 {
+		return false
+	}
+	return true
 }
 
 // parseAndFilterResources decodes the raw resources JSON from the
