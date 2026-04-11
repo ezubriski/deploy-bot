@@ -104,7 +104,7 @@ func (b *Bot) handleManualTagValidation(ctx context.Context, callback slack.Inte
 			// CommandName isn't preserved across view updates (PrivateMetadata
 			// only carries app/env/rollback), so hardcode /deploy here.
 			params.TagValidation = fmt.Sprintf(
-				":x: Tag `%s` not found for *%s*. Use `/deploy tags %s` to list available tags.",
+				":x: The tag `%s` was not found for *%s*. Run `/deploy tags %s` in this channel to list valid tags.",
 				manualTag, fullName, fullName,
 			)
 		}

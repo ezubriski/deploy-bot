@@ -284,14 +284,10 @@ func buildDeployModal(p DeployModalParams) slack.ModalViewRequest {
 		manualTagEl.DispatchActionConfig = &slack.DispatchActionConfig{
 			TriggerActionsOn: []string{"on_enter_pressed"},
 		}
-		commandHint := p.CommandName
-		if commandHint == "" {
-			commandHint = "/deploy"
-		}
 		manualTagBlock := slack.NewInputBlock(BlockTagManual,
 			slack.NewTextBlockObject("plain_text", "Manual Tag Override", false, false),
 			slack.NewTextBlockObject("plain_text",
-				fmt.Sprintf("Leave blank to use selection above. If the tag is not found a message will be posted in the deploy channel — use %s tags <app> to list valid tags.", commandHint),
+				"Leave blank to use selection above. Press Enter to validate.",
 				false, false),
 			manualTagEl,
 		).WithOptional(true).WithDispatchAction(true)
