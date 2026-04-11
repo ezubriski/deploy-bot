@@ -154,7 +154,7 @@ func (b *Bot) buildFilteredModalParams(ctx context.Context, cfg *config.Config, 
 	ecrTagOptions := func(fullName string) []*slack.OptionBlockObject {
 		var opts []*slack.OptionBlockObject
 		for _, t := range b.ecrCache.RecentTagsWithTime(fullName) {
-			label := fmt.Sprintf("%s (published %s)", t.Tag, t.PushedAt.Format("Jan 2 15:04"))
+			label := fmt.Sprintf("%s (published %s)", t.Tag, t.PushedAt.UTC().Format("Jan 2 15:04 MST"))
 			opts = append(opts, slack.NewOptionBlockObject(
 				t.Tag,
 				slack.NewTextBlockObject("plain_text", label, false, false),
@@ -186,7 +186,7 @@ func (b *Bot) buildFilteredModalParams(ctx context.Context, cfg *config.Config, 
 				for _, e := range entries {
 					if e.App == fullName && e.EventType == "approved" && !seen[e.Tag] {
 						seen[e.Tag] = true
-						label := fmt.Sprintf("%s (deployed %s)", e.Tag, e.CompletedAt.Format("Jan 2 15:04"))
+						label := fmt.Sprintf("%s (deployed %s)", e.Tag, e.CompletedAt.UTC().Format("Jan 2 15:04 MST"))
 						params.TagOptions = append(params.TagOptions, slack.NewOptionBlockObject(
 							e.Tag,
 							slack.NewTextBlockObject("plain_text", label, false, false),

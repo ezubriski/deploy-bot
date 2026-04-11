@@ -204,8 +204,8 @@ func buildDeployModal(p DeployModalParams) slack.ModalViewRequest {
 		info := fmt.Sprintf(
 			":rewind: *Rolling back %s*\nCurrent version:  `%s` (deployed %s)\nRolling back to:  `%s` (deployed %s)",
 			appLabel,
-			p.RollbackCurrent, p.RollbackCurrentDate.Format("Jan 2"),
-			p.RollbackTarget, p.RollbackTargetDate.Format("Jan 2"),
+			p.RollbackCurrent, p.RollbackCurrentDate.UTC().Format("Jan 2 15:04 MST"),
+			p.RollbackTarget, p.RollbackTargetDate.UTC().Format("Jan 2 15:04 MST"),
 		)
 		blocks = append(blocks, slack.NewSectionBlock(
 			slack.NewTextBlockObject("mrkdwn", info, false, false),

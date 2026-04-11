@@ -22,6 +22,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/bot"
 	"github.com/ezubriski/deploy-bot/internal/buffer"
 	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/ecr"
 	"github.com/ezubriski/deploy-bot/internal/ecrpoller"
 	"github.com/ezubriski/deploy-bot/internal/health"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
@@ -150,6 +151,19 @@ func main() {
 	}
 	memberCache.StartRefresh(ctx, approverRefreshInterval)
 
+	// ECR cache used for inline manual-tag validation on modal submit.
+	// Populate on startup so the in-memory cache is warm from Redis (written
+	// by the worker) — this avoids a DescribeImages call on the common path.
+	// We skip StartRefresh: the worker already refreshes every 5 minutes and
+	// writes to Redis, and cache misses here fall back to a direct ECR
+	// DescribeImages via ValidateTag, which is cheap for a single tag.
+	m := metrics.NewDefault()
+	ecrCache, err := ecr.NewCache(ctx, cfg, rdb, m, log)
+	if err != nil {
+		log.Fatal("init ecr cache", zap.Error(err))
+	}
+	ecrCache.Populate(ctx)
+
 	// Start ECR poller and/or webhook if configured. Both share the same
 	// buffer and Redis stream for ECR events.
 	if cfg.ECRAutoDeploy.Enabled {
@@ -169,7 +183,6 @@ func main() {
 			if len(secrets.ECRWebhookAPIKey) < 32 {
 				log.Fatal("ecr_webhook_api_key must be at least 32 characters when webhook is enabled")
 			}
-			m := metrics.NewDefault()
 			webhookPoller := ecrpoller.NewWithoutSQS(rdb, ecrBuf, redisStore, holder, log)
 			mux.Handle("/v1/webhooks/ecr", ecrpoller.NewWebhookHandler(webhookPoller, secrets.ECRWebhookAPIKey, m, log))
 			log.Info("ecr webhook endpoint registered", zap.String("path", "/v1/webhooks/ecr"))
@@ -249,7 +262,7 @@ func main() {
 				}
 				if callback.Type == slack.InteractionTypeViewSubmission &&
 					callback.View.CallbackID == bot.ModalCallbackDeploy {
-					validateAndDispatch(ctx, sm, rdb, cfg, memberCache, evtBuffer, evt, callback, log)
+					validateAndDispatch(ctx, sm, rdb, cfg, memberCache, ecrCache, evtBuffer, evt, callback, log)
 				} else {
 					enqueueAndAck(ctx, sm, rdb, evtBuffer, evt, log)
 				}
@@ -301,6 +314,7 @@ func validateAndDispatch(
 	rdb *redis.Client,
 	cfg *config.Config,
 	memberCache *approvers.Cache,
+	ecrCache *ecr.Cache,
 	buf *buffer.Buffer,
 	evt socketmode.Event,
 	callback slack.InteractionCallback,
@@ -311,6 +325,7 @@ func validateAndDispatch(
 	env := vals.SelectedOption(bot.BlockEnv, bot.ActionEnv)
 	appVal := appName + "-" + env // reconstruct FullName
 	approverID := vals.SelectedUser(bot.BlockApprover, bot.ActionApprover)
+	dropdownTag := vals.SelectedOption(bot.BlockTag, bot.ActionTag)
 	manualTag := vals.Text(bot.BlockTagManual, bot.ActionTagManual)
 
 	errs := make(map[string]string)
@@ -337,6 +352,29 @@ func validateAndDispatch(
 			errs[bot.BlockTagManual] = fmt.Sprintf(
 				"Tag does not match the required pattern for %s. Use /deploy tags %s to list valid tags.",
 				appVal, appVal,
+			)
+		}
+	}
+
+	// Require either a selected tag or a manual tag. Without this the worker
+	// would fail later with a channel-side notice and the modal would close
+	// silently — confusing UX.
+	if _, hasTagErr := errs[bot.BlockTagManual]; !hasTagErr && dropdownTag == "" && manualTag == "" && appName != "" && env != "" {
+		errs[bot.BlockTagManual] = "Enter a tag or pick one from the dropdown above."
+	}
+
+	// ECR existence check for the manual tag — authoritative (cache hit or
+	// direct DescribeImages fallback). Fail open on errors (API blips,
+	// unknown app from hot-reload race) so the worker gets a chance to
+	// validate again. Skip if we already queued a pattern error.
+	if _, hasTagErr := errs[bot.BlockTagManual]; !hasTagErr && manualTag != "" && appName != "" && env != "" {
+		exists, vErr := ecrCache.ValidateTag(ctx, appVal, manualTag)
+		if vErr != nil {
+			log.Warn("receiver: ecr validate failed, passing through", zap.String("app", appVal), zap.String("tag", manualTag), zap.Error(vErr))
+		} else if !exists {
+			errs[bot.BlockTagManual] = fmt.Sprintf(
+				"Tag %q was not found in ECR for %s. Use /deploy tags %s to list valid tags.",
+				manualTag, appVal, appVal,
 			)
 		}
 	}

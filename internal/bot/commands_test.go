@@ -229,6 +229,10 @@ func TestBuildDeployModal_RollbackInfoSection(t *testing.T) {
 			if !strings.Contains(sec.Text.Text, "Apr 8") || !strings.Contains(sec.Text.Text, "Apr 1") {
 				t.Errorf("rollback info missing dates: %s", sec.Text.Text)
 			}
+			// Times must include hour:minute and a UTC zone label.
+			if !strings.Contains(sec.Text.Text, "00:00 UTC") {
+				t.Errorf("rollback info missing hour:minute UTC: %s", sec.Text.Text)
+			}
 			return
 		}
 	}
