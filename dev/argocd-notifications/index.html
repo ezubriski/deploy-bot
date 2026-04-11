@@ -902,6 +902,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#rollback-prompt-phase-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollback prompt (phase 4)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#resource-detail" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1081,11 +1092,11 @@ behaviour, and to suggest actions (rollback) where the bot can help.</p>
 </tr>
 <tr>
 <td><code>on-sync-failed</code></td>
-<td><strong>Top-level alarming message</strong> in the deploy channel with failing-resource detail</td>
+<td><strong>Top-level alarming message</strong> with failing-resource detail, plus a separate rollback-prompt message with <code>[Roll back]</code> / <code>[Dismiss]</code> buttons</td>
 </tr>
 <tr>
 <td><code>on-health-degraded</code></td>
-<td><strong>Top-level alarming message</strong> with failing-resource detail</td>
+<td>Same as <code>on-sync-failed</code></td>
 </tr>
 <tr>
 <td><code>on-sync-running</code></td>
@@ -1094,16 +1105,25 @@ behaviour, and to suggest actions (rollback) where the bot can help.</p>
 </tbody>
 </table>
 <blockquote>
-<p><strong>Phase 3 status (this commit):</strong> receiver webhook + queue plumbing + dedupe
-+ worker-side correlation + failure posting are all live. Failure messages
-land top-level in the deploy channel with siren framing, requester ping,
-per-resource detail, and a permalink back to the original deploy. Late-
-arriving notifications (deploy &gt; 2h old) use calmer framing with an
-"investigate before rolling back" note.</p>
-<p><strong>Still deferred to phase 4:</strong> the separate rollback-prompt message with
-[Roll back] and [Dismiss] buttons, and the late-arrival suppression of
-the rollback prompt specifically (the phase-3 status message still
-surfaces, the prompt does not).</p>
+<p><strong>Phase 4 status (this commit):</strong> alongside every phase-3 failure status
+message, the bot now posts a <strong>separate top-level "suggested action"
+message</strong> carrying <code>[Roll back]</code> and <code>[Dismiss]</code> buttons. The rollback
+target is the previous known-good tag for the same app/env, resolved
+from deploy history at post time and baked into the button payload so
+clicks stay deterministic. Late-arriving failures (deploy &gt; 2h old) and
+first-ever deploys (no prior approved history entry) suppress the
+prompt entirely — the status message still lands.</p>
+<p><strong>Buttons:</strong></p>
+<ul>
+<li><code>[Roll back]</code> opens the standard deploy approval modal in rollback
+  mode with the app, environment, and previous tag pre-filled. The
+  submission goes through the normal approval flow, so the usual
+  per-app lock, tag validation, and approver authorization apply.</li>
+<li><code>[Dismiss]</code> replaces the prompt buttons in place with a
+  ":no_entry_sign: <em>Dismissed</em> by @user" line. Only members of the
+  authorized team can dismiss — other users get an ephemeral refusal
+  and the prompt stays clickable.</li>
+</ul>
 </blockquote>
 <h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>ArgoCD app  ─►  argocd-notifications-controller  ─►  POST /v1/webhooks/argocd
@@ -1147,6 +1167,38 @@ note. The rationale (from the planning discussion): a sync that was healthy
 for hours and then degrades is almost certainly a runtime issue, not a
 bad deploy, and rolling back a hours-old stable deploy is rarely the right
 first response.</p>
+<h3 id="rollback-prompt-phase-4">Rollback prompt (phase 4)<a class="headerlink" href="#rollback-prompt-phase-4" title="Permanent link">&para;</a></h3>
+<p>The rollback target is resolved from deploy history at prompt-post time,
+not at click time. The handler scans history newest-first for the most
+recent <code>approved</code> entry for the same composite <code>app-env</code> FullName whose
+<code>CompletedAt</code> is <strong>strictly before</strong> the failing deploy's <code>CompletedAt</code>,
+and embeds the resulting tag in the button's JSON payload. This handles
+the race where a newer deploy has already completed by the time an
+ArgoCD notification arrives: we still want to roll back past the
+failing deploy, not past an unrelated newer one.</p>
+<p>Suppression conditions (logged at info level, no prompt posted):</p>
+<ul>
+<li><strong>Late arrival</strong> (failing deploy &gt; <code>lateArrivalThreshold</code>, default 2h).
+  A hours-old deploy that has been healthy for hours is almost never
+  the right thing to roll back.</li>
+<li><strong>No prior approved history entry</strong> for this app/env. This is the
+  first-ever deploy, so there is no known-good tag to offer.</li>
+<li><strong>History lookup failure</strong>. Redis blip during the notification
+  handler — the status message has already posted, and dropping the
+  prompt is safer than offering a <code>[Roll back]</code> button that can't
+  resolve its target.</li>
+</ul>
+<p>Authorization:</p>
+<ul>
+<li><strong><code>[Roll back]</code></strong> requires the clicker to be a member of the
+  authorized team (same bar as <code>/deploy rollback</code>). On click, the
+  standard deploy modal opens in rollback mode — the subsequent
+  submit, approval, and merge all go through the normal flow.</li>
+<li><strong><code>[Dismiss]</code></strong> also requires team membership. On click the prompt
+  message is updated in place: buttons are replaced with a
+  ":no_entry_sign: <em>Dismissed</em> by @user" line. The underlying failure
+  status message is left untouched.</li>
+</ul>
 <h3 id="resource-detail">Resource detail<a class="headerlink" href="#resource-detail" title="Permanent link">&para;</a></h3>
 <p>The webhook template includes <code>.app.status.resources</code> as a JSON array in the
 payload. On <code>sync-failed</code> / <code>health-degraded</code> the handler parses this,
@@ -1263,13 +1315,6 @@ since early v2.x, so the wiring should work on older versions. Confirmation
 against older releases will land once the homelab cluster upgrades.</p>
 <h2 id="future-work">Future work<a class="headerlink" href="#future-work" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Rollback button + Dismiss</strong>: phase 4. A separate top-level message
-  posted alongside the phase-3 status message, carrying the previous
-  known-good tag and a <code>[Roll back]</code> button that opens the standard
-  deploy-approval modal, plus a <code>[Dismiss]</code> button an authorized approver
-  can use to clear the prompt when fixing forward. Late-arriving
-  notifications will post the status message but suppress the rollback
-  prompt — a hours-old deploy is rarely the right thing to roll back.</li>
 <li><strong><code>on-sync-running</code> watchdog</strong>: rather than echoing every "sync started"
   notification (low signal), use the absence of a <code>sync-succeeded</code> within
   N minutes of a merge to detect stuck ArgoCD or unsubscribed apps. Tracked
