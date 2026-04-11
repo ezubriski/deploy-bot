@@ -103,41 +103,11 @@ func ValidateConfig(cfg *Config) []ValidationError {
 	}
 
 	// --- postgres ---
-	// Required in 2.0+, no enabled flag. See PostgresConfig doc comment
-	// for rationale and docs/postgres-setup.md for operator guidance.
-	if strings.TrimSpace(cfg.Postgres.Host) == "" {
-		add("postgres", "host", "required")
-	}
-	if strings.TrimSpace(cfg.Postgres.Database) == "" {
-		add("postgres", "database", "required")
-	}
-	if strings.TrimSpace(cfg.Postgres.User) == "" {
-		add("postgres", "user", "required")
-	}
-	if cfg.Postgres.Port < 0 {
-		add("postgres", "port", fmt.Sprintf("must be >= 0, got %d", cfg.Postgres.Port))
-	}
-	if cfg.Postgres.RetentionHistory != "" {
-		d, err := time.ParseDuration(cfg.Postgres.RetentionHistory)
-		switch {
-		case err != nil:
-			add("postgres", "retention_history", fmt.Sprintf("invalid duration: %v", err))
-		case d < minPostgresRetentionHistory:
-			add("postgres", "retention_history", fmt.Sprintf(
-				"must be >= %s (%d days) for audit compliance — audits don't happen immediately at period end and anything shorter risks deleting data an auditor is about to ask for",
-				minPostgresRetentionHistory, int(minPostgresRetentionHistory.Hours()/24),
-			))
-		}
-	}
-	if cfg.Postgres.RetentionPendingTerminal != "" {
-		d, err := time.ParseDuration(cfg.Postgres.RetentionPendingTerminal)
-		switch {
-		case err != nil:
-			add("postgres", "retention_pending_terminal", fmt.Sprintf("invalid duration: %v", err))
-		case d < minPostgresRetentionPendingTerminal:
-			add("postgres", "retention_pending_terminal", fmt.Sprintf("must be >= %s, got %s", minPostgresRetentionPendingTerminal, d))
-		}
-	}
+	// Delegated to PostgresConfig.validateStructured() so this path
+	// (CLI validator) and Load()'s fail-fast Validate() can't drift.
+	// See PostgresConfig doc comment for rationale and
+	// docs/postgres-setup.md for operator guidance.
+	errs = append(errs, cfg.Postgres.validateStructured()...)
 
 	// --- repo_discovery ---
 	if cfg.RepoDiscovery.Enabled {

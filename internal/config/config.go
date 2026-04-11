@@ -40,9 +40,9 @@ type Config struct {
 	// effect on config hot-reload; the config watcher logs a warning
 	// if a diff is detected here and operators must restart the
 	// process. See docs/postgres-setup.md for deployment guidance.
-	Postgres            PostgresConfig            `json:"postgres"`
-	RepoDiscovery       RepoDiscoveryConfig       `json:"repo_discovery,omitempty"`
-	Apps                []AppConfig               `json:"apps"`
+	Postgres      PostgresConfig      `json:"postgres"`
+	RepoDiscovery RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
+	Apps          []AppConfig         `json:"apps"`
 	// LogLevel sets the minimum severity emitted by zap. Valid values are
 	// "debug", "info", "warn", "error". Defaults to "info" when empty. The
 	// LOG_LEVEL environment variable, if set on the bot/receiver process,
@@ -213,7 +213,7 @@ type ArgoCDNotificationsConfig struct {
 // the config watcher logs a warning if a reload detects a diff.
 type PostgresConfig struct {
 	Host     string `json:"host"`
-	Port     int    `json:"port,omitempty"`     // default 5432
+	Port     int    `json:"port,omitempty"` // default 5432
 	Database string `json:"database"`
 	User     string `json:"user"`
 	// SSLMode is one of "disable", "allow", "prefer", "require",
@@ -250,6 +250,13 @@ type PostgresConfig struct {
 	// idempotency of late button clicks; 30 days is default, 1 hour
 	// minimum.
 	RetentionPendingTerminal string `json:"retention_pending_terminal,omitempty"`
+
+	// Parsed duration fields, populated by validateStructured() on
+	// success. The getters below return these directly instead of
+	// re-parsing the strings on every call. Unexported so JSON
+	// round-trips are unaffected.
+	historyRetention     time.Duration
+	pendingTermRetention time.Duration
 }
 
 // Postgres retention and default constants. These are deliberately
@@ -288,48 +295,86 @@ const (
 	defaultPostgresSSLMode = "require"
 )
 
+// validateStructured returns postgres validation failures as
+// []ValidationError and, on success, caches the parsed retention
+// durations on the receiver so HistoryRetentionDuration() and
+// PendingTerminalRetentionDuration() don't have to re-parse.
+//
+// This is the single source of truth for postgres validation; both
+// Validate() (called from Load for fail-fast startup) and
+// ValidateConfig() (the CLI validator) delegate here so the two
+// entrypoints can't drift.
+func (p *PostgresConfig) validateStructured() []ValidationError {
+	var errs []ValidationError
+	add := func(field, msg string) {
+		errs = append(errs, ValidationError{Section: "postgres", Field: field, Msg: msg})
+	}
+
+	if strings.TrimSpace(p.Host) == "" {
+		add("host", "required")
+	}
+	if strings.TrimSpace(p.Database) == "" {
+		add("database", "required")
+	}
+	if strings.TrimSpace(p.User) == "" {
+		add("user", "required")
+	}
+	if p.Port < 0 {
+		add("port", fmt.Sprintf("must be >= 0 (0 means default), got %d", p.Port))
+	}
+
+	// Seed with defaults so a validated-but-blank config still yields
+	// usable durations from the getters below.
+	p.historyRetention = defaultPostgresRetentionHistory
+	if p.RetentionHistory != "" {
+		d, err := time.ParseDuration(p.RetentionHistory)
+		switch {
+		case err != nil:
+			add("retention_history", fmt.Sprintf("invalid duration %q: %v", p.RetentionHistory, err))
+		case d < minPostgresRetentionHistory:
+			add("retention_history", fmt.Sprintf(
+				"must be >= %s (%d days) for audit compliance — audits don't happen "+
+					"immediately at period end and anything shorter risks deleting data an "+
+					"auditor is about to ask for; got %s",
+				minPostgresRetentionHistory, int(minPostgresRetentionHistory.Hours()/24), d,
+			))
+		default:
+			p.historyRetention = d
+		}
+	}
+
+	p.pendingTermRetention = defaultPostgresRetentionPendingTerminal
+	if p.RetentionPendingTerminal != "" {
+		d, err := time.ParseDuration(p.RetentionPendingTerminal)
+		switch {
+		case err != nil:
+			add("retention_pending_terminal", fmt.Sprintf("invalid duration %q: %v", p.RetentionPendingTerminal, err))
+		case d < minPostgresRetentionPendingTerminal:
+			add("retention_pending_terminal", fmt.Sprintf("must be >= %s, got %s",
+				minPostgresRetentionPendingTerminal, d))
+		default:
+			p.pendingTermRetention = d
+		}
+	}
+
+	return errs
+}
+
 // Validate checks that the postgres config is structurally valid and
 // that retention values meet the floors. Called from Load() after
 // JSON unmarshaling; callers should surface any error and refuse to
-// start.
+// start. Successful validation also caches parsed retention durations
+// on the receiver.
 func (p *PostgresConfig) Validate() error {
-	if strings.TrimSpace(p.Host) == "" {
-		return errors.New("postgres.host is required")
+	ve := p.validateStructured()
+	if len(ve) == 0 {
+		return nil
 	}
-	if strings.TrimSpace(p.Database) == "" {
-		return errors.New("postgres.database is required")
+	wrapped := make([]error, len(ve))
+	for i, e := range ve {
+		wrapped[i] = e
 	}
-	if strings.TrimSpace(p.User) == "" {
-		return errors.New("postgres.user is required")
-	}
-	if p.Port < 0 {
-		return fmt.Errorf("postgres.port must be >= 0 (0 means default), got %d", p.Port)
-	}
-	if p.RetentionHistory != "" {
-		d, err := time.ParseDuration(p.RetentionHistory)
-		if err != nil {
-			return fmt.Errorf("postgres.retention_history: invalid duration %q: %w", p.RetentionHistory, err)
-		}
-		if d < minPostgresRetentionHistory {
-			return fmt.Errorf(
-				"postgres.retention_history must be >= %s (%d days) for audit compliance — "+
-					"audits don't happen immediately at period end and anything shorter "+
-					"risks deleting data an auditor is about to ask for; got %s",
-				minPostgresRetentionHistory, int(minPostgresRetentionHistory.Hours()/24), d,
-			)
-		}
-	}
-	if p.RetentionPendingTerminal != "" {
-		d, err := time.ParseDuration(p.RetentionPendingTerminal)
-		if err != nil {
-			return fmt.Errorf("postgres.retention_pending_terminal: invalid duration %q: %w", p.RetentionPendingTerminal, err)
-		}
-		if d < minPostgresRetentionPendingTerminal {
-			return fmt.Errorf("postgres.retention_pending_terminal must be >= %s, got %s",
-				minPostgresRetentionPendingTerminal, d)
-		}
-	}
-	return nil
+	return errors.Join(wrapped...)
 }
 
 // PortValue returns the configured port or defaultPostgresPort.
@@ -348,25 +393,24 @@ func (p *PostgresConfig) SSLModeValue() string {
 	return defaultPostgresSSLMode
 }
 
-// HistoryRetentionDuration returns the parsed history retention with
-// defaults applied. Validate() has already enforced the floor, so for
-// a validated config this never returns a value below the floor.
+// HistoryRetentionDuration returns the parsed history retention.
+// Populated by validateStructured(); for a validated config this
+// never returns a value below the audit-compliance floor. Falls back
+// to the default for callers that reach it without having run
+// validation (e.g. unit tests using a zero-value PostgresConfig).
 func (p *PostgresConfig) HistoryRetentionDuration() time.Duration {
-	if p.RetentionHistory != "" {
-		if d, err := time.ParseDuration(p.RetentionHistory); err == nil && d > 0 {
-			return d
-		}
+	if p.historyRetention > 0 {
+		return p.historyRetention
 	}
 	return defaultPostgresRetentionHistory
 }
 
 // PendingTerminalRetentionDuration returns the parsed pending-terminal
-// retention with defaults applied.
+// retention. Populated by validateStructured(); falls back to the
+// default for unvalidated configs.
 func (p *PostgresConfig) PendingTerminalRetentionDuration() time.Duration {
-	if p.RetentionPendingTerminal != "" {
-		if d, err := time.ParseDuration(p.RetentionPendingTerminal); err == nil && d > 0 {
-			return d
-		}
+	if p.pendingTermRetention > 0 {
+		return p.pendingTermRetention
 	}
 	return defaultPostgresRetentionPendingTerminal
 }

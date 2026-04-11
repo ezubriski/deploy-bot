@@ -477,7 +477,7 @@ func TestLoad_MissingPostgres_Fails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing postgres block")
 	}
-	if !strings.Contains(err.Error(), "postgres.host is required") {
+	if !strings.Contains(err.Error(), "postgres.host: required") {
 		t.Errorf("error = %v, want postgres.host required message", err)
 	}
 }
