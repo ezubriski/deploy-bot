@@ -296,6 +296,7 @@ func newTestStore(t *testing.T) *store.Store {
 func newTestBot(t *testing.T, gh githubClient, sl *captureSlack, st *store.Store) *Bot {
 	t.Helper()
 	cfg := &config.Config{
+		GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 		Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 		Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 		Apps: []config.AppConfig{

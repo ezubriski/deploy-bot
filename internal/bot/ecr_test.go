@@ -18,6 +18,7 @@ import (
 func newECRTestBot(t *testing.T, gh githubClient, sl *captureSlack, st *store.Store, apps []config.AppConfig) *Bot {
 	t.Helper()
 	cfg := &config.Config{
+		GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 		Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 		Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 		Apps:       apps,
