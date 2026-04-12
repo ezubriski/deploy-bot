@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -95,15 +96,34 @@ func NewStoreWithRedis(t *testing.T) (*store.Store, *miniredis.Miniredis) {
 	return store.New(mr.Addr(), "").WithPostgres(pool), mr
 }
 
+// envDSNKey is checked before starting a testcontainer. When set
+// (e.g. in CI via a GitHub Actions service container), storetest
+// connects directly to the pre-provisioned database, skipping the
+// testcontainer startup entirely. This avoids Docker-in-Docker in
+// CI and saves ~5s of image pull per test package.
+const envDSNKey = "DEPLOYBOT_TEST_POSTGRES_DSN"
+
 // sharedDSN lazily initializes the shared Postgres testcontainer
-// and returns a DSN against it. Subsequent calls return the same
-// DSN. If container startup fails for any reason, every caller
-// (this one and future ones) calls t.Skip with the failure reason —
-// we don't fail tests in environments where testcontainers is
-// fundamentally unusable.
+// and returns a DSN against it. If DEPLOYBOT_TEST_POSTGRES_DSN is
+// set in the environment (CI service container), the testcontainer
+// is skipped entirely and the env DSN is used directly.
+// Subsequent calls return the same DSN. If container startup fails
+// for any reason, every caller (this one and future ones) calls
+// t.Skip with the failure reason — we don't fail tests in
+// environments where testcontainers is fundamentally unusable.
 func sharedDSN(t *testing.T) string {
 	t.Helper()
 	shared.once.Do(func() {
+		if dsn := os.Getenv(envDSNKey); dsn != "" {
+			// CI path: skip testcontainer, connect to the service
+			// container directly. Still need to apply migrations.
+			if err := applyMigrations(context.Background(), dsn); err != nil {
+				shared.initErr = fmt.Errorf("apply migrations to %s DSN: %w", envDSNKey, err)
+				return
+			}
+			shared.dsn = dsn
+			return
+		}
 		shared.dsn, shared.initErr = startContainer()
 	})
 	if shared.initErr != nil {
