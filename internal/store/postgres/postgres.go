@@ -234,16 +234,39 @@ func (p *Pool) Close() {
 // pgxpool.Config that pgxpool.NewWithConfig consumes. Shared by both
 // auth modes — the IAM branch just installs a BeforeConnect hook to
 // refresh the password on each new connection.
+//
+// The pool config is seeded by parsing a *minimal* DSN that carries
+// only `host` and `sslmode`. pgx needs both in the DSN to build the
+// TLS config correctly (ServerName for verify-full is derived from
+// the host during ParseConfig). Everything else — port, user,
+// database, password — is assigned programmatically on ConnConfig
+// so values with spaces, single quotes, or backslashes can't corrupt
+// the libpq keyword/value grammar. Passwords in particular very
+// commonly contain special characters, and the keyword/value format
+// requires them to be single-quoted-and-escaped, which is fragile
+// and easy to get wrong. Assigning the field directly sidesteps the
+// whole category.
 func buildPoolConfig(cfg config.PostgresConfig, secrets *config.Secrets) (*pgxpool.Config, error) {
 	host := strings.TrimSpace(cfg.Host)
 	if host == "" {
 		return nil, errors.New("postgres.host is empty (should have been caught by Validate)")
 	}
 
-	dsn := baseDSN(cfg, secrets)
+	// Host is DNS-safe (ASCII, no spaces); sslmode is one of a small
+	// ASCII allowlist — both are safe to embed unquoted. pgx's
+	// ParseConfig rejects unknown sslmode values so an unexpected
+	// value surfaces here, not silently downstream.
+	dsn := fmt.Sprintf("host=%s sslmode=%s", host, cfg.SSLModeValue())
 	poolCfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse dsn: %w", err)
+	}
+
+	poolCfg.ConnConfig.Port = uint16(cfg.PortValue())
+	poolCfg.ConnConfig.Database = cfg.Database
+	poolCfg.ConnConfig.User = cfg.User
+	if !secrets.PostgresIAMAuth {
+		poolCfg.ConnConfig.Password = secrets.PostgresPassword
 	}
 
 	if secrets.PostgresIAMAuth {
@@ -253,23 +276,6 @@ func buildPoolConfig(cfg config.PostgresConfig, secrets *config.Secrets) (*pgxpo
 	}
 
 	return poolCfg, nil
-}
-
-// baseDSN constructs a libpq-style DSN string suitable for
-// pgxpool.ParseConfig. For password auth the password is embedded
-// directly; for IAM auth we leave the password empty here — the
-// BeforeConnect hook will populate it with a fresh token on each
-// connection.
-func baseDSN(cfg config.PostgresConfig, secrets *config.Secrets) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "host=%s port=%d database=%s user=%s sslmode=%s",
-		cfg.Host, cfg.PortValue(), cfg.Database, cfg.User, cfg.SSLModeValue())
-	if !secrets.PostgresIAMAuth && secrets.PostgresPassword != "" {
-		// pgx's DSN parser accepts embedded passwords here; special
-		// characters are handled by pgx itself.
-		fmt.Fprintf(&sb, " password=%s", secrets.PostgresPassword)
-	}
-	return sb.String()
 }
 
 // gooseZapAdapter adapts zap.Logger to the goose.Logger interface so
