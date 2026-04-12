@@ -160,7 +160,7 @@ func TestConcurrentLockContention(t *testing.T) {
 	// Clean up.
 	injectApprove(t, firstPR)
 	if !poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), firstPR)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, firstPR)
 		return d == nil
 	}) {
 		t.Fatal("timed out waiting for approved deploy to complete")
@@ -221,7 +221,7 @@ func TestConcurrentDifferentApps(t *testing.T) {
 	// Wait for all deploys to complete.
 	if !poll(t, 120*time.Second, func() bool {
 		for _, pr := range prByApp {
-			if d, _ := env.store.Get(context.Background(), pr); d != nil {
+			if d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, pr); d != nil {
 				return false
 			}
 		}
@@ -292,7 +292,7 @@ func TestMultiWorker_LockContention(t *testing.T) {
 
 	injectApprove(t, firstPR)
 	if !poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), firstPR)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, firstPR)
 		return d == nil
 	}) {
 		t.Fatal("timed out waiting for approved deploy to complete")
@@ -334,7 +334,7 @@ func TestMultiWorker_NoDoubleDelivery(t *testing.T) {
 
 	injectApprove(t, prNumber)
 	if !poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), prNumber)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, prNumber)
 		return d == nil
 	}) {
 		t.Fatal("timed out waiting for approved deploy to complete")
