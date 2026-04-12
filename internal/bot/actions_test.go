@@ -583,6 +583,7 @@ func TestHandleDeploySubmit_HappyPath(t *testing.T) {
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
 		cfg: config.NewHolder(&config.Config{
+			GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -636,6 +637,7 @@ func TestHandleApprove_HappyPath(t *testing.T) {
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
 		cfg: config.NewHolder(&config.Config{
+			GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -715,6 +717,7 @@ func TestHandleRejectSubmit_HappyPath(t *testing.T) {
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
 		cfg: config.NewHolder(&config.Config{
+			GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -807,6 +810,7 @@ func TestHandleCancel_HappyPath(t *testing.T) {
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
 		cfg: config.NewHolder(&config.Config{
+			GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
