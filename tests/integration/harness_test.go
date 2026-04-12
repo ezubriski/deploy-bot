@@ -26,6 +26,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
+	pgstore "github.com/ezubriski/deploy-bot/internal/store/postgres"
 	"github.com/ezubriski/deploy-bot/internal/validator"
 )
 
@@ -90,7 +91,12 @@ func TestMain(m *testing.M) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	secrets, err := config.LoadSecrets(ctx, requireEnv("AWS_SECRET_NAME"))
+	var secrets *config.Secrets
+	if sp := os.Getenv("SECRETS_PATH"); sp != "" {
+		secrets, err = config.LoadSecretsFromFile(sp)
+	} else {
+		secrets, err = config.LoadSecrets(ctx, requireEnv("AWS_SECRET_NAME"))
+	}
 	if err != nil {
 		fatalf("load secrets: %v", err)
 	}
@@ -102,6 +108,19 @@ func TestMain(m *testing.M) {
 	if err := redisStore.Ping(ctx); err != nil {
 		fatalf("redis ping: %v", err)
 	}
+
+	// Postgres — durable store for history + pending deploys.
+	pgPool, err := pgstore.New(ctx, cfg.Postgres, secrets, log)
+	if err != nil {
+		fatalf("init postgres pool: %v", err)
+	}
+	if err := pgPool.WaitFor(ctx, pgstore.DefaultWaitTimeout); err != nil {
+		fatalf("postgres not available: %v", err)
+	}
+	if err := pgPool.Migrate(ctx); err != nil {
+		fatalf("postgres migrate: %v", err)
+	}
+	redisStore.WithPostgres(pgPool.Pool)
 
 	ghHTTP, err := secrets.GitHubHTTPClient(cfg.GitHub.Repo)
 	if err != nil {
@@ -147,17 +166,29 @@ func TestMain(m *testing.M) {
 	val := validator.New(valHTTP, rawSlack, redisStore.Redis(), cfg, log)
 	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m2, cfgHolder, log)
 
-	// Delete any leftover stream from a previous test run. This clears the
-	// consumer group and PEL so ghost events from failed runs are not replayed.
-	if err := redisStore.Redis().Del(ctx, queue.StreamKey).Err(); err != nil {
-		fatalf("flush event stream: %v", err)
+	// Delete ALL event streams from any prior or concurrent usage. When
+	// running against a shared Redis (e.g. the homelab cluster), the ECR
+	// and ArgoCD streams may contain live events from the production bot.
+	// The test worker would consume those and get stuck processing stale
+	// ECR push events instead of the injected test events.
+	for _, streamKey := range queue.AllStreams {
+		if err := redisStore.Redis().Del(ctx, streamKey).Err(); err != nil {
+			fatalf("flush event stream %s: %v", streamKey, err)
+		}
 	}
 
 	qw := queue.NewWorker(redisStore.Redis(), log)
 	if err := qw.Init(ctx); err != nil {
 		fatalf("init queue consumer group: %v", err)
 	}
-	go qw.Run(ctx, b.HandleEvent)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "\n!!! PANIC in worker goroutine: %v\n", r)
+			}
+		}()
+		qw.Run(ctx, b.HandleEvent)
+	}()
 
 	appCfg, ok := cfg.AppByName(app)
 	if !ok {
@@ -258,7 +289,7 @@ func resetAppState(t *testing.T) {
 	}
 	for _, d := range deploys {
 		if d.App == env.app {
-			_ = env.store.Delete(ctx, d.PRNumber)
+			_ = env.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, d.PRNumber)
 		}
 	}
 }

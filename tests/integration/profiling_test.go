@@ -73,7 +73,7 @@ func TestProfiling(t *testing.T) {
 
 		injectApprove(t, prNumber)
 		if !poll(t, 60*time.Second, func() bool {
-			d, _ := env.store.Get(context.Background(), prNumber)
+			d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, prNumber)
 			return d == nil
 		}) {
 			t.Fatalf("approve cycle %d: timed out waiting for merge (PR #%d)", i+1, prNumber)
@@ -97,7 +97,7 @@ func TestProfiling(t *testing.T) {
 
 		injectRejectSubmit(t, prNumber, "profiling: rejected")
 		if !poll(t, 30*time.Second, func() bool {
-			d, _ := env.store.Get(context.Background(), prNumber)
+			d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, prNumber)
 			return d == nil
 		}) {
 			t.Fatalf("reject cycle: timed out (PR #%d)", prNumber)
@@ -121,7 +121,7 @@ func TestProfiling(t *testing.T) {
 
 		injectSlashCommand(t, fmt.Sprintf("cancel %d", prNumber))
 		if !poll(t, 30*time.Second, func() bool {
-			d, _ := env.store.Get(context.Background(), prNumber)
+			d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, prNumber)
 			return d == nil
 		}) {
 			t.Fatalf("cancel cycle: timed out (PR #%d)", prNumber)
@@ -157,7 +157,7 @@ func resetAppStateFor(t *testing.T, app string) {
 	}
 	for _, d := range deploys {
 		if d.App == app {
-			_ = env.store.Delete(ctx, d.PRNumber)
+			_ = env.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, d.PRNumber)
 		}
 	}
 }

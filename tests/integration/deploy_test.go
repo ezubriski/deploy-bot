@@ -25,7 +25,7 @@ func TestDeployAndApprove(t *testing.T) {
 	t.Logf("deploy PR created: #%d (tag %s)", prNumber, tag)
 
 	// Verify the pending deploy record is well-formed.
-	d, err := env.store.Get(context.Background(), prNumber)
+	d, err := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, prNumber)
 	if err != nil || d == nil {
 		t.Fatalf("expected pending deploy in Redis for PR #%d", prNumber)
 	}
@@ -47,7 +47,7 @@ func TestDeployAndApprove(t *testing.T) {
 
 	// Poll until the pending deploy is removed from Redis (merge complete).
 	if !poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), prNumber)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, prNumber)
 		return d == nil
 	}) {
 		t.Fatal("timed out waiting for deploy to be approved and merged")
@@ -66,7 +66,7 @@ func TestDeployAndApprove(t *testing.T) {
 	// History should contain an approved entry for this deploy.
 	var historyEntries []store.HistoryEntry
 	if !poll(t, 5*time.Second, func() bool {
-		entries, err := env.store.GetHistory(context.Background(), 20)
+		entries, err := env.store.GetHistory(context.Background(), "", 20)
 		if err != nil {
 			return false
 		}
@@ -99,7 +99,7 @@ func TestDeployAndReject(t *testing.T) {
 
 	// Poll until the pending deploy is removed from Redis.
 	if !poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), prNumber)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, prNumber)
 		return d == nil
 	}) {
 		t.Fatal("timed out waiting for deploy to be rejected")
@@ -115,7 +115,7 @@ func TestDeployAndReject(t *testing.T) {
 	// History should contain a rejected entry.
 	var historyEntries []store.HistoryEntry
 	if !poll(t, 5*time.Second, func() bool {
-		entries, err := env.store.GetHistory(context.Background(), 20)
+		entries, err := env.store.GetHistory(context.Background(), "", 20)
 		if err != nil {
 			return false
 		}
@@ -167,7 +167,7 @@ func TestDeployLockPreventsSecondDeploy(t *testing.T) {
 	// Clean up the first deploy.
 	injectApprove(t, firstPR)
 	poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), firstPR)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, firstPR)
 		return d == nil
 	})
 }
@@ -187,7 +187,7 @@ func TestCancelDeploy(t *testing.T) {
 
 	// Poll until the pending deploy is removed from Redis.
 	if !poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), prNumber)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, prNumber)
 		return d == nil
 	}) {
 		t.Fatal("timed out waiting for cancel to complete")
@@ -203,7 +203,7 @@ func TestCancelDeploy(t *testing.T) {
 	// History should contain a cancelled entry.
 	var historyEntries []store.HistoryEntry
 	if !poll(t, 5*time.Second, func() bool {
-		entries, err := env.store.GetHistory(context.Background(), 20)
+		entries, err := env.store.GetHistory(context.Background(), "", 20)
 		if err != nil {
 			return false
 		}
@@ -241,7 +241,7 @@ func TestRollback(t *testing.T) {
 	t.Cleanup(func() { cleanupPRWithTag(t, firstPR, tagA) })
 	injectApprove(t, firstPR)
 	if !poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), firstPR)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, firstPR)
 		return d == nil
 	}) {
 		t.Fatal("timed out waiting for first setup deploy to complete")
@@ -258,7 +258,7 @@ func TestRollback(t *testing.T) {
 	t.Cleanup(func() { cleanupPRWithTag(t, secondPR, tagB) })
 	injectApprove(t, secondPR)
 	if !poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), secondPR)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, secondPR)
 		return d == nil
 	}) {
 		t.Fatal("timed out waiting for second setup deploy to complete")
@@ -281,7 +281,7 @@ func TestRollback(t *testing.T) {
 	// Step 4: approve and verify.
 	injectApprove(t, rollbackPR)
 	if !poll(t, 30*time.Second, func() bool {
-		d, _ := env.store.Get(context.Background(), rollbackPR)
+		d, _ := env.store.Get(context.Background(), env.cfg.GitHub.Org, env.cfg.GitHub.Repo, rollbackPR)
 		return d == nil
 	}) {
 		t.Fatal("timed out waiting for rollback deploy to complete")
@@ -289,7 +289,7 @@ func TestRollback(t *testing.T) {
 
 	var historyEntries []store.HistoryEntry
 	if !poll(t, 5*time.Second, func() bool {
-		entries, _ := env.store.GetHistory(context.Background(), 20)
+		entries, _ := env.store.GetHistory(context.Background(), "", 20)
 		historyEntries = entries
 		for _, e := range entries {
 			if e.App == env.app && e.Tag == tagA && e.EventType == audit.EventApproved && e.PRNumber == rollbackPR {
