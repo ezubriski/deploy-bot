@@ -33,8 +33,16 @@ type Config struct {
 	// disabled, the receiver mounts no handler and consumes no Redis
 	// stream, so existing deployments are unaffected.
 	ArgoCDNotifications ArgoCDNotificationsConfig `json:"argocd_notifications,omitempty"`
-	RepoDiscovery       RepoDiscoveryConfig       `json:"repo_discovery,omitempty"`
-	Apps                []AppConfig               `json:"apps"`
+	// Postgres configures the durable store for deploy history and
+	// in-flight pending deploys. Required on 2.0+ — the bot and
+	// receiver fail to start if this block is missing, invalid, or
+	// Postgres is unreachable. Changes to this section do NOT take
+	// effect on config hot-reload; the config watcher logs a warning
+	// if a diff is detected here and operators must restart the
+	// process. See docs/postgres-setup.md for deployment guidance.
+	Postgres      PostgresConfig      `json:"postgres"`
+	RepoDiscovery RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
+	Apps          []AppConfig         `json:"apps"`
 	// LogLevel sets the minimum severity emitted by zap. Valid values are
 	// "debug", "info", "warn", "error". Defaults to "info" when empty. The
 	// LOG_LEVEL environment variable, if set on the bot/receiver process,
@@ -192,6 +200,182 @@ type ECRAutoDeployConfig struct {
 // reference ConfigMap patch.
 type ArgoCDNotificationsConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
+}
+
+// PostgresConfig holds connection and operational settings for the
+// durable store backing deploy history and in-flight pending deploys.
+// Postgres is required in 2.0+; there is no "enabled" switch. The
+// bot and receiver fail to start if this block is missing, invalid,
+// or the database is unreachable.
+//
+// Runtime changes to this section are not applied on config hot-
+// reload. A change to any postgres field requires a process restart;
+// the config watcher logs a warning if a reload detects a diff.
+type PostgresConfig struct {
+	Host     string `json:"host"`
+	Port     int    `json:"port,omitempty"` // default 5432
+	Database string `json:"database"`
+	User     string `json:"user"`
+	// SSLMode is one of "disable", "allow", "prefer", "require",
+	// "verify-ca", "verify-full". Defaults to "require" — the bot
+	// refuses to silently fall back to plaintext if the operator
+	// forgot to set it.
+	SSLMode string `json:"sslmode,omitempty"`
+
+	// AutoMigrate, when true, causes the bot to run goose.Up() at
+	// startup (gated by a Postgres advisory lock so only one replica
+	// wins during a rolling restart). Default: false. Operators flip
+	// this on in the upgrade window of any release shipping a new
+	// migration, observe the migration run at startup, then flip it
+	// back off. Release notes for such releases call this out.
+	//
+	// The receiver NEVER runs migrations even when AutoMigrate is
+	// true: cmd/receiver/main.go ignores this field entirely. Only
+	// the bot reconciles schema state.
+	AutoMigrate bool `json:"auto_migrate,omitempty"`
+
+	// RetentionHistory is the maximum age of a history row before
+	// the retention ticker purges it. Accepts Go duration strings
+	// (e.g. "8760h"). Defaults to 2 years. Must be >= 390 days —
+	// Validate() fails at load time otherwise. The floor exists
+	// because audits don't happen immediately at period end; 390
+	// days is the empirically-observed "audits are done by now"
+	// ceiling and dropping below it would risk deleting data an
+	// auditor was about to ask for.
+	//
+	// pending_deploys has no retention policy: rows are deleted by
+	// the bot on state transition to a terminal event (the matching
+	// record goes into history). Retention is a history-only concern.
+	RetentionHistory string `json:"retention_history,omitempty"`
+
+	// Parsed duration field populated by validateStructured() on
+	// success. The getter below returns this directly instead of
+	// re-parsing the string on every call. Unexported so JSON
+	// round-trips are unaffected.
+	historyRetention time.Duration
+}
+
+// Postgres retention and default constants. These are deliberately
+// top-level constants (not struct fields) so the audit-compliance
+// floor is unambiguous and grep-able across the codebase.
+const (
+	// minPostgresRetentionHistory is the hard floor on history row
+	// retention. 390 days — audits don't happen immediately at
+	// period end; this covers the audit lag without risking early
+	// deletion of compliance-relevant data. Enforced at config load;
+	// attempting to run the bot with a shorter value is a fatal
+	// startup error.
+	minPostgresRetentionHistory = 390 * 24 * time.Hour
+
+	// defaultPostgresRetentionHistory is what operators get when
+	// they leave retention_history blank. 2 years — comfortably
+	// above the audit floor and cheap to store at deploy-bot scale.
+	defaultPostgresRetentionHistory = 2 * 365 * 24 * time.Hour
+
+	// defaultPostgresPort is the standard Postgres listen port.
+	defaultPostgresPort = 5432
+
+	// defaultPostgresSSLMode is the default if the operator does
+	// not set sslmode explicitly. "require" is the narrowest
+	// reasonable default — actual CA verification requires
+	// "verify-ca" or "verify-full" which need a trust bundle.
+	defaultPostgresSSLMode = "require"
+)
+
+// validateStructured returns postgres validation failures as
+// []ValidationError and, on success, caches the parsed retention
+// durations on the receiver so HistoryRetentionDuration() and
+// PendingTerminalRetentionDuration() don't have to re-parse.
+//
+// This is the single source of truth for postgres validation; both
+// Validate() (called from Load for fail-fast startup) and
+// ValidateConfig() (the CLI validator) delegate here so the two
+// entrypoints can't drift.
+func (p *PostgresConfig) validateStructured() []ValidationError {
+	var errs []ValidationError
+	add := func(field, msg string) {
+		errs = append(errs, ValidationError{Section: "postgres", Field: field, Msg: msg})
+	}
+
+	if strings.TrimSpace(p.Host) == "" {
+		add("host", "required")
+	}
+	if strings.TrimSpace(p.Database) == "" {
+		add("database", "required")
+	}
+	if strings.TrimSpace(p.User) == "" {
+		add("user", "required")
+	}
+	if p.Port < 0 {
+		add("port", fmt.Sprintf("must be >= 0 (0 means default), got %d", p.Port))
+	}
+
+	// Seed with defaults so a validated-but-blank config still yields
+	// usable durations from the getters below.
+	p.historyRetention = defaultPostgresRetentionHistory
+	if p.RetentionHistory != "" {
+		d, err := time.ParseDuration(p.RetentionHistory)
+		switch {
+		case err != nil:
+			add("retention_history", fmt.Sprintf("invalid duration %q: %v", p.RetentionHistory, err))
+		case d < minPostgresRetentionHistory:
+			add("retention_history", fmt.Sprintf(
+				"must be >= %s (%d days) for audit compliance — audits don't happen "+
+					"immediately at period end and anything shorter risks deleting data an "+
+					"auditor is about to ask for; got %s",
+				minPostgresRetentionHistory, int(minPostgresRetentionHistory.Hours()/24), d,
+			))
+		default:
+			p.historyRetention = d
+		}
+	}
+
+	return errs
+}
+
+// Validate checks that the postgres config is structurally valid and
+// that retention values meet the floors. Called from Load() after
+// JSON unmarshaling; callers should surface any error and refuse to
+// start. Successful validation also caches parsed retention durations
+// on the receiver.
+func (p *PostgresConfig) Validate() error {
+	ve := p.validateStructured()
+	if len(ve) == 0 {
+		return nil
+	}
+	wrapped := make([]error, len(ve))
+	for i, e := range ve {
+		wrapped[i] = e
+	}
+	return errors.Join(wrapped...)
+}
+
+// PortValue returns the configured port or defaultPostgresPort.
+func (p *PostgresConfig) PortValue() int {
+	if p.Port > 0 {
+		return p.Port
+	}
+	return defaultPostgresPort
+}
+
+// SSLModeValue returns the configured sslmode or defaultPostgresSSLMode.
+func (p *PostgresConfig) SSLModeValue() string {
+	if p.SSLMode != "" {
+		return p.SSLMode
+	}
+	return defaultPostgresSSLMode
+}
+
+// HistoryRetentionDuration returns the parsed history retention.
+// Populated by validateStructured(); for a validated config this
+// never returns a value below the audit-compliance floor. Falls back
+// to the default for callers that reach it without having run
+// validation (e.g. unit tests using a zero-value PostgresConfig).
+func (p *PostgresConfig) HistoryRetentionDuration() time.Duration {
+	if p.historyRetention > 0 {
+		return p.historyRetention
+	}
+	return defaultPostgresRetentionHistory
 }
 
 // PollIntervalDuration returns the parsed poll interval, defaulting to 30s.
@@ -387,6 +571,26 @@ type Secrets struct {
 	// X-Deploybot-Secret header on inbound ArgoCD notification webhooks.
 	// Required (>= 32 chars) when ArgoCDNotifications.Enabled is true.
 	ArgoCDWebhookAPIKey string `json:"argocd_webhook_api_key,omitempty"`
+
+	// PostgresPassword is used to authenticate to the durable store
+	// when PostgresIAMAuth is false (the default). Required in that
+	// case; ignored when PostgresIAMAuth is true.
+	PostgresPassword string `json:"postgres_password,omitempty"`
+
+	// PostgresIAMAuth, when true, causes the bot to authenticate to
+	// AWS RDS using IAM-generated tokens instead of a static
+	// password. The token is short-lived (~15m) and refreshed
+	// transparently by the pool; requires PostgresRDSRegion to be
+	// set so the SigV4 signer knows which region to target.
+	//
+	// This mirrors the existing RedisIAMAuth pattern. The code path
+	// that generates tokens lives in internal/store/postgres/.
+	PostgresIAMAuth bool `json:"postgres_iam_auth,omitempty"`
+
+	// PostgresRDSRegion is the AWS region hosting the RDS instance,
+	// needed for SigV4 presigning when PostgresIAMAuth is true.
+	// Ignored when password auth is in use.
+	PostgresRDSRegion string `json:"postgres_rds_region,omitempty"`
 }
 
 // UseGitHubApp returns true if GitHub App credentials are configured.
@@ -450,6 +654,19 @@ func (s *Secrets) Validate() error {
 			errs = append(errs, errors.New("redis_token and redis_iam_auth are mutually exclusive"))
 		}
 	}
+	// Postgres auth: IAM or password, exactly one.
+	if s.PostgresIAMAuth {
+		if s.PostgresRDSRegion == "" {
+			errs = append(errs, errors.New("postgres_rds_region is required when postgres_iam_auth is true"))
+		}
+		if s.PostgresPassword != "" {
+			errs = append(errs, errors.New("postgres_password and postgres_iam_auth are mutually exclusive"))
+		}
+	} else {
+		if s.PostgresPassword == "" {
+			errs = append(errs, errors.New("postgres_password is required (set postgres_iam_auth: true to use RDS IAM auth instead)"))
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -495,6 +712,9 @@ func Load(path string) (*Config, error) {
 		if _, err := time.ParseDuration(cfg.Deployment.LockTTL); err != nil {
 			return nil, fmt.Errorf("invalid deployment.lock_ttl %q: %w", cfg.Deployment.LockTTL, err)
 		}
+	}
+	if err := cfg.Postgres.Validate(); err != nil {
+		return nil, fmt.Errorf("postgres config: %w", err)
 	}
 	if cfg.LogLevel != "" {
 		if _, err := ParseLogLevel(cfg.LogLevel); err != nil {

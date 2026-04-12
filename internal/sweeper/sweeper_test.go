@@ -17,18 +17,17 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/config"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/storetest"
 )
 
 // --- helpers ---
 
 func newTestStore(t *testing.T) (*store.Store, *miniredis.Miniredis) {
 	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("start miniredis: %v", err)
-	}
-	t.Cleanup(mr.Close)
-	return store.New(mr.Addr(), ""), mr
+	// Hands back a Store with both in-process miniredis and a
+	// testcontainer-backed Postgres pool. Tests skip cleanly when
+	// no container runtime is available.
+	return storetest.NewStoreWithRedis(t)
 }
 
 func newTestCfgHolder() *config.Holder {

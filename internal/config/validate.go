@@ -102,6 +102,13 @@ func ValidateConfig(cfg *Config) []ValidationError {
 		}
 	}
 
+	// --- postgres ---
+	// Delegated to PostgresConfig.validateStructured() so this path
+	// (CLI validator) and Load()'s fail-fast Validate() can't drift.
+	// See PostgresConfig doc comment for rationale and
+	// docs/postgres-setup.md for operator guidance.
+	errs = append(errs, cfg.Postgres.validateStructured()...)
+
 	// --- repo_discovery ---
 	if cfg.RepoDiscovery.Enabled {
 		if cfg.RepoDiscovery.PollInterval != "" {

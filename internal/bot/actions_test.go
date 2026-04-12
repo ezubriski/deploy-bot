@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
@@ -20,6 +18,7 @@ import (
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/storetest"
 	"github.com/ezubriski/deploy-bot/internal/validator"
 )
 
@@ -286,16 +285,12 @@ func (t *trackingGH) MergePR(ctx context.Context, pr int, method string) (string
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("start miniredis: %v", err)
-	}
-	t.Cleanup(mr.Close)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	// Construct a Store using its exported constructor with the miniredis addr.
-	s := store.New(mr.Addr(), "")
-	_ = rdb // rdb only used to verify; the store creates its own client
-	return s
+	// storetest.NewStore hands back a Store with both an in-process
+	// miniredis and a testcontainer-backed Postgres pool. Tests here
+	// skip cleanly when no container runtime is available, so
+	// `make test` on a Docker-less dev machine still runs the
+	// remaining in-process suites without failing.
+	return storetest.NewStore(t)
 }
 
 func newTestBot(t *testing.T, gh githubClient, sl *captureSlack, st *store.Store) *Bot {

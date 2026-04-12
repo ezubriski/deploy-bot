@@ -9,6 +9,20 @@ const (
 )
 
 type PendingDeploy struct {
+	// GitHubOrg and GitHubRepo identify the gitops repository the PR
+	// lives in. Together with PRNumber they form the composite primary
+	// key on the pending_deploys Postgres table, so the bot can manage
+	// apps across multiple gitops repos in a single instance without
+	// PR-number collisions. 1.x had a single-repo assumption baked
+	// into its `pending:<pr>` Redis key; 2.0 carries the org/repo on
+	// every row.
+	//
+	// For deploys sourced from the operator `github` config section,
+	// these are populated from `config.GitHub.Org` / `config.GitHub.Repo`
+	// at modal-submit time. For repo-discovered apps, they come from
+	// the discovered app's SourceRepo.
+	GitHubOrg   string    `json:"github_org"`
+	GitHubRepo  string    `json:"github_repo"`
 	App         string    `json:"app"`
 	Environment string    `json:"environment"`
 	Tag         string    `json:"tag"`
@@ -34,14 +48,28 @@ type PendingDeploy struct {
 }
 
 // HistoryEntry is an immutable record of a completed deployment event,
-// stored in a Redis list for /deploy history queries.
+// stored in the `history` Postgres table for /deploy history queries,
+// rollback-target resolution, and ArgoCD notification correlation.
 type HistoryEntry struct {
-	EventType   string    `json:"event_type"` // approved, rejected, expired, cancelled
-	App         string    `json:"app"`
-	Environment string    `json:"environment"`
-	Tag         string    `json:"tag"`
-	PRNumber    int       `json:"pr_number"`
-	PRURL       string    `json:"pr_url"`
+	// GitHubOrg and GitHubRepo identify the gitops repository the
+	// deploy targeted. Populated for every row inserted by 2.0+ code.
+	// The 1.x → 2.0 data migration populates them from the top-level
+	// `github` config section since 1.x is single-repo-by-definition.
+	// NULL-tolerant in the schema; required for display and for
+	// future cross-repo filtering.
+	GitHubOrg   string `json:"github_org,omitempty"`
+	GitHubRepo  string `json:"github_repo,omitempty"`
+	EventType   string `json:"event_type"` // approved, rejected, expired, cancelled
+	App         string `json:"app"`
+	Environment string `json:"environment"`
+	Tag         string `json:"tag"`
+	PRNumber    int    `json:"pr_number"`
+	PRURL       string `json:"pr_url"`
+	// ApproverID is the Slack user ID of whoever clicked Approve
+	// (for event_type='approved') or empty otherwise. 1.x did not
+	// record this field at all; 2.0 adds it because Postgres makes
+	// structured queries worthwhile and audit consumers asked for it.
+	ApproverID  string    `json:"approver_id,omitempty"`
 	RequesterID string    `json:"requester_id"` // Slack user ID for @mention
 	CompletedAt time.Time `json:"completed_at"`
 
