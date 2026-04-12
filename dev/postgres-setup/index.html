@@ -935,15 +935,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#1x-20-data-migration" class="md-nav__link">
+  <a href="#2x-30-data-migration" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1.x → 2.0 data migration
+        2.x → 3.0 data migration
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="1.x → 2.0 data migration">
+    <nav class="md-nav" aria-label="2.x → 3.0 data migration">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1005,7 +1005,7 @@
 
 
 <h1 id="postgres-setup">Postgres Setup<a class="headerlink" href="#postgres-setup" title="Permanent link">&para;</a></h1>
-<p>deploy-bot 2.0 requires Postgres for durable storage of deploy history
+<p>deploy-bot 3.0 requires Postgres for durable storage of deploy history
 and in-flight pending deploys. Redis remains required for streams,
 caches, locks, and short-TTL coordination.</p>
 <h2 id="quick-start-container">Quick start (container)<a class="headerlink" href="#quick-start-container" title="Permanent link">&para;</a></h2>
@@ -1141,7 +1141,7 @@ runs goose; the others block until it finishes, then proceed with a
 no-op migration check. The lock is session-scoped — if the winning
 replica crashes mid-migration, the server releases the lock when the
 connection drops.</p>
-<h2 id="1x-20-data-migration">1.x → 2.0 data migration<a class="headerlink" href="#1x-20-data-migration" title="Permanent link">&para;</a></h2>
+<h2 id="2x-30-data-migration">2.x → 3.0 data migration<a class="headerlink" href="#2x-30-data-migration" title="Permanent link">&para;</a></h2>
 <p>A standalone tool copies existing Redis data to Postgres:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">CONFIG_PATH</span><span class="o">=</span>/etc/deploy-bot/config.json<span class="w"> </span><span class="se">\</span>
 <span class="nv">SECRETS_PATH</span><span class="o">=</span>/etc/deploy-bot/secrets.json<span class="w"> </span><span class="se">\</span>
@@ -1162,7 +1162,7 @@ connection drops.</p>
 <li>Deploy Postgres (container or RDS).</li>
 <li>Add <code>postgres</code> block to config + secrets.</li>
 <li>Run <code>migrate-redis-to-postgres</code> once.</li>
-<li>Set <code>auto_migrate: true</code>, deploy 2.0 bot + receiver.</li>
+<li>Set <code>auto_migrate: true</code>, deploy 3.0 bot + receiver.</li>
 <li>Verify <code>/deploy history</code> shows migrated data.</li>
 <li>Set <code>auto_migrate: false</code> on next config push.</li>
 <li>(Optional) Turn off Redis AOF/RDB — Redis no longer needs to be

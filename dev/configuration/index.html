@@ -1470,9 +1470,10 @@
 kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>deploy-bot-worker-secrets<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--namespace<span class="o">=</span>deploy-bot<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--from-literal<span class="o">=</span>secrets.json<span class="o">=</span><span class="s1">&#39;{</span>
-<span class="s1">    &quot;slack_bot_token&quot;: &quot;xoxb-...&quot;,</span>
-<span class="s1">    &quot;github_token&quot;:    &quot;github_pat_...&quot;,</span>
-<span class="s1">    &quot;redis_addr&quot;:      &quot;redis:6379&quot;</span>
+<span class="s1">    &quot;slack_bot_token&quot;:    &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:       &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:         &quot;redis:6379&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:  &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 
 <span class="c1"># Receiver secret</span>
@@ -1483,7 +1484,8 @@ kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="
 <span class="s1">    &quot;slack_app_token&quot;:      &quot;xapp-...&quot;,</span>
 <span class="s1">    &quot;github_token&quot;:         &quot;github_pat_...&quot;,</span>
 <span class="s1">    &quot;github_scanner_token&quot;: &quot;github_pat_...&quot;,</span>
-<span class="s1">    &quot;redis_addr&quot;:           &quot;redis:6379&quot;</span>
+<span class="s1">    &quot;redis_addr&quot;:           &quot;redis:6379&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:    &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 </code></pre></div>
 <p>Set <code>SECRETS_PATH=/etc/deploy-bot/secrets/secrets.json</code> in each deployment and mount the respective secret as a volume.</p>
@@ -1496,7 +1498,8 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <span class="s1">    &quot;slack_bot_token&quot;: &quot;xoxb-...&quot;,</span>
 <span class="s1">    &quot;github_token&quot;:    &quot;github_pat_...&quot;,</span>
 <span class="s1">    &quot;redis_addr&quot;:      &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
-<span class="s1">    &quot;redis_token&quot;:     &quot;your-elasticache-auth-token&quot;</span>
+<span class="s1">    &quot;redis_token&quot;:     &quot;your-elasticache-auth-token&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;: &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 
 <span class="c1"># Receiver secret (password auth)</span>
@@ -1508,7 +1511,8 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <span class="s1">    &quot;github_token&quot;:         &quot;github_pat_...&quot;,</span>
 <span class="s1">    &quot;github_scanner_token&quot;: &quot;github_pat_...&quot;,</span>
 <span class="s1">    &quot;redis_addr&quot;:           &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
-<span class="s1">    &quot;redis_token&quot;:          &quot;your-elasticache-auth-token&quot;</span>
+<span class="s1">    &quot;redis_token&quot;:          &quot;your-elasticache-auth-token&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:    &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 </code></pre></div>
 <p>The Terraform module scopes each role's Secrets Manager read permission to its own secret (<code>bot_secrets_manager_secret_name</code> and <code>receiver_secrets_manager_secret_name</code>), preventing cross-access.</p>
@@ -1523,7 +1527,8 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <span class="s1">    &quot;redis_addr&quot;:                   &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
 <span class="s1">    &quot;redis_iam_auth&quot;:               true,</span>
 <span class="s1">    &quot;redis_user_id&quot;:                &quot;deploy-bot-iam&quot;,</span>
-<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;</span>
+<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:            &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 
 <span class="c1"># Receiver secret (IAM auth)</span>
@@ -1537,7 +1542,8 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>create-secret<s
 <span class="s1">    &quot;redis_addr&quot;:                   &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
 <span class="s1">    &quot;redis_iam_auth&quot;:               true,</span>
 <span class="s1">    &quot;redis_user_id&quot;:                &quot;deploy-bot-iam&quot;,</span>
-<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;</span>
+<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:            &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 </code></pre></div>
 <p>The <code>redis_user_id</code> must match the ElastiCache user ID configured with IAM authentication type. The <code>redis_replication_group_id</code> is the ElastiCache replication group ID (not the endpoint address) — it is used as the Host in the SigV4 presigned request. The IAM role or user running the bot/receiver must have <code>elasticache:Connect</code> permission on both the replication group and user ARNs (the Terraform module handles this when <code>elasticache_replication_group_arn</code> and <code>elasticache_user_arn</code> are set).</p>
@@ -1969,6 +1975,11 @@ as long as the app is granted the <code>users:read.email</code> scope.</p>
 <span class="w">    </span><span class="nt">&quot;poll_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;5m&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;config_file&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;.deploy-bot.json&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;repo_prefix&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;postgres&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;postgres.deploy-bot.svc.cluster.local&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy_bot&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;user&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy_bot&quot;</span>
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>

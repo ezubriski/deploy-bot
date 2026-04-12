@@ -11,10 +11,6 @@
       
       
       
-        <link rel="prev" href="../github-app-auth/">
-      
-      
-        <link rel="next" href="../merge-conflict-handling/">
       
       
         
@@ -25,7 +21,7 @@
     
     
       
-        <title>Redis Resilience - deploy-bot</title>
+        <title>AWS Cost Estimate - deploy-bot</title>
       
     
     
@@ -76,7 +72,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#redis-resilience" class="md-skip">
+        <a href="#aws-cost-estimate" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Redis Resilience
+              AWS Cost Estimate
             
           </span>
         </div>
@@ -576,8 +572,6 @@
       
   
   
-    
-  
   
   
     
@@ -590,11 +584,13 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
         
           
           <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
@@ -615,7 +611,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -658,37 +654,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Redis Resilience
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../redis-resilience/" class="md-nav__link">
         
   
   
@@ -704,153 +673,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#what-redis-holds-30" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What Redis holds (3.0+)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#temporary-unavailability" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Temporary unavailability
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#flushall-data-loss" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        FLUSHALL / data loss
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="FLUSHALL / data loss">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-consumer-group-re-initialisation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Consumer group re-initialisation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-per-app-deploy-locks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Per-app deploy locks
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-thread-parent-timestamps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Thread parent timestamps
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-dedupe-markers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Dedupe markers
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#5-github-reconciliation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. GitHub reconciliation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#6-history-reconstruction-rarely-needed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        6. History reconstruction (rarely needed)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#optional-periodic-reconciliation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optional periodic reconciliation
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#recommended-elasticache-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Recommended ElastiCache configuration
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1035,10 +857,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#what-redis-holds-30" class="md-nav__link">
+  <a href="#monthly-cost-by-tier" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What Redis holds (3.0+)
+        Monthly cost by tier
       
     </span>
   </a>
@@ -1046,10 +868,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#temporary-unavailability" class="md-nav__link">
+  <a href="#why-volume-doesnt-matter" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Temporary unavailability
+        Why volume doesn't matter
       
     </span>
   </a>
@@ -1057,104 +879,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#flushall-data-loss" class="md-nav__link">
+  <a href="#sizing-recommendations" class="md-nav__link">
     <span class="md-ellipsis">
       
-        FLUSHALL / data loss
+        Sizing recommendations
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="FLUSHALL / data loss">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-consumer-group-re-initialisation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        1. Consumer group re-initialisation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-per-app-deploy-locks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        2. Per-app deploy locks
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-thread-parent-timestamps" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        3. Thread parent timestamps
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4-dedupe-markers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        4. Dedupe markers
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#5-github-reconciliation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        5. GitHub reconciliation
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#6-history-reconstruction-rarely-needed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        6. History reconstruction (rarely needed)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#optional-periodic-reconciliation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Optional periodic reconciliation
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#recommended-elasticache-configuration" class="md-nav__link">
+  <a href="#whats-not-in-this-estimate" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Recommended ElastiCache configuration
+        What's not in this estimate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-honest-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The honest summary
       
     </span>
   </a>
@@ -1181,176 +931,183 @@
   
 
 
-<h1 id="redis-resilience">Redis resilience<a class="headerlink" href="#redis-resilience" title="Permanent link">&para;</a></h1>
-<p>deploy-bot requires Redis for event streaming, per-app locks, caches, and
-short-TTL coordination. On startup, both the receiver and worker attempt to
-connect with retries every 5 seconds for up to 60 seconds. During this window
-the pod reports unhealthy (<code>/healthz</code> returns 503) and not ready (<code>/readyz</code>
-returns 503). If Redis is still unreachable after 60 seconds, the process
-exits. There is no degraded mode; Redis is not optional.</p>
-<blockquote>
-<p><strong>3.0+ note:</strong> Durable state (deploy history, in-flight pending deploys) is
-now in Postgres, not Redis. Redis no longer needs AOF or RDB persistence —
-it can run as a pure ephemeral cache + queue. A Redis flush or restart loses
-streams and locks but not history or pending deploys. See
-<a href="../postgres-setup/">postgres-setup.md</a> for the durable-store setup.</p>
-</blockquote>
-<h2 id="what-redis-holds-30">What Redis holds (3.0+)<a class="headerlink" href="#what-redis-holds-30" title="Permanent link">&para;</a></h2>
+<h1 id="aws-cost-estimate">AWS Cost Estimate<a class="headerlink" href="#aws-cost-estimate" title="Permanent link">&para;</a></h1>
+<p>Approximate monthly costs for the AWS resources deploy-bot adds on top
+of an existing EKS cluster. All prices are us-east-1, on-demand, as of
+mid-2026. Deploy-bot's data volume is tiny — cost is almost entirely
+instance hours, not usage.</p>
+<h2 id="monthly-cost-by-tier">Monthly cost by tier<a class="headerlink" href="#monthly-cost-by-tier" title="Permanent link">&para;</a></h2>
+<p>The only line items that differ between tiers are the two database
+instances. Everything else is either fixed at a few dollars or rounds
+to zero regardless of volume.</p>
 <table>
 <thead>
 <tr>
-<th>Data</th>
-<th>Key pattern</th>
-<th>TTL</th>
+<th>Component</th>
+<th>Dev / Staging</th>
+<th>Production</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Per-app deploy locks</td>
-<td><code>lock:&lt;env&gt;/&lt;app&gt;</code></td>
-<td><code>lock_ttl</code> (default 5m)</td>
+<td><strong>RDS Postgres</strong></td>
+<td><strong>$15</strong></td>
+<td><strong>$50</strong></td>
 </tr>
 <tr>
-<td>System locks (sweeper, reconcile, retention)</td>
-<td><code>syslock:&lt;name&gt;</code></td>
-<td>Varies</td>
+<td></td>
+<td>db.t4g.micro, single-AZ, 20GB gp3</td>
+<td>db.t4g.small, Multi-AZ, 20GB gp3</td>
 </tr>
 <tr>
-<td>User event stream</td>
-<td><code>user:events</code></td>
-<td>MAXLEN ~10,000 entries</td>
+<td><strong>Redis</strong></td>
+<td><strong>$0</strong></td>
+<td><strong>$25</strong></td>
 </tr>
 <tr>
-<td>ECR event stream</td>
-<td><code>ecr:events</code></td>
-<td>MAXLEN ~10,000 entries</td>
+<td></td>
+<td>In-cluster pod</td>
+<td>cache.t4g.micro × 2, Multi-AZ</td>
 </tr>
 <tr>
-<td>ArgoCD event stream</td>
-<td><code>argocd:events</code></td>
-<td>MAXLEN ~10,000 entries</td>
+<td>Secrets Manager</td>
+<td>$1</td>
+<td>$1</td>
 </tr>
 <tr>
-<td>Consumer groups</td>
-<td>(stream metadata)</td>
-<td>Permanent until deleted</td>
+<td>KMS</td>
+<td>$1</td>
+<td>$1</td>
 </tr>
 <tr>
-<td>Deploy thread parents</td>
-<td><code>thread:&lt;env&gt;</code></td>
-<td>10 minutes</td>
+<td>SQS + EventBridge + S3 audit</td>
+<td>&lt; $1</td>
+<td>&lt; $1</td>
 </tr>
 <tr>
-<td>ArgoCD dedupe markers</td>
-<td><code>argocd:seen:&lt;app&gt;:&lt;sha&gt;:&lt;trigger&gt;</code></td>
-<td>24 hours</td>
+<td></td>
+<td></td>
+<td></td>
 </tr>
 <tr>
-<td>Identity / approver caches</td>
-<td>various</td>
-<td>Refreshed periodically</td>
+<td><strong>Total</strong></td>
+<td><strong>~$17/mo</strong></td>
+<td><strong>~$77/mo</strong></td>
 </tr>
 </tbody>
 </table>
-<p>Everything above is either reconstructible (caches refresh on their own,
-consumer groups are re-created on startup) or short-lived (locks, thread
-parents, dedupe markers all have TTLs). The only data that matters for
-correctness is the stream content — events in-flight between the receiver and
-worker. The receiver's in-memory buffer and Slack's at-least-once retries
-cover the gap when streams are lost.</p>
-<h2 id="temporary-unavailability">Temporary unavailability<a class="headerlink" href="#temporary-unavailability" title="Permanent link">&para;</a></h2>
-<p>If Redis becomes unreachable after startup (e.g. a primary node failure during
-ElastiCache failover, typically 1–2 minutes):</p>
-<p><strong>Receiver</strong>
-- New Slack events cannot be enqueued (XADD fails).
-- Failed events are placed in an in-memory buffer (default 500 events,
-  configurable via <code>slack.buffer_size</code>).
-- The buffer drains automatically with exponential backoff (1s → 30s) once
-  Redis recovers.
-- Slack is never ACKed from the buffer — Slack retries unACKed events in
-  parallel, providing a second delivery path if the receiver restarts while
-  the buffer is non-empty.
-- If the buffer fills (extended outage or very high event rate), incoming
-  events are dropped. Slack will retry these since they were never ACKed.</p>
-<p><strong>Worker</strong>
-- The event loop continues running but <code>XReadGroup</code> calls fail.
-- Errors are logged and the loop retries on each iteration.
-- If the Redis consumer group is missing on recovery (see flush scenario
-  below), the worker re-initialises it automatically.
-- In-flight events that were claimed but not yet ACKed before the outage are
-  recovered via <code>XAUTOCLAIM</code> once Redis is back (claim idle threshold: 60s).
-- Pending-deploy and history operations (Postgres-backed) are <strong>unaffected</strong>
-  by Redis outages. <code>/deploy history</code>, rollback target resolution, and ArgoCD
-  notification correlation continue to work.</p>
-<p><strong>Sweeper</strong>
-- The sweeper queries Postgres for expired deploys, so its data path is
-  unaffected by Redis outages. However, it acquires a Redis sys-lock to
-  coordinate multi-replica execution — if Redis is down, the lock acquisition
-  fails and the sweep is skipped for that tick. Stale deployments are not
-  expired until the next tick where Redis is available for the lock. No data
-  is lost; the sweep catches up on recovery.</p>
-<h2 id="flushall-data-loss">FLUSHALL / data loss<a class="headerlink" href="#flushall-data-loss" title="Permanent link">&para;</a></h2>
-<p>If Redis is flushed (<code>FLUSHALL</code> or equivalent), all Redis-held state is lost.
-<strong>Deploy history and pending deploys are unaffected</strong> — they live in Postgres.</p>
-<p>What is lost and how it recovers:</p>
-<h3 id="1-consumer-group-re-initialisation">1. Consumer group re-initialisation<a class="headerlink" href="#1-consumer-group-re-initialisation" title="Permanent link">&para;</a></h3>
-<p>The worker detects the missing consumer group (<code>NOGROUP</code> error on
-<code>XReadGroup</code>) and calls <code>Init</code> to recreate it. The stream is empty after a
-flush so no events are replayed — any events that arrived during the outage
-window are covered by the receiver buffer and Slack's retries.</p>
-<h3 id="2-per-app-deploy-locks">2. Per-app deploy locks<a class="headerlink" href="#2-per-app-deploy-locks" title="Permanent link">&para;</a></h3>
-<p>All <code>lock:&lt;env&gt;/&lt;app&gt;</code> keys are gone. This means a second deploy for the same
-app could be submitted while a first is still in-flight. The Postgres
-<code>pending_deploys</code> table is the authoritative record of in-flight deploys, and
-the bot's <code>GetByEnvApp</code> check (which queries Postgres) will still surface the
-conflict on modal submission. The lock is a fast-path optimisation, not the
-sole guard.</p>
-<h3 id="3-thread-parent-timestamps">3. Thread parent timestamps<a class="headerlink" href="#3-thread-parent-timestamps" title="Permanent link">&para;</a></h3>
-<p><code>thread:&lt;env&gt;</code> keys are gone, so the next deploy in each environment will post
-a new top-level message instead of threading under an existing one. Cosmetic
-impact only; no data loss.</p>
-<h3 id="4-dedupe-markers">4. Dedupe markers<a class="headerlink" href="#4-dedupe-markers" title="Permanent link">&para;</a></h3>
-<p>ArgoCD and ECR dedupe markers (<code>argocd:seen:*</code>, <code>ecr:seen:*</code>) are gone. The
-next notification or ECR event for a recently-processed SHA/tag may be
-re-delivered and processed a second time. For ArgoCD, this means a duplicate
-Slack post (annoying but not harmful). For ECR, a duplicate PR creation
-attempt that the GitHub API rejects as a conflict (the branch already exists).</p>
-<h3 id="5-github-reconciliation">5. GitHub reconciliation<a class="headerlink" href="#5-github-reconciliation" title="Permanent link">&para;</a></h3>
-<p><code>ReconcileFromGitHub</code> still runs on startup and queries GitHub for open PRs
-carrying the <code>deploy-bot/pending</code> label. Since pending deploys are in
-Postgres, this path is now a sanity check rather than a primary recovery
-mechanism — it catches PRs where Postgres and GitHub disagree (e.g. a PR was
-closed outside the bot).</p>
-<h3 id="6-history-reconstruction-rarely-needed">6. History reconstruction (rarely needed)<a class="headerlink" href="#6-history-reconstruction-rarely-needed" title="Permanent link">&para;</a></h3>
-<p><code>ReconstructHistory</code> detects an empty Postgres history table and
-asynchronously rebuilds from GitHub commit history. Since a Redis flush does
-NOT empty the Postgres history table, this path does not trigger on a
-Redis-only event. It only runs after a Postgres data loss (which would
-typically be restored from a database backup instead).</p>
-<h3 id="optional-periodic-reconciliation">Optional periodic reconciliation<a class="headerlink" href="#optional-periodic-reconciliation" title="Permanent link">&para;</a></h3>
-<p>Reconciliation also runs on a configurable interval if
-<code>deployment.reconcile_interval</code> is set (e.g. <code>1h</code>). This is disabled by
-default. Only one worker pod runs reconciliation per interval, coordinated
-via a Redis lock.</p>
-<h2 id="recommended-elasticache-configuration">Recommended ElastiCache configuration<a class="headerlink" href="#recommended-elasticache-configuration" title="Permanent link">&para;</a></h2>
-<p>Since Redis no longer holds durable state, the operational posture is simpler
-than in 2.x:</p>
-<ul>
-<li><strong>Multi-AZ with automatic failover</strong> — primary failure triggers automatic
-  promotion of a replica, typically within 1–2 minutes. This is for
-  <strong>availability</strong>, not durability.</li>
-<li><strong>AOF / RDB persistence is optional.</strong> Redis holds only streams, locks, and
-  caches — all of which are either short-lived or reconstructible. Enabling
-  AOF avoids re-delivery of in-flight stream events after a node restart, but
-  the dedupe layer and Slack's retries already handle that case. If your
-  ops team prefers the belt-and-suspenders approach, <code>appendfsync everysec</code>
-  is fine; if you'd rather simplify, turning persistence off is equally
-  valid.</li>
-<li><strong>Do not run FLUSHALL in production</strong> without coordinating with the team.
-  The blast radius is smaller than in 2.x (no history or pending deploy
-  loss), but in-flight events will be re-delivered and deploy locks will
-  momentarily drop.</li>
-</ul>
+<h2 id="why-volume-doesnt-matter">Why volume doesn't matter<a class="headerlink" href="#why-volume-doesnt-matter" title="Permanent link">&para;</a></h2>
+<p>Deploy-bot's usage-priced services stay in free tier or round to zero
+at every realistic deploy volume:</p>
+<table>
+<thead>
+<tr>
+<th>Service</th>
+<th>At 200 deploys/day (high)</th>
+<th>Free tier / baseline</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SQS</td>
+<td>~100K messages/mo</td>
+<td>1M messages/mo free</td>
+</tr>
+<tr>
+<td>EventBridge</td>
+<td>~6K events/mo</td>
+<td>$1 per 1M events</td>
+</tr>
+<tr>
+<td>S3 audit</td>
+<td>~6K objects/mo (~6MB)</td>
+<td>pennies; Glacier after 90d</td>
+</tr>
+<tr>
+<td>RDS I/O</td>
+<td>single-digit QPS at peak</td>
+<td>gp3 baseline: 3000 IOPS</td>
+</tr>
+</tbody>
+</table>
+<p>Even at 500+ deploys/day, none of these cross a dollar. The tables
+above show a single cost per tier because the number doesn't change.</p>
+<h2 id="sizing-recommendations">Sizing recommendations<a class="headerlink" href="#sizing-recommendations" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Dev / Staging</th>
+<th>Production</th>
+<th>When to upsize</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RDS</td>
+<td>db.t4g.micro, single-AZ</td>
+<td>db.t4g.small, Multi-AZ</td>
+<td>Unlikely. 100K deploys/year ≈ 100MB of data, single-digit QPS. Multi-AZ is for availability, not capacity.</td>
+</tr>
+<tr>
+<td>Redis</td>
+<td>In-cluster pod</td>
+<td>cache.t4g.micro × 2</td>
+<td>Unlikely. Sub-MB working set (streams + locks + caches). Micro is the smallest ElastiCache offers. Multi-AZ is for pod-failure availability, not durability (Redis is ephemeral).</td>
+</tr>
+<tr>
+<td>SQS</td>
+<td>Standard queue, SSE-SQS</td>
+<td>Standard queue, CMK if compliance requires</td>
+<td>No sizing dimension — SQS scales automatically.</td>
+</tr>
+<tr>
+<td>S3 audit</td>
+<td>Glacier lifecycle at 90d</td>
+<td>Object Lock (WORM), Glacier at 90d, access logging</td>
+<td>~70MB/year at 200 deploys/day. Glacier: $0.004/GB/mo.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="whats-not-in-this-estimate">What's not in this estimate<a class="headerlink" href="#whats-not-in-this-estimate" title="Permanent link">&para;</a></h2>
+<p>These are shared infrastructure costs that deploy-bot uses but doesn't
+own. Included here so the full picture is visible when budgeting.</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Typical cost</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EKS control plane</td>
+<td>$73/mo</td>
+<td>Per-cluster. Assumed shared.</td>
+</tr>
+<tr>
+<td>NAT Gateway</td>
+<td>$32/mo + $0.045/GB</td>
+<td>Per-AZ. Often the largest forgotten line item in any VPC-hosted workload. Not deploy-bot-specific.</td>
+</tr>
+<tr>
+<td>ECR image storage</td>
+<td>&lt; $1/mo</td>
+<td>Bot image is ~40MB.</td>
+</tr>
+<tr>
+<td>Data transfer</td>
+<td>~$0</td>
+<td>All traffic is intra-VPC or outbound to AWS APIs. The bot moves KB, not GB. VPC endpoints eliminate the per-GB charge entirely.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="the-honest-summary">The honest summary<a class="headerlink" href="#the-honest-summary" title="Permanent link">&para;</a></h2>
+<p>Deploy-bot's incremental AWS bill is <strong>~$17/mo in dev, ~$77/mo in
+prod</strong>. The cost is two small database instances. Everything else
+rounds to zero. The number doesn't meaningfully change whether you're
+doing 5 deploys/day or 500.</p>
 
 
 

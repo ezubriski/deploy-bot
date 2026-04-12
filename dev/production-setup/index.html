@@ -515,10 +515,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3b-deploy-bot-module" class="md-nav__link">
+  <a href="#3b-rds-postgres" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3b. deploy-bot module
+        3b. RDS Postgres
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3c-deploy-bot-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3c. deploy-bot module
       
     </span>
   </a>
@@ -1208,10 +1219,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3b-deploy-bot-module" class="md-nav__link">
+  <a href="#3b-rds-postgres" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3b. deploy-bot module
+        3b. RDS Postgres
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3c-deploy-bot-module" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3c. deploy-bot module
       
     </span>
   </a>
@@ -1360,11 +1382,12 @@
 
 
 <h1 id="production-setup">Production Setup<a class="headerlink" href="#production-setup" title="Permanent link">&para;</a></h1>
-<p>A step-by-step guide for deploying deploy-bot with production-grade infrastructure: IRSA, ElastiCache with IAM auth, WORM-compliant audit logging, encrypted secrets, ECR push-triggered deploys, and repo-sourced app discovery.</p>
+<p>A step-by-step guide for deploying deploy-bot with production-grade infrastructure: IRSA, Postgres (RDS with optional IAM auth), ElastiCache with IAM auth, WORM-compliant audit logging, encrypted secrets, ECR push-triggered deploys, and repo-sourced app discovery.</p>
 <p>If you're evaluating the bot, start with the <a href="../quickstart/">quickstart</a> and come back here when you're ready to harden.</p>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
 <li>An EKS cluster with an OIDC provider configured</li>
+<li>A Postgres instance (RDS, Aurora, or a container for non-prod). See <a href="../postgres-setup/">postgres-setup.md</a></li>
 <li>Terraform, <code>kubectl</code>, and the AWS CLI</li>
 <li>A GitHub organization with a gitops repo</li>
 <li>Admin access to a Slack workspace</li>
@@ -1460,9 +1483,12 @@
 <p>This creates an ElastiCache replication group with:
 - IAM authentication (no static passwords for the bot)
 - Encryption in transit (TLS) and at rest (KMS)
-- Multi-AZ automatic failover
-- Automatic snapshots with 7-day retention</p>
-<h3 id="3b-deploy-bot-module">3b. deploy-bot module<a class="headerlink" href="#3b-deploy-bot-module" title="Permanent link">&para;</a></h3>
+- Multi-AZ automatic failover (for availability — Redis data is ephemeral since 3.0)
+- Snapshots disabled by default (nothing worth snapshotting; all durable state is in Postgres)</p>
+<h3 id="3b-rds-postgres">3b. RDS Postgres<a class="headerlink" href="#3b-rds-postgres" title="Permanent link">&para;</a></h3>
+<p>Provision an RDS or Aurora Postgres instance for the durable store. The bot needs a database, a user, and network reachability from the EKS pods. IAM auth is optional — password auth (stored in Secrets Manager) is the default.</p>
+<p>If using IAM auth, enable it on the RDS instance and note the <strong>DBI resource ID</strong> (visible in the RDS console as "Resource ID", e.g. <code>db-ABCDE12345FGHIJ67890</code>). The deploy-bot terraform module wires the <code>rds-db:connect</code> IAM permission from that ID.</p>
+<h3 id="3c-deploy-bot-module">3c. deploy-bot module<a class="headerlink" href="#3c-deploy-bot-module" title="Permanent link">&para;</a></h3>
 <p>Grab your cluster's OIDC provider details:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">OIDC_URL</span><span class="o">=</span><span class="k">$(</span>aws<span class="w"> </span>eks<span class="w"> </span>describe-cluster<span class="w"> </span>--name<span class="w"> </span>your-cluster<span class="w"> </span>--query<span class="w"> </span><span class="s2">&quot;cluster.identity.oidc.issuer&quot;</span><span class="w"> </span>--output<span class="w"> </span>text<span class="k">)</span>
 <span class="nv">OIDC_ID</span><span class="o">=</span><span class="k">$(</span><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;</span><span class="nv">$OIDC_URL</span><span class="s2">&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>sed<span class="w"> </span><span class="s1">&#39;s|https://||&#39;</span><span class="k">)</span>
@@ -1498,6 +1524,10 @@
 <span class="w">  </span><span class="na">elasticache_replication_group_arn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">module.redis.replication_group_arn</span>
 <span class="w">  </span><span class="na">elasticache_user_arn</span><span class="w">             </span><span class="o">=</span><span class="w"> </span><span class="nv">module.redis.iam_user_arn</span>
 
+<span class="c1">  # RDS IAM auth (omit if using password auth for Postgres)</span>
+<span class="w">  </span><span class="na">rds_resource_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nv">aws_db_instance.deploy_bot.resource_id</span><span class="c1">  # e.g. &quot;db-ABCDE12345&quot;</span>
+<span class="w">  </span><span class="na">rds_db_user</span><span class="w">     </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;deploy_bot&quot;</span>
+
 <span class="w">  </span><span class="nb">tags</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="na">Team</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;platform&quot;</span>
 <span class="w">    </span><span class="na">Environment</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;production&quot;</span>
@@ -1527,7 +1557,7 @@
 </tr>
 <tr>
 <td>2 managed IAM policies</td>
-<td>SecretsManager, ECR, S3, SQS, ElastiCache, KMS</td>
+<td>SecretsManager, ECR, S3, SQS, ElastiCache, RDS (conditional), KMS</td>
 </tr>
 <tr>
 <td>2 Secrets Manager secrets</td>
@@ -1564,7 +1594,8 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <span class="s1">    &quot;redis_addr&quot;:                   &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
 <span class="s1">    &quot;redis_iam_auth&quot;:               true,</span>
 <span class="s1">    &quot;redis_user_id&quot;:                &quot;deploy-bot-iam&quot;,</span>
-<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;</span>
+<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:            &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 
 <span class="c1"># Receiver secret</span>
@@ -1579,7 +1610,8 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <span class="s1">    &quot;redis_addr&quot;:                   &quot;deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379&quot;,</span>
 <span class="s1">    &quot;redis_iam_auth&quot;:               true,</span>
 <span class="s1">    &quot;redis_user_id&quot;:                &quot;deploy-bot-iam&quot;,</span>
-<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;</span>
+<span class="s1">    &quot;redis_replication_group_id&quot;:   &quot;deploy-bot&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:            &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 </code></pre></div>
 <p>The <code>redis_user_id</code> must match the ElastiCache user configured with IAM authentication. The <code>redis_replication_group_id</code> is the replication group ID (not the endpoint) — it's used to generate SigV4 presigned auth tokens. TLS is enabled automatically when <code>redis_iam_auth</code> is true.</p>
@@ -1588,10 +1620,11 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-value<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--secret-id<span class="w"> </span>deploy-bot/bot-secrets<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--secret-string<span class="w"> </span><span class="s1">&#39;{</span>
-<span class="s1">    &quot;slack_bot_token&quot;: &quot;xoxb-...&quot;,</span>
-<span class="s1">    &quot;github_token&quot;:    &quot;github_pat_...&quot;,</span>
-<span class="s1">    &quot;redis_addr&quot;:      &quot;your-redis:6379&quot;,</span>
-<span class="s1">    &quot;redis_token&quot;:     &quot;your-auth-token&quot;</span>
+<span class="s1">    &quot;slack_bot_token&quot;:    &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:       &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:         &quot;your-redis:6379&quot;,</span>
+<span class="s1">    &quot;redis_token&quot;:        &quot;your-auth-token&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:  &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 
 <span class="c1"># Receiver secret</span>
@@ -1603,7 +1636,8 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <span class="s1">    &quot;github_token&quot;:         &quot;github_pat_...&quot;,</span>
 <span class="s1">    &quot;github_scanner_token&quot;: &quot;github_pat_...&quot;,</span>
 <span class="s1">    &quot;redis_addr&quot;:           &quot;your-redis:6379&quot;,</span>
-<span class="s1">    &quot;redis_token&quot;:          &quot;your-auth-token&quot;</span>
+<span class="s1">    &quot;redis_token&quot;:          &quot;your-auth-token&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:    &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 </code></pre></div>
 <p>See <a href="../configuration/">configuration.md</a> for all secret fields and auth combinations.</p>
@@ -1634,6 +1668,11 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <span class="w">  </span><span class="nt">&quot;ecr_auto_deploy&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;sqs_queue_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;terraform sqs_queue_url output&gt;&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;postgres&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;your-rds-endpoint.region.rds.amazonaws.com&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy_bot&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;user&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy_bot&quot;</span>
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">&quot;repo_discovery&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
@@ -1719,6 +1758,7 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <h2 id="7-verify">7. Verify<a class="headerlink" href="#7-verify" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>/deploy help     — command help
 /deploy apps     — verify app config loaded
+/deploy history  — verify Postgres connectivity (empty list is fine on first run)
 </code></pre></div>
 <p>Deploy something: <code>/deploy myapp-prod</code> → pick a tag → approve → watch the PR merge and Argo CD sync.</p>
 <h2 id="8-enable-ecr-push-deploys">8. Enable ECR push deploys<a class="headerlink" href="#8-enable-ecr-push-deploys" title="Permanent link">&para;</a></h2>
@@ -1765,6 +1805,22 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <tr>
 <td>Secrets encrypted with CMK</td>
 <td><code>secrets_kms_key_arn</code> set</td>
+</tr>
+<tr>
+<td>Postgres IAM auth (no static database password)</td>
+<td><code>postgres_iam_auth: true</code> + <code>rds_resource_id</code> in terraform</td>
+</tr>
+<tr>
+<td>Postgres encryption in transit (TLS)</td>
+<td><code>sslmode: require</code> (default) or <code>verify-full</code></td>
+</tr>
+<tr>
+<td>Postgres encryption at rest</td>
+<td>RDS default (AES-256) or CMK</td>
+</tr>
+<tr>
+<td>History retention floor (390 days, audit compliance)</td>
+<td>Enforced at config load; cannot be set lower</td>
 </tr>
 <tr>
 <td>ElastiCache IAM auth (no static Redis password)</td>

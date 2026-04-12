@@ -1222,19 +1222,21 @@
 aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-value<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--secret-id<span class="w"> </span>deploy-bot/bot-secrets<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--secret-string<span class="w"> </span><span class="s1">&#39;{</span>
-<span class="s1">    &quot;slack_bot_token&quot;: &quot;xoxb-...&quot;,</span>
-<span class="s1">    &quot;github_token&quot;:    &quot;github_pat_...&quot;,</span>
-<span class="s1">    &quot;redis_addr&quot;:      &quot;redis.deploy-bot.svc.cluster.local:6379&quot;</span>
+<span class="s1">    &quot;slack_bot_token&quot;:    &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:       &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:         &quot;redis.deploy-bot.svc.cluster.local:6379&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:  &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 
 <span class="c1"># Receiver secret</span>
 aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-value<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--secret-id<span class="w"> </span>deploy-bot/receiver-secrets<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--secret-string<span class="w"> </span><span class="s1">&#39;{</span>
-<span class="s1">    &quot;slack_bot_token&quot;: &quot;xoxb-...&quot;,</span>
-<span class="s1">    &quot;slack_app_token&quot;: &quot;xapp-...&quot;,</span>
-<span class="s1">    &quot;github_token&quot;:    &quot;github_pat_...&quot;,</span>
-<span class="s1">    &quot;redis_addr&quot;:      &quot;redis.deploy-bot.svc.cluster.local:6379&quot;</span>
+<span class="s1">    &quot;slack_bot_token&quot;:    &quot;xoxb-...&quot;,</span>
+<span class="s1">    &quot;slack_app_token&quot;:    &quot;xapp-...&quot;,</span>
+<span class="s1">    &quot;github_token&quot;:       &quot;github_pat_...&quot;,</span>
+<span class="s1">    &quot;redis_addr&quot;:         &quot;redis.deploy-bot.svc.cluster.local:6379&quot;,</span>
+<span class="s1">    &quot;postgres_password&quot;:  &quot;changeme&quot;</span>
 <span class="s1">  }&#39;</span>
 </code></pre></div>
 <h2 id="5-write-your-config">5. Write your config<a class="headerlink" href="#5-write-your-config" title="Permanent link">&para;</a></h2>
@@ -1252,6 +1254,11 @@ aws<span class="w"> </span>secretsmanager<span class="w"> </span>put-secret-valu
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">&quot;aws&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
 <span class="w">    </span><span class="nt">&quot;ecr_region&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;us-east-1&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;postgres&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;host&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;postgres&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy_bot&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;user&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy_bot&quot;</span>
 <span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
