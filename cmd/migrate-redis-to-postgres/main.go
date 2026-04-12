@@ -1,7 +1,7 @@
-// migrate-redis-to-postgres is a one-shot tool for the 1.x → 2.0
+// migrate-redis-to-postgres is a one-shot tool for the 2.x → 3.0
 // upgrade. It reads the existing deploy history list and pending
 // deploy hashes from Redis and inserts them into the Postgres tables
-// that the 2.0 bot reads from.
+// that the 3.0 bot reads from.
 //
 // Idempotent: re-running is safe. History rows use ON CONFLICT DO
 // NOTHING on (event_type, app, environment, completed_at); pending

@@ -51,7 +51,7 @@ The net effect: deploys stop being a context switch. They're a sentence in a cha
 
 ## Why deploy-bot
 
-🔒 **No public network exposure.** Socket Mode (outbound WebSocket) and SQS long-polling. No ingress, no webhooks, no load balancer. Deploy it in a private subnet and forget about it.
+🔒 **No public ingress required.** Slack via Socket Mode (outbound WebSocket), ECR events via SQS long-polling — no public load balancer needed out of the box. Optional webhook endpoints for [ArgoCD notifications](docs/argocd-notifications.md) and ECR push events are served on the receiver's health port; they're cluster-internal by default but can be exposed via ingress if ArgoCD lives in a separate cluster.
 
 📦 **ECR push-triggered deploys.** One EventBridge rule captures all ECR pushes account-wide. The bot filters by app and tag pattern. A single push triggers deploys for all apps sharing that ECR repo. Add a new app and it works immediately:
 - No EventBridge changes
@@ -69,11 +69,13 @@ The net effect: deploys stop being a context switch. They're a sentence in a cha
 📐 **Convention over configuration.** With [enforced naming conventions](docs/naming-conventions.md), app names and kustomize paths are derived from repository names. Teams only specify their environment and ECR repo — everything else follows the org standard. Conflicts between teams are structurally impossible, and onboarding a new app takes two lines of JSON.
 
 🛡️ **Built for resilience.** The bot handles the rough edges of distributed systems:
-- Redis Streams consumer groups for exactly-once processing
+- Durable state in Postgres (deploy history, in-flight pending deploys) — survives Redis restarts and flushes
+- Redis Streams consumer groups for exactly-once event processing
 - In-memory buffer with backpressure during Redis outages
-- Sweeper for expired deploys
-- Automatic rebase on merge conflicts
-- GitHub reconciliation after data loss
+- Sweeper for expired deploys, automatic rebase on merge conflicts
+- GitHub reconciliation as a sanity check (not a recovery mechanism — Postgres is the source of truth)
+
+🔔 **Deploy outcome visibility.** Optional [ArgoCD notifications](docs/argocd-notifications.md) integration: the bot subscribes to sync-succeeded, sync-failed, and health-degraded events, correlates them to the originating deploy by gitops commit SHA, and posts the outcome in-context — a quiet threaded reply on success, an unmissable top-level alert with failing-resource detail on failure, and a one-click rollback prompt when things go wrong.
 
 📈 **Horizontal scaling.** Receiver and worker scale independently. Consumer groups ensure each event processes once. Distributed Redis locks coordinate singleton work across replicas. User events and ECR events use separate Redis streams (`user:events` and `ecr:events`), so user button clicks and slash commands are never delayed by ECR bulk processing.
 
@@ -111,13 +113,19 @@ Two processes share a single container image:
 - **receiver** -- connects to Slack via Socket Mode, validates incoming events, and enqueues them to a Redis Stream. User events (slash commands, button clicks, mentions) go to `user:events`; ECR push events go to `ecr:events`. Also polls SQS for ECR push events and scans repos for app config (when enabled). Stateless; run 2+ replicas.
 - **worker** -- consumes events from both streams, prioritizing `user:events` (drains it before checking `ecr:events`). Runs all business logic (GitHub API, ECR, audit logging). Run 2+ replicas; Redis Streams consumer groups ensure each event is processed once. When multiple deploys target the same environment, the bot threads individual approval requests under a parent message to reduce channel noise (configurable via `slack.thread_threshold`).
 
+### Postgres (3.0+, required)
+
+deploy-bot stores durable state — deploy history and in-flight pending deploys — in Postgres. **Postgres must be available for the bot to function.** The bot and receiver both fail fast on startup if Postgres is unreachable. Schema migrations are embedded in the bot binary and managed by goose; they run at startup only when `postgres.auto_migrate` is true (default false). For production, use RDS or Aurora with IAM auth (optional — password auth is the default). See [docs/postgres-setup.md](docs/postgres-setup.md) for setup, migration, and retention configuration.
+
+A `postgres:15-alpine` container works for development and low-volume environments. The included `cmd/migrate-redis-to-postgres` tool handles the one-shot 2.x → 3.0 data migration.
+
 ### Redis
 
-deploy-bot relies heavily on Redis for event streaming, deploy state, per-app locks, and history. **Redis must be available for the bot to function.** For production, use ElastiCache for Redis (or an equivalent managed service) with Multi-AZ automatic failover and AOF persistence enabled. This gives you durability across restarts and high availability during node failures.
+deploy-bot uses Redis for event streaming, per-app locks, caches, and short-TTL coordination. **Redis must be available for the bot to function.** Redis no longer needs to be durable (no AOF/RDB required) — all durable state is in Postgres. For production, use ElastiCache for Redis (or an equivalent managed service) with Multi-AZ automatic failover for high availability during node failures.
 
-The bot tolerates brief Redis connectivity interruptions -- the in-memory buffer absorbs events during outages and replays them on reconnection. It also recovers from complete Redis data loss by reconciling against GitHub (closing orphaned PRs, releasing stale locks). However, performance degrades during outages and deploy requests will queue rather than process.
+The bot tolerates brief Redis connectivity interruptions — the in-memory buffer absorbs events during outages and replays them on reconnection. It also recovers from complete Redis data loss by reconciling against GitHub (closing orphaned PRs, releasing stale locks). However, performance degrades during outages and deploy requests will queue rather than process.
 
-An in-cluster Redis deployment (e.g. the `redis.yaml` in `deploy/`) works for development and low-volume environments, but lacks the persistence and failover guarantees that matter when deployments are business-critical. See [docs/redis-resilience.md](docs/redis-resilience.md) for detailed behaviour during outages and recovery.
+An in-cluster Redis deployment (e.g. the `redis.yaml` in `deploy/`) works for development and low-volume environments. See [docs/redis-resilience.md](docs/redis-resilience.md) for detailed behaviour during outages and recovery.
 
 ## Security
 
@@ -142,7 +150,8 @@ deploy-bot requires no ingress controller, load balancer, or public IP. All exte
 | Outbound | HTTPS | `api.ecr.{region}.amazonaws.com` | Tag listing and cache refresh (worker) |
 | Outbound | HTTPS | `s3.{region}.amazonaws.com` | Audit log writes (worker, optional) |
 | Outbound | HTTPS | `slack.com` | Slack Web API calls (worker) |
-| Internal | TCP 6379 | Redis | State, locks, streams, history |
+| Internal | TCP 5432 | Postgres | Durable state (history, pending deploys) |
+| Internal | TCP 6379 | Redis | Locks, streams, caches |
 | Internal | HTTP | Inter-pod | Health checks (`/healthz`, `/readyz`) |
 
 If deployed on AWS with VPC endpoints for SQS, ECR, S3, and Secrets Manager, the bot can run in a fully private subnet with no internet gateway. The only service that requires public internet access is the Slack Socket Mode WebSocket and the Slack/GitHub APIs.
@@ -211,7 +220,7 @@ The module also supports Secrets Manager secret creation, S3 audit buckets with 
 
 ## ElastiCache example
 
-A reference ElastiCache module is provided at [`terraform/examples/elasticache/`](terraform/examples/elasticache/) with recommended settings: IAM authentication, encryption in transit and at rest, multi-AZ failover, and automatic snapshots. It is provided as an example only and is not actively maintained — copy it into your own infrastructure and adapt as needed. See the [production setup guide](docs/production-setup.md) for how to wire it together with the deploy-bot module.
+A reference ElastiCache module is provided at [`terraform/examples/elasticache/`](terraform/examples/elasticache/) with recommended settings: IAM authentication, encryption in transit and at rest, and multi-AZ failover for availability. Snapshots are disabled by default since Redis holds only ephemeral data in 3.0+ (all durable state is in Postgres). It is provided as an example only and is not actively maintained — copy it into your own infrastructure and adapt as needed. See the [production setup guide](docs/production-setup.md) for how to wire it together with the deploy-bot module.
 
 ## deploy-bot-config CLI
 

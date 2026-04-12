@@ -106,7 +106,7 @@ release; they're tracked here so they don't get lost.
   registers only the requested dialect and lets the linker drop the rest. The
   refactor is local to `internal/store/postgres/postgres.go` and is a real
   change to how migrations are invoked (provider-scoped, not package-global),
-  so it gets its own review pass rather than riding the postgres-2.0 branch.
+  so it gets its own review pass rather than riding the postgres-3.0 branch.
 
 - [ ] **Disable self-approval by default.** Self-approval (requester == approver)
   should be disabled by default; it's useful for testing but questionable in

@@ -94,19 +94,21 @@ This creates:
 aws secretsmanager put-secret-value \
   --secret-id deploy-bot/bot-secrets \
   --secret-string '{
-    "slack_bot_token": "xoxb-...",
-    "github_token":    "github_pat_...",
-    "redis_addr":      "redis.deploy-bot.svc.cluster.local:6379"
+    "slack_bot_token":    "xoxb-...",
+    "github_token":       "github_pat_...",
+    "redis_addr":         "redis.deploy-bot.svc.cluster.local:6379",
+    "postgres_password":  "changeme"
   }'
 
 # Receiver secret
 aws secretsmanager put-secret-value \
   --secret-id deploy-bot/receiver-secrets \
   --secret-string '{
-    "slack_bot_token": "xoxb-...",
-    "slack_app_token": "xapp-...",
-    "github_token":    "github_pat_...",
-    "redis_addr":      "redis.deploy-bot.svc.cluster.local:6379"
+    "slack_bot_token":    "xoxb-...",
+    "slack_app_token":    "xapp-...",
+    "github_token":       "github_pat_...",
+    "redis_addr":         "redis.deploy-bot.svc.cluster.local:6379",
+    "postgres_password":  "changeme"
   }'
 ```
 
@@ -128,6 +130,11 @@ Create `config.json`:
   },
   "aws": {
     "ecr_region": "us-east-1"
+  },
+  "postgres": {
+    "host": "postgres",
+    "database": "deploy_bot",
+    "user": "deploy_bot"
   },
   "apps": [
     {

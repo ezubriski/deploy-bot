@@ -57,9 +57,9 @@ variable "maintenance_window" {
 }
 
 variable "snapshot_retention_days" {
-  description = "Number of days to retain automatic snapshots. 0 disables snapshots"
+  description = "Number of days to retain automatic snapshots. 0 disables snapshots. Default 0: Redis holds only ephemeral data (streams, locks, caches) since 3.0 — all durable state is in Postgres, so snapshots provide no recovery value. Set > 0 only if your ops team wants them for debugging."
   type        = number
-  default     = 7
+  default     = 0
 }
 
 variable "snapshot_window" {

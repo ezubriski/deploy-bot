@@ -255,7 +255,7 @@ func TestSetSlackHandle_NoOpWhenRecordGone(t *testing.T) {
 	}
 }
 
-// TestUpdateState_NotFoundReturnsErr is new for 2.0: the Postgres-
+// TestUpdateState_NotFoundReturnsErr is new for 3.0: the Postgres-
 // backed UpdateState surfaces ErrPendingNotFound when the row
 // doesn't exist, so callers can distinguish "nothing to update"
 // from infrastructure failure. 1.x returned a generic "deploy N
