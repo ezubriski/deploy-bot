@@ -14,6 +14,11 @@
     "merge_method": "squash",
     "lock_ttl": "5m"
   },
+  "postgres": {
+    "host": "localhost",
+    "database": "deploy_bot",
+    "user": "deploy_bot"
+  },
   "aws": {
     "ecr_region": "us-east-1",
     "audit_bucket": "my-audit-logs",

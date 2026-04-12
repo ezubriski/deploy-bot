@@ -64,7 +64,9 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 
 **App config**: Each app entry requires an `environment` field (e.g. `"dev"`, `"prod"`). The `app` field is the base name (e.g. `"myapp"`); the bot constructs the composite `app-environment` (e.g. `myapp-dev`, `myapp-prod`) internally via `FullName()`. This composite is used in lock keys, branch names, PR titles, and all user-facing messages so deployments across environments are unambiguous.
 
-**Redis state** (`internal/store`): Pending deploys are stored as `pending:<pr_number>` keys with a TTL equal to `stale_duration`. Per-app deploy locks use `lock:<env>/<app>` keys (SET NX with `lock_ttl` TTL) so the same app in different environments locks independently. The history list (`history`) holds up to 100 `HistoryEntry` records, newest-first, populated by every completion path (approved, rejected, expired, cancelled). User events and ECR events use separate Redis streams (`user:events` and `ecr:events`); the worker drains the user stream with priority before checking the ECR stream. Deploy thread parent timestamps are stored as `thread:<env>` keys with a 10-minute TTL, created atomically (SET NX) to prevent duplicate parent messages from concurrent workers.
+**Durable state** (`internal/store`, `internal/store/postgres`): Deploy history and in-flight pending deploys are stored in **Postgres** (required on 2.0+). `history` holds completed deploy events (approved, rejected, expired, cancelled) with no retention cap (retention is governed by a background ticker, default 2 years, 390-day floor). `pending_deploys` holds in-flight deploys with a composite PK `(github_org, github_repo, pr_number)` for multi-repo future-proofing; rows are deleted on state transition to a terminal event (the matching terminal record goes into `history`). Schema is managed by goose migrations embedded in the bot binary; migrations run at startup only when `postgres.auto_migrate` is true, gated by a Postgres advisory lock. See `docs/postgres-setup.md`.
+
+**Redis state** (`internal/store`): Per-app deploy locks use `lock:<env>/<app>` keys (SET NX with `lock_ttl` TTL) so the same app in different environments locks independently. User events and ECR events use separate Redis streams (`user:events` and `ecr:events`); the worker drains the user stream with priority before checking the ECR stream. ArgoCD notifications use a third stream (`argocd:events`). Deploy thread parent timestamps are stored as `thread:<env>` keys with a 10-minute TTL, created atomically (SET NX) to prevent duplicate parent messages from concurrent workers. Redis no longer needs to be durable (no AOF/RDB required) — all durable state is in Postgres.
 
 **Authorization** (`internal/validator`, `internal/approvers`): Users are authorized via OR logic across three configurable sources: direct Slack user IDs, Slack user group membership, and GitHub team membership (Slack user ID -> email -> GitHub login -> team check). The `authorization` config section defines which sources are active. The approvers cache pre-fetches all sources into a single Redis set for fast modal validation; the validator does live checks authoritatively in the worker. For users with private GitHub emails, `identity_overrides` (top-level config field) provides a manual Slack user ID to GitHub login mapping.
 
@@ -87,8 +89,11 @@ deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow 
 | `cmd/bot` | Wiring: loads config/secrets, constructs all components, runs sweeper and queue worker with distributed Redis locks |
 | `cmd/receiver` | Slack Socket Mode receiver: accepts events, validates deploy modal submissions inline, enqueues to Redis Streams. Also runs ECR poller and repo scanner |
 | `cmd/deploy-bot-config` | Standalone CLI for validating `.deploy-bot.json` files |
+| `cmd/migrate-redis-to-postgres` | One-shot 1.x → 2.0 data migration (copies Redis history + pending to Postgres) |
 | `internal/bot` | Slash command handlers, @mention handlers, interaction (button) handlers, modal builders, ECR push handler |
-| `internal/store` | Redis operations: pending deploys, per-app/env locks, history list |
+| `internal/store` | Store facade: pending deploys + history (Postgres-backed), per-app/env locks + thread ts (Redis-backed) |
+| `internal/store/postgres` | Postgres pool, goose migrations, retention ticker, RDS IAM auth |
+| `internal/storetest` | Test helper: shared testcontainer + miniredis for unit tests |
 | `internal/sweeper` | Expires stale deploys on a ticker; reconciles GitHub on startup |
 | `internal/github` | PR creation, merge, close, commenting, commit statuses |
 | `internal/slackclient` | Slack `Poster` interface with rate-limit retry wrapper |
