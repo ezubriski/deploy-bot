@@ -857,13 +857,63 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#monthly-cost-by-tier" class="md-nav__link">
+  <a href="#the-short-version" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Monthly cost by tier
+        The short version
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-breakdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost breakdown
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-youre-paying-for-and-what-youre-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What you're paying for (and what you're not)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What you&#39;re paying for (and what you&#39;re not)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rds-single-az-vs-multi-az" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RDS: single-AZ vs Multi-AZ
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redis-in-cluster-pod-vs-elasticache" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redis: in-cluster pod vs ElastiCache
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -879,10 +929,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sizing-recommendations" class="md-nav__link">
+  <a href="#sizing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Sizing recommendations
+        Sizing
       
     </span>
   </a>
@@ -901,10 +951,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-honest-summary" class="md-nav__link">
+  <a href="#summary" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The honest summary
+        Summary
       
     </span>
   </a>
@@ -932,20 +982,50 @@
 
 
 <h1 id="aws-cost-estimate">AWS Cost Estimate<a class="headerlink" href="#aws-cost-estimate" title="Permanent link">&para;</a></h1>
-<p>Approximate monthly costs for the AWS resources deploy-bot adds on top
-of an existing EKS cluster. All prices are us-east-1, on-demand, as of
-mid-2026. Deploy-bot's data volume is tiny — cost is almost entirely
-instance hours, not usage.</p>
-<h2 id="monthly-cost-by-tier">Monthly cost by tier<a class="headerlink" href="#monthly-cost-by-tier" title="Permanent link">&para;</a></h2>
-<p>The only line items that differ between tiers are the two database
-instances. Everything else is either fixed at a few dollars or rounds
-to zero regardless of volume.</p>
+<p>Approximate costs for the AWS resources deploy-bot adds on top of an
+existing EKS cluster. All prices are us-east-1, on-demand, as of
+mid-2026. Your actual bill will vary with region, reserved-instance
+or savings-plan discounts, negotiated pricing, and how your
+organization allocates shared costs like EKS and NAT Gateways. The
+figures below are based on published list prices and are intended to
+give a reasonable ballpark, not a quote — verify against the
+<a href="https://calculator.aws/">AWS pricing calculator</a> for your specific
+configuration.</p>
+<h2 id="the-short-version">The short version<a class="headerlink" href="#the-short-version" title="Permanent link">&para;</a></h2>
+<p>Deploy-bot's cost is two small database instances. Everything else
+rounds to zero regardless of deploy volume. The question is how much
+availability redundancy you want around those instances.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Standard</th>
+<th>High availability</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Monthly</strong></td>
+<td><strong>~$17</strong></td>
+<td><strong>~$77</strong></td>
+</tr>
+<tr>
+<td><strong>Annual</strong></td>
+<td><strong>~$204</strong></td>
+<td><strong>~$924</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Both configurations run the same code, the same schema, and the same
+features. The difference is what happens during infrastructure
+failures — read on for what that actually means in practice.</p>
+<h2 id="cost-breakdown">Cost breakdown<a class="headerlink" href="#cost-breakdown" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Component</th>
-<th>Dev / Staging</th>
-<th>Production</th>
+<th>Standard</th>
+<th>High availability</th>
 </tr>
 </thead>
 <tbody>
@@ -956,18 +1036,18 @@ to zero regardless of volume.</p>
 </tr>
 <tr>
 <td></td>
-<td>db.t4g.micro, single-AZ, 20GB gp3</td>
-<td>db.t4g.small, Multi-AZ, 20GB gp3</td>
+<td>db.t4g.micro, single-AZ</td>
+<td>db.t4g.small, Multi-AZ</td>
 </tr>
 <tr>
 <td><strong>Redis</strong></td>
-<td><strong>$0</strong></td>
+<td><strong>$0/mo</strong></td>
 <td><strong>$25/mo</strong></td>
 </tr>
 <tr>
 <td></td>
 <td>In-cluster pod</td>
-<td>cache.t4g.micro × 2, Multi-AZ</td>
+<td>ElastiCache cache.t4g.micro × 2, Multi-AZ</td>
 </tr>
 <tr>
 <td>Secrets Manager</td>
@@ -984,23 +1064,94 @@ to zero regardless of volume.</p>
 <td>&lt; $1/mo</td>
 <td>&lt; $1/mo</td>
 </tr>
+</tbody>
+</table>
+<h2 id="what-youre-paying-for-and-what-youre-not">What you're paying for (and what you're not)<a class="headerlink" href="#what-youre-paying-for-and-what-youre-not" title="Permanent link">&para;</a></h2>
+<p>The cost difference between the two columns is entirely about
+<strong>availability during failures</strong> — how quickly the bot resumes after
+an infrastructure event. It is not about data safety, capacity, or
+features. Both columns:</p>
+<ul>
+<li>Store deploy history and pending deploys in Postgres with automated
+  daily backups (included with RDS at no extra cost)</li>
+<li>Run the same bot binary with the same schema</li>
+<li>Handle the same deploy volume (the bot's resource usage is trivial
+  at any realistic scale — see <a href="#why-volume-doesnt-matter">volume</a>)</li>
+</ul>
+<h3 id="rds-single-az-vs-multi-az">RDS: single-AZ vs Multi-AZ<a class="headerlink" href="#rds-single-az-vs-multi-az" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
 <tr>
-<td></td>
-<td></td>
-<td></td>
+<th></th>
+<th>Standard (single-AZ)</th>
+<th>HA (Multi-AZ)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Normal operation</strong></td>
+<td>Identical</td>
+<td>Identical</td>
 </tr>
 <tr>
-<td><strong>Monthly</strong></td>
-<td><strong>~$17</strong></td>
-<td><strong>~$77</strong></td>
+<td><strong>Node failure</strong></td>
+<td>AWS restores automatically from latest backup. Deploys pause for minutes while the instance recovers.</td>
+<td>Automatic failover to standby replica. Deploys pause for ~30 seconds.</td>
 </tr>
 <tr>
-<td><strong>Annual</strong></td>
-<td><strong>~$204</strong></td>
-<td><strong>~$924</strong></td>
+<td><strong>Maintenance window</strong></td>
+<td>Brief downtime during patched restarts (typically seconds, scheduled).</td>
+<td>Patched via failover — zero-downtime maintenance.</td>
+</tr>
+<tr>
+<td><strong>Data loss risk</strong></td>
+<td>Automated daily backups + point-in-time recovery (5-minute RPO). A failure between backups could lose the most recent few minutes of deploy history. In practice this means a small number of history entries — the deploys themselves (GitHub PRs) are unaffected.</td>
+<td>Same backup schedule, but the synchronous standby replica means zero data loss on failover.</td>
 </tr>
 </tbody>
 </table>
+<p>The realistic impact of a single-AZ RDS failure: deploys pause for a
+few minutes, then resume. No PRs are lost. A handful of recent history
+entries might be missing until the next deploy recreates them. The bot
+reconciles against GitHub on startup, so orphaned PRs are cleaned up
+automatically.</p>
+<h3 id="redis-in-cluster-pod-vs-elasticache">Redis: in-cluster pod vs ElastiCache<a class="headerlink" href="#redis-in-cluster-pod-vs-elasticache" title="Permanent link">&para;</a></h3>
+<p>Since 3.0, Redis holds only ephemeral data — event streams, locks,
+caches, and dedupe markers. <strong>No durable state lives in Redis.</strong> This
+means the recovery story for an in-cluster Redis pod is nearly
+identical to ElastiCache:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Standard (in-cluster pod)</th>
+<th>HA (ElastiCache Multi-AZ)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Normal operation</strong></td>
+<td>Identical</td>
+<td>Identical</td>
+</tr>
+<tr>
+<td><strong>Pod/node restart</strong></td>
+<td>Redis restarts in seconds. Streams are empty; Slack retries in-flight events. Locks auto-expire. Caches rebuild on their own.</td>
+<td>ElastiCache failover in ~1-2 minutes. Same recovery path (streams re-deliver, locks expire, caches rebuild).</td>
+</tr>
+<tr>
+<td><strong>Data loss</strong></td>
+<td>Streams only — no deploy history or pending state is affected (those are in Postgres).</td>
+<td>Same — ElastiCache persistence is disabled by default because there's nothing worth persisting.</td>
+</tr>
+</tbody>
+</table>
+<p>The only operational advantage of ElastiCache over an in-cluster pod
+is that ElastiCache survives Kubernetes node failures without waiting
+for pod rescheduling. In practice the difference is seconds vs minutes
+of deploy unavailability.</p>
+<p>An in-cluster Redis pod is a legitimate production choice for
+deploy-bot. It was not before 3.0, when Redis held durable state.</p>
 <h2 id="why-volume-doesnt-matter">Why volume doesn't matter<a class="headerlink" href="#why-volume-doesnt-matter" title="Permanent link">&para;</a></h2>
 <p>Deploy-bot's usage-priced services stay in free tier or round to zero
 at every realistic deploy volume:</p>
@@ -1008,7 +1159,7 @@ at every realistic deploy volume:</p>
 <thead>
 <tr>
 <th>Service</th>
-<th>At 200 deploys/day (high)</th>
+<th>At 200 deploys/day</th>
 <th>Free tier / baseline</th>
 </tr>
 </thead>
@@ -1035,30 +1186,31 @@ at every realistic deploy volume:</p>
 </tr>
 </tbody>
 </table>
-<p>Even at 500+ deploys/day, none of these cross a dollar. The tables
-above show a single cost per tier because the number doesn't change.</p>
-<h2 id="sizing-recommendations">Sizing recommendations<a class="headerlink" href="#sizing-recommendations" title="Permanent link">&para;</a></h2>
+<p>Even at 500+ deploys/day, none of these services cross $1/mo. The
+cost tables above show a single number per tier because deploy volume
+doesn't change it.</p>
+<h2 id="sizing">Sizing<a class="headerlink" href="#sizing" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Component</th>
-<th>Dev / Staging</th>
-<th>Production</th>
+<th>Standard</th>
+<th>High availability</th>
 <th>When to upsize</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>RDS</td>
-<td>db.t4g.micro, single-AZ</td>
-<td>db.t4g.small, Multi-AZ</td>
-<td>Unlikely. 100K deploys/year ≈ 100MB of data, single-digit QPS. Multi-AZ is for availability, not capacity.</td>
+<td>db.t4g.micro, single-AZ, 20GB gp3</td>
+<td>db.t4g.small, Multi-AZ, 20GB gp3</td>
+<td>Unlikely. 100K deploys/year produces ~100MB of data at single-digit QPS.</td>
 </tr>
 <tr>
 <td>Redis</td>
 <td>In-cluster pod</td>
 <td>cache.t4g.micro × 2</td>
-<td>Unlikely. Sub-MB working set (streams + locks + caches). Micro is the smallest ElastiCache offers. Multi-AZ is for pod-failure availability, not durability (Redis is ephemeral).</td>
+<td>Unlikely. Sub-MB working set. Micro is the smallest ElastiCache offers.</td>
 </tr>
 <tr>
 <td>SQS</td>
@@ -1069,14 +1221,14 @@ above show a single cost per tier because the number doesn't change.</p>
 <tr>
 <td>S3 audit</td>
 <td>Glacier lifecycle at 90d</td>
-<td>Object Lock (WORM), Glacier at 90d, access logging</td>
-<td>~70MB/year at 200 deploys/day. Glacier: $0.004/GB/mo.</td>
+<td>Object Lock (WORM), Glacier at 90d</td>
+<td>~70MB/year at 200 deploys/day.</td>
 </tr>
 </tbody>
 </table>
 <h2 id="whats-not-in-this-estimate">What's not in this estimate<a class="headerlink" href="#whats-not-in-this-estimate" title="Permanent link">&para;</a></h2>
-<p>These are shared infrastructure costs that deploy-bot uses but doesn't
-own. Included here so the full picture is visible when budgeting.</p>
+<p>Shared infrastructure costs that deploy-bot uses but doesn't own.
+Included for budgeting visibility.</p>
 <table>
 <thead>
 <tr>
@@ -1088,13 +1240,13 @@ own. Included here so the full picture is visible when budgeting.</p>
 <tbody>
 <tr>
 <td>EKS control plane</td>
-<td>$73/mo</td>
+<td>$73/mo ($876/yr)</td>
 <td>Per-cluster. Assumed shared.</td>
 </tr>
 <tr>
 <td>NAT Gateway</td>
 <td>$32/mo + $0.045/GB</td>
-<td>Per-AZ. Often the largest forgotten line item in any VPC-hosted workload. Not deploy-bot-specific.</td>
+<td>Per-AZ. Often the largest forgotten line item.</td>
 </tr>
 <tr>
 <td>ECR image storage</td>
@@ -1104,15 +1256,52 @@ own. Included here so the full picture is visible when budgeting.</p>
 <tr>
 <td>Data transfer</td>
 <td>~$0</td>
-<td>All traffic is intra-VPC or outbound to AWS APIs. The bot moves KB, not GB. VPC endpoints eliminate the per-GB charge entirely.</td>
+<td>Intra-VPC. VPC endpoints eliminate per-GB charges.</td>
 </tr>
 </tbody>
 </table>
-<h2 id="the-honest-summary">The honest summary<a class="headerlink" href="#the-honest-summary" title="Permanent link">&para;</a></h2>
-<p>Deploy-bot's incremental AWS bill is <strong>~$204/yr in dev, ~$924/yr in
-prod</strong> (~$17/mo and ~$77/mo respectively). The cost is two small
-database instances. Everything else rounds to zero. The number doesn't
-meaningfully change whether you're doing 5 deploys/day or 500.</p>
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Standard</th>
+<th>High availability</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Annual cost</strong></td>
+<td><strong>~$204/yr</strong></td>
+<td><strong>~$924/yr</strong></td>
+</tr>
+<tr>
+<td><strong>RDS failover</strong></td>
+<td>Minutes (auto-restore)</td>
+<td>~30 seconds</td>
+</tr>
+<tr>
+<td><strong>Redis failover</strong></td>
+<td>Seconds (pod restart)</td>
+<td>1-2 minutes (ElastiCache)</td>
+</tr>
+<tr>
+<td><strong>Data loss on failure</strong></td>
+<td>Minutes of recent history (RPO ~5m)</td>
+<td>None (synchronous replica)</td>
+</tr>
+<tr>
+<td><strong>Deploy impact</strong></td>
+<td>Deploys pause briefly, resume on recovery</td>
+<td>Near-zero interruption</td>
+</tr>
+</tbody>
+</table>
+<p>Both options are production-viable. The standard configuration is not
+a dev setup with known gaps — it's a complete deployment with a small,
+well-understood availability trade-off. The choice comes down to
+whether a few minutes of deploy downtime during a rare infrastructure
+event is acceptable for your organization.</p>
 
 
 
