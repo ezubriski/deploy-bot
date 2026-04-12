@@ -3,26 +3,53 @@ package store
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	keyPrefix     = "pending:"
 	lockPrefix    = "lock:"
 	sysLockPrefix = "syslock:"
 	threadPrefix  = "thread:"
-	historyKey    = "history"
-	// HistoryMaxLen is the maximum number of entries kept in the history list.
-	HistoryMaxLen = 100
 )
 
+// DefaultHistoryLimit is the default page size for unbounded history
+// queries. Callers that want the full retained window should pass an
+// explicit larger limit (retention is configurable per install via
+// config.Postgres.RetentionHistory; two years is the default).
+const DefaultHistoryLimit = 100
+
+// Store wraps both backing stores the bot uses: Redis for ephemeral
+// coordination (locks, thread timestamps, sweeper/reconcile leader
+// locks, dedupe markers) and Postgres for durable structured state
+// (deploy history, in-flight pending deploys).
+//
+// Either backing store can be nil in unit tests that don't exercise
+// the methods it fronts: a test that only touches locks can pass
+// nil for pg, and a test that only touches history can pass nil for
+// rdb. The relevant methods will panic with a clear message if
+// called with their required store missing — see the nil checks in
+// each method.
 type Store struct {
 	rdb *redis.Client
+	pg  *pgxpool.Pool
+}
+
+// WithPostgres returns the same Store with its Postgres pool set to
+// pg. Used by production code paths (cmd/bot, cmd/receiver) after
+// constructing the Redis-only Store via New/NewFromSecrets, and by
+// tests that want to exercise history/pending methods via a real
+// testcontainer-backed pool.
+//
+// The pool is not closed by Store; callers own its lifecycle.
+func (s *Store) WithPostgres(pg *pgxpool.Pool) *Store {
+	s.pg = pg
+	return s
 }
 
 // Options configures the Redis connection.
@@ -93,226 +120,429 @@ func (s *Store) Redis() *redis.Client {
 	return s.rdb
 }
 
-func key(prNumber int) string {
-	return fmt.Sprintf("%s%d", keyPrefix, prNumber)
+// Postgres returns the underlying connection pool. Used by the
+// retention ticker and the migration tool, which need direct access
+// for batched DELETEs and schema inspection.
+func (s *Store) Postgres() *pgxpool.Pool {
+	return s.pg
 }
 
+// ErrPendingNotFound is returned by Get/Delete/UpdateState/
+// SetSlackHandle when the requested PR has no row in pending_deploys.
+// Callers use this to distinguish "not our deploy" from infrastructure
+// failure — the former is usually expected (late button clicks, already-
+// handled PRs), the latter warrants an alert.
+var ErrPendingNotFound = errors.New("pending deploy not found")
+
+// pendingColumns lists the pending_deploys columns in the order every
+// SELECT/INSERT/UPDATE in this file uses them. Kept in one place so a
+// schema addition is a one-edit change.
+const pendingColumns = `github_org, github_repo, pr_number, app, environment, tag,
+	requester, requester_id, approver_id, pr_url, slack_channel, slack_message_ts,
+	reason, requested_at, expires_at, state`
+
+// scanPending decodes a single pgx.Row into a PendingDeploy. Shared by
+// Get, GetAll, GetExpired, and GetByEnvApp.
+func scanPending(row pgx.Row, d *PendingDeploy) error {
+	return row.Scan(
+		&d.GitHubOrg, &d.GitHubRepo, &d.PRNumber, &d.App, &d.Environment, &d.Tag,
+		&d.Requester, &d.RequesterID, &d.ApproverID, &d.PRURL, &d.SlackChannel, &d.SlackMessageTS,
+		&d.Reason, &d.RequestedAt, &d.ExpiresAt, &d.State,
+	)
+}
+
+// Set upserts a pending deploy record. The ttl argument is preserved
+// from the old Redis interface but is now computed into an expires_at
+// column rather than applied as a key TTL — see note on expiration
+// handling in GetExpired.
 func (s *Store) Set(ctx context.Context, d *PendingDeploy, ttl time.Duration) error {
-	data, err := json.Marshal(d)
-	if err != nil {
-		return fmt.Errorf("marshal deploy: %w", err)
+	if s.pg == nil {
+		panic("store.Set: postgres pool is nil; construct Store with NewFromSecrets or WithPostgres")
 	}
-	return s.rdb.Set(ctx, key(d.PRNumber), data, ttl).Err()
+	// ExpiresAt on the record wins if the caller populated it
+	// (matching the 1.x semantics where the pipeline set both TTL
+	// and the embedded ExpiresAt field); otherwise derive from the
+	// TTL argument. The column is NOT NULL, so one of the two must
+	// produce a value.
+	expires := d.ExpiresAt
+	if expires.IsZero() {
+		expires = time.Now().Add(ttl)
+	}
+	if d.RequestedAt.IsZero() {
+		d.RequestedAt = time.Now()
+	}
+	state := d.State
+	if state == "" {
+		state = StatePending
+	}
+
+	const q = `INSERT INTO pending_deploys (` + pendingColumns + `)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+	ON CONFLICT (github_org, github_repo, pr_number) DO UPDATE SET
+		app              = EXCLUDED.app,
+		environment      = EXCLUDED.environment,
+		tag              = EXCLUDED.tag,
+		requester        = EXCLUDED.requester,
+		requester_id     = EXCLUDED.requester_id,
+		approver_id      = EXCLUDED.approver_id,
+		pr_url           = EXCLUDED.pr_url,
+		slack_channel    = EXCLUDED.slack_channel,
+		slack_message_ts = EXCLUDED.slack_message_ts,
+		reason           = EXCLUDED.reason,
+		requested_at     = EXCLUDED.requested_at,
+		expires_at       = EXCLUDED.expires_at,
+		state            = EXCLUDED.state
+	`
+	_, err := s.pg.Exec(ctx, q,
+		d.GitHubOrg, d.GitHubRepo, d.PRNumber, d.App, d.Environment, d.Tag,
+		d.Requester, d.RequesterID, d.ApproverID, d.PRURL, d.SlackChannel, d.SlackMessageTS,
+		d.Reason, d.RequestedAt, expires, state,
+	)
+	if err != nil {
+		return fmt.Errorf("store pending: %w", err)
+	}
+	d.ExpiresAt = expires
+	d.State = state
+	return nil
 }
 
+// Get returns the pending deploy for prNumber, or (nil, nil) if no
+// row exists. Non-found is NOT surfaced as an error because the
+// interaction handlers frequently do existence-checks here as the
+// primary signal for "is this a live deploy?".
 func (s *Store) Get(ctx context.Context, prNumber int) (*PendingDeploy, error) {
-	data, err := s.rdb.Get(ctx, key(prNumber)).Bytes()
-	if err == redis.Nil {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get deploy: %w", err)
+	if s.pg == nil {
+		panic("store.Get: postgres pool is nil")
 	}
 	var d PendingDeploy
-	if err := json.Unmarshal(data, &d); err != nil {
-		return nil, fmt.Errorf("unmarshal deploy: %w", err)
+	// Legacy single-repo callers don't thread the github_org/repo
+	// through; match on pr_number alone and return the single row
+	// if it exists. The multi-repo migration story is: each caller
+	// either already knows the org/repo (via config.GitHub.Org/Repo)
+	// or is willing to accept whatever row has that PR number, on
+	// the assumption that multi-repo tenancy is opt-in.
+	const q = `SELECT ` + pendingColumns + ` FROM pending_deploys WHERE pr_number = $1 LIMIT 1`
+	row := s.pg.QueryRow(ctx, q, prNumber)
+	if err := scanPending(row, &d); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get pending: %w", err)
 	}
 	return &d, nil
 }
 
+// Delete removes the pending deploy row for prNumber. No-op and nil
+// error if the row no longer exists.
 func (s *Store) Delete(ctx context.Context, prNumber int) error {
-	return s.rdb.Del(ctx, key(prNumber)).Err()
-}
-
-// SetSlackHandle atomically stores the (channel, message timestamp) pair on
-// the pending deploy record for prNumber, preserving all other fields and
-// the current TTL. Uses WATCH/MULTI so a concurrent writer (e.g. the
-// approval handler transitioning state from pending to merging) is not
-// clobbered by this update.
-//
-// If the record no longer exists (the deploy was already approved,
-// rejected, cancelled, or expired by the time the Slack post completed),
-// this is a no-op rather than an error: the caller is expected to treat
-// a missing handle as "not correlatable" rather than a failure.
-func (s *Store) SetSlackHandle(ctx context.Context, prNumber int, channel, ts string) error {
-	k := key(prNumber)
-	const maxRetries = 5
-	for range maxRetries {
-		err := s.rdb.Watch(ctx, func(tx *redis.Tx) error {
-			data, err := tx.Get(ctx, k).Bytes()
-			if err == redis.Nil {
-				return nil // record gone — no-op
-			}
-			if err != nil {
-				return err
-			}
-			var d PendingDeploy
-			if err := json.Unmarshal(data, &d); err != nil {
-				return fmt.Errorf("unmarshal deploy: %w", err)
-			}
-			d.SlackChannel = channel
-			d.SlackMessageTS = ts
-			newData, err := json.Marshal(&d)
-			if err != nil {
-				return fmt.Errorf("marshal deploy: %w", err)
-			}
-			ttl := time.Until(d.ExpiresAt)
-			if ttl <= 0 {
-				return nil // already expired — no-op
-			}
-			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-				pipe.Set(ctx, k, newData, ttl)
-				return nil
-			})
-			return err
-		}, k)
-		if err == nil {
-			return nil
-		}
-		if err != redis.TxFailedErr {
-			return fmt.Errorf("set slack handle: %w", err)
-		}
-		// WATCH aborted because another writer touched the key; retry.
+	if s.pg == nil {
+		panic("store.Delete: postgres pool is nil")
 	}
-	return fmt.Errorf("set slack handle: %d retries exhausted", maxRetries)
+	const q = `DELETE FROM pending_deploys WHERE pr_number = $1`
+	_, err := s.pg.Exec(ctx, q, prNumber)
+	if err != nil {
+		return fmt.Errorf("delete pending: %w", err)
+	}
+	return nil
 }
 
-func (s *Store) UpdateState(ctx context.Context, prNumber int, state string) error {
-	d, err := s.Get(ctx, prNumber)
+// SetSlackHandle atomically stores the (channel, message timestamp)
+// pair on the pending deploy row for prNumber, preserving all other
+// fields. No-op if the row no longer exists (the deploy was already
+// approved/rejected/expired/cancelled by the time the Slack post
+// completed). Uses a row-level UPDATE so a concurrent writer
+// transitioning state is not clobbered — Postgres's MVCC guarantees
+// the two updates serialize cleanly and neither loses.
+func (s *Store) SetSlackHandle(ctx context.Context, prNumber int, channel, ts string) error {
+	if s.pg == nil {
+		panic("store.SetSlackHandle: postgres pool is nil")
+	}
+	const q = `UPDATE pending_deploys
+	SET slack_channel = $2, slack_message_ts = $3
+	WHERE pr_number = $1`
+	_, err := s.pg.Exec(ctx, q, prNumber, channel, ts)
 	if err != nil {
+		return fmt.Errorf("set slack handle: %w", err)
+	}
+	// No error if zero rows affected — "record gone" is not an error
+	// here, same as the 1.x Redis behaviour.
+	return nil
+}
+
+// UpdateState transitions the pending deploy's state column. Returns
+// ErrPendingNotFound if the row doesn't exist, so callers can
+// distinguish "nothing to update" from infrastructure failure.
+func (s *Store) UpdateState(ctx context.Context, prNumber int, state string) error {
+	if s.pg == nil {
+		panic("store.UpdateState: postgres pool is nil")
+	}
+	const q = `UPDATE pending_deploys SET state = $2 WHERE pr_number = $1`
+	tag, err := s.pg.Exec(ctx, q, prNumber, state)
+	if err != nil {
+		return fmt.Errorf("update state: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("deploy %d: %w", prNumber, ErrPendingNotFound)
+	}
+	return nil
+}
+
+// GetAll returns every pending row, regardless of state. Order is
+// not guaranteed; callers that want newest-first order by requested_at
+// on their own.
+//
+// The 1.x-compatible semantics say "every pending record" — which in
+// Redis meant "every `pending:*` key, some of which may be in
+// StateMerging or StateMerged." Postgres preserves that: we return
+// every row without filtering on state, and callers that only want
+// in-flight ones apply their own state==pending filter.
+func (s *Store) GetAll(ctx context.Context) ([]*PendingDeploy, error) {
+	if s.pg == nil {
+		panic("store.GetAll: postgres pool is nil")
+	}
+	const q = `SELECT ` + pendingColumns + ` FROM pending_deploys`
+	rows, err := s.pg.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list pending: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*PendingDeploy
+	for rows.Next() {
+		d := &PendingDeploy{}
+		if err := scanPending(rows, d); err != nil {
+			return nil, fmt.Errorf("scan pending: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending: %w", err)
+	}
+	return out, nil
+}
+
+// GetExpired returns every pending row (state='pending') whose
+// expires_at is in the past. Used by the sweeper. The partial index
+// `pending_deploys_expires_idx` on (expires_at) WHERE state='pending'
+// makes this a cheap indexed range scan rather than a sequential
+// full-table scan.
+func (s *Store) GetExpired(ctx context.Context) ([]*PendingDeploy, error) {
+	if s.pg == nil {
+		panic("store.GetExpired: postgres pool is nil")
+	}
+	const q = `SELECT ` + pendingColumns + `
+	FROM pending_deploys
+	WHERE state = 'pending' AND expires_at <= NOW()
+	ORDER BY expires_at`
+	rows, err := s.pg.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list expired: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*PendingDeploy
+	for rows.Next() {
+		d := &PendingDeploy{}
+		if err := scanPending(rows, d); err != nil {
+			return nil, fmt.Errorf("scan expired: %w", err)
+		}
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate expired: %w", err)
+	}
+	return out, nil
+}
+
+// GetByEnvApp returns the first in-flight deploy for the given
+// environment and app, or (nil, nil) if none exists. Used to surface
+// the existing PR link when a lock is contested on a new modal
+// submit. Only considers rows with state='pending' — merging/merged
+// rows are mid-completion and not user-visible as "another deploy is
+// in flight."
+func (s *Store) GetByEnvApp(ctx context.Context, env, app string) (*PendingDeploy, error) {
+	if s.pg == nil {
+		panic("store.GetByEnvApp: postgres pool is nil")
+	}
+	const q = `SELECT ` + pendingColumns + `
+	FROM pending_deploys
+	WHERE state = 'pending' AND environment = $1 AND app = $2
+	ORDER BY requested_at DESC
+	LIMIT 1`
+	var d PendingDeploy
+	row := s.pg.QueryRow(ctx, q, env, app)
+	if err := scanPending(row, &d); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get by env/app: %w", err)
+	}
+	return &d, nil
+}
+
+// historyColumns lists the history columns in the fixed order every
+// SELECT/INSERT in this file uses. Kept in one place for the same
+// reason as pendingColumns.
+const historyColumns = `github_org, github_repo, event_type, app, environment, tag,
+	pr_number, pr_url, requester_id, approver_id, completed_at,
+	gitops_commit_sha, slack_channel, slack_message_ts`
+
+// scanHistory decodes a single pgx.Row into a HistoryEntry. pr_number,
+// pr_url, approver_id, gitops_commit_sha, slack_channel, and
+// slack_message_ts are nullable in the schema, so they're scanned
+// through sql.Null* intermediates and transcribed on success.
+func scanHistory(row pgx.Row, e *HistoryEntry) error {
+	var (
+		org, repo, prURL, approverID, sha, slackCh, slackTS *string
+		prNumber                                            *int32
+	)
+	if err := row.Scan(
+		&org, &repo, &e.EventType, &e.App, &e.Environment, &e.Tag,
+		&prNumber, &prURL, &e.RequesterID, &approverID, &e.CompletedAt,
+		&sha, &slackCh, &slackTS,
+	); err != nil {
 		return err
 	}
-	if d == nil {
-		return fmt.Errorf("deploy %d not found", prNumber)
+	if org != nil {
+		e.GitHubOrg = *org
 	}
-	d.State = state
-	ttl := time.Until(d.ExpiresAt)
-	if ttl <= 0 {
-		ttl = time.Minute
+	if repo != nil {
+		e.GitHubRepo = *repo
 	}
-	return s.Set(ctx, d, ttl)
+	if prNumber != nil {
+		e.PRNumber = int(*prNumber)
+	}
+	if prURL != nil {
+		e.PRURL = *prURL
+	}
+	if approverID != nil {
+		e.ApproverID = *approverID
+	}
+	if sha != nil {
+		e.GitopsCommitSHA = *sha
+	}
+	if slackCh != nil {
+		e.SlackChannel = *slackCh
+	}
+	if slackTS != nil {
+		e.SlackMessageTS = *slackTS
+	}
+	return nil
 }
 
-func (s *Store) GetAll(ctx context.Context) ([]*PendingDeploy, error) {
-	keys, err := s.rdb.Keys(ctx, keyPrefix+"*").Result()
-	if err != nil {
-		return nil, fmt.Errorf("list keys: %w", err)
-	}
-	if len(keys) == 0 {
-		return nil, nil
-	}
-	vals, err := s.rdb.MGet(ctx, keys...).Result()
-	if err != nil {
-		return nil, fmt.Errorf("mget deploys: %w", err)
-	}
-	var deploys []*PendingDeploy
-	for _, v := range vals {
-		if v == nil {
-			continue
-		}
-		s, ok := v.(string)
-		if !ok {
-			continue
-		}
-		var d PendingDeploy
-		if err := json.Unmarshal([]byte(s), &d); err != nil {
-			continue
-		}
-		deploys = append(deploys, &d)
-	}
-	return deploys, nil
-}
-
-func (s *Store) GetExpired(ctx context.Context) ([]*PendingDeploy, error) {
-	all, err := s.GetAll(ctx)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now()
-	var expired []*PendingDeploy
-	for _, d := range all {
-		if now.After(d.ExpiresAt) {
-			expired = append(expired, d)
-		}
-	}
-	return expired, nil
-}
-
-// PushHistory prepends a HistoryEntry to the history list and trims it to
-// historyMaxLen entries. Both operations run in a single pipeline.
+// PushHistory inserts a HistoryEntry into the history table. Unlike
+// the 1.x Redis implementation, there's no 100-entry cap — retention
+// is governed by the retention ticker per the configured
+// history_retention duration (default 2 years, floor 390 days).
 func (s *Store) PushHistory(ctx context.Context, e HistoryEntry) error {
-	data, err := json.Marshal(e)
-	if err != nil {
-		return fmt.Errorf("marshal history entry: %w", err)
+	if s.pg == nil {
+		panic("store.PushHistory: postgres pool is nil")
 	}
-	pipe := s.rdb.Pipeline()
-	pipe.LPush(ctx, historyKey, data)
-	pipe.LTrim(ctx, historyKey, 0, HistoryMaxLen-1)
-	_, err = pipe.Exec(ctx)
+	const q = `INSERT INTO history (` + historyColumns + `)
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
+	_, err := s.pg.Exec(ctx, q,
+		nullIfEmpty(e.GitHubOrg), nullIfEmpty(e.GitHubRepo),
+		e.EventType, e.App, e.Environment, e.Tag,
+		nullIfZero(e.PRNumber), nullIfEmpty(e.PRURL),
+		e.RequesterID, nullIfEmpty(e.ApproverID),
+		e.CompletedAt,
+		nullIfEmpty(e.GitopsCommitSHA),
+		nullIfEmpty(e.SlackChannel), nullIfEmpty(e.SlackMessageTS),
+	)
 	if err != nil {
 		return fmt.Errorf("push history: %w", err)
 	}
 	return nil
 }
 
-// GetHistory returns up to limit entries from the history list, newest first.
+// GetHistory returns up to limit rows from history, newest first,
+// unfiltered by app. Backed by the history_completed_at_idx index.
+// limit <= 0 falls back to DefaultHistoryLimit.
 func (s *Store) GetHistory(ctx context.Context, limit int) ([]HistoryEntry, error) {
-	vals, err := s.rdb.LRange(ctx, historyKey, 0, int64(limit-1)).Result()
+	if s.pg == nil {
+		panic("store.GetHistory: postgres pool is nil")
+	}
+	if limit <= 0 {
+		limit = DefaultHistoryLimit
+	}
+	const q = `SELECT ` + historyColumns + `
+	FROM history
+	ORDER BY completed_at DESC
+	LIMIT $1`
+	rows, err := s.pg.Query(ctx, q, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get history: %w", err)
 	}
-	entries := make([]HistoryEntry, 0, len(vals))
-	for _, v := range vals {
+	defer rows.Close()
+
+	out := make([]HistoryEntry, 0, limit)
+	for rows.Next() {
 		var e HistoryEntry
-		if err := json.Unmarshal([]byte(v), &e); err != nil {
-			continue // skip malformed entries
+		if err := scanHistory(rows, &e); err != nil {
+			return nil, fmt.Errorf("scan history: %w", err)
 		}
-		entries = append(entries, e)
+		out = append(out, e)
 	}
-	return entries, nil
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate history: %w", err)
+	}
+	return out, nil
 }
 
-// FindHistoryBySHA returns the most recent history entry whose
-// GitopsCommitSHA matches sha, or nil if no entry in the retained window
-// (HistoryMaxLen) matches. Used by the ArgoCD notification handler to
-// correlate a synced gitops revision back to the deploy that produced it.
+// FindHistoryBySHA returns the single most-recent history entry whose
+// gitops_commit_sha matches sha, or (nil, nil) if none matches.
+// Backed by the partial index history_gitops_sha_idx WHERE NOT NULL,
+// so this is an O(1) lookup instead of the O(N) list scan it was in
+// 1.x. Used by the ArgoCD notification handler to correlate a synced
+// revision back to the deploy that produced it.
 //
-// Returns nil without error when sha is empty — callers often feed this
-// straight from an upstream payload where the field may be absent, and a
-// missing SHA is "not matched", not an infrastructure error.
+// Returns (nil, nil) when sha is empty — callers feed this straight
+// from upstream payloads where the field may be absent, and a missing
+// SHA is "not matched," not infrastructure failure.
 func (s *Store) FindHistoryBySHA(ctx context.Context, sha string) (*HistoryEntry, error) {
 	if sha == "" {
 		return nil, nil
 	}
-	entries, err := s.GetHistory(ctx, HistoryMaxLen)
-	if err != nil {
+	if s.pg == nil {
+		panic("store.FindHistoryBySHA: postgres pool is nil")
+	}
+	const q = `SELECT ` + historyColumns + `
+	FROM history
+	WHERE gitops_commit_sha = $1
+	ORDER BY completed_at DESC
+	LIMIT 1`
+	var e HistoryEntry
+	row := s.pg.QueryRow(ctx, q, sha)
+	if err := scanHistory(row, &e); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("find history by sha: %w", err)
 	}
-	for i := range entries {
-		if entries[i].GitopsCommitSHA == sha {
-			// Copy to a fresh value so the caller cannot mutate the slice's
-			// backing array via the returned pointer.
-			e := entries[i]
-			return &e, nil
-		}
-	}
-	return nil, nil
+	return &e, nil
 }
 
-// GetByEnvApp returns the first pending deploy found for the given environment
-// and app, or nil if none exists. Used to surface the existing PR link when a
-// lock is contested.
-func (s *Store) GetByEnvApp(ctx context.Context, env, app string) (*PendingDeploy, error) {
-	all, err := s.GetAll(ctx)
-	if err != nil {
-		return nil, err
+// nullIfEmpty turns an empty string into a nil *string so Postgres
+// receives SQL NULL rather than ” for nullable text columns. This
+// matters for indexes with WHERE NOT NULL clauses (the gitops_sha
+// partial index in particular) — an empty string would be a distinct
+// non-null value and pollute the index.
+func nullIfEmpty(s string) *string {
+	if s == "" {
+		return nil
 	}
-	for _, d := range all {
-		if d.Environment == env && d.App == app {
-			return d, nil
-		}
+	return &s
+}
+
+// nullIfZero turns a zero int into a nil *int32 for the same reason.
+// Applies to pr_number on history rows where direct-deploy paths may
+// not carry a PR.
+func nullIfZero(n int) *int32 {
+	if n == 0 {
+		return nil
 	}
-	return nil, nil
+	v := int32(n)
+	return &v
 }
 
 // deployLockKey returns the Redis key for a per-app deploy lock scoped to its
@@ -406,15 +636,4 @@ func (s *Store) UpdateThreadTS(ctx context.Context, env, ts string, ttl time.Dur
 // DeleteThreadTS removes the thread timestamp for an environment.
 func (s *Store) DeleteThreadTS(ctx context.Context, env string) error {
 	return s.rdb.Del(ctx, threadPrefix+env).Err()
-}
-
-// PRNumberFromKey extracts the PR number from a Redis key like "pending:123".
-func PRNumberFromKey(k string) (int, bool) {
-	s := strings.TrimPrefix(k, keyPrefix)
-	if s == k {
-		return 0, false
-	}
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err == nil
 }

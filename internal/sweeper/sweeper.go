@@ -50,7 +50,7 @@ func (s *Sweeper) ReconstructHistory(ctx context.Context) {
 			go func(app config.AppConfig) {
 				defer wg.Done()
 				defer func() { <-sem }()
-				commits, err := s.gh.ListDeployCommits(ctx, app.KustomizePath, store.HistoryMaxLen)
+				commits, err := s.gh.ListDeployCommits(ctx, app.KustomizePath, store.DefaultHistoryLimit)
 				if err != nil {
 					s.log.Warn("reconstruct history: list commits",
 						zap.String("app", app.App), zap.Error(err))
@@ -74,8 +74,8 @@ func (s *Sweeper) ReconstructHistory(ctx context.Context) {
 	slices.SortFunc(all, func(a, b github.DeployCommit) int {
 		return a.CommittedAt.Compare(b.CommittedAt)
 	})
-	if len(all) > store.HistoryMaxLen {
-		all = all[len(all)-store.HistoryMaxLen:]
+	if len(all) > store.DefaultHistoryLimit {
+		all = all[len(all)-store.DefaultHistoryLimit:]
 	}
 
 	// Resolve PR info for each commit in parallel; preserve order so the

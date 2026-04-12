@@ -45,6 +45,15 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
+// MigrationsFS returns the embedded migrations filesystem for reuse
+// by test helpers (internal/storetest) that want to apply the same
+// schema to a testcontainer without going through the full Pool
+// construction path. Returning embed.FS by value is fine — it's a
+// slim wrapper around a *embed.filedata pointer and immutable.
+func MigrationsFS() embed.FS {
+	return migrationsFS
+}
+
 // migrationAdvisoryLockID is the key passed to pg_advisory_lock() in
 // Migrate() to serialize concurrent migration attempts from multiple
 // replicas during a rolling restart. Value is a fixed large constant
