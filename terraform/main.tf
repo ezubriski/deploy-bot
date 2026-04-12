@@ -12,6 +12,15 @@ locals {
   create_roles      = var.identity_type == "role" && (local.create_irsa_roles || var.enable_ec2_trust)
   create_users      = var.identity_type == "user"
   elasticache_iam   = var.elasticache_replication_group_arn != ""
+  rds_iam           = var.rds_resource_id != ""
+  rds_connect_arn   = local.rds_iam ? "arn:aws:rds-db:${var.region}:${var.account_id}:dbuser:${var.rds_resource_id}/${var.rds_db_user}" : ""
+}
+
+check "rds_db_user_required" {
+  assert {
+    condition     = !(local.rds_iam && var.rds_db_user == "")
+    error_message = "rds_db_user is required when rds_resource_id is set."
+  }
 }
 
 check "elasticache_user_required" {
