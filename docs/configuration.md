@@ -49,9 +49,10 @@ The bot does not need `slack_app_token` (Socket Mode is receiver-only) or `githu
 kubectl create secret generic deploy-bot-worker-secrets \
   --namespace=deploy-bot \
   --from-literal=secrets.json='{
-    "slack_bot_token": "xoxb-...",
-    "github_token":    "github_pat_...",
-    "redis_addr":      "redis:6379"
+    "slack_bot_token":    "xoxb-...",
+    "github_token":       "github_pat_...",
+    "redis_addr":         "redis:6379",
+    "postgres_password":  "changeme"
   }'
 
 # Receiver secret
@@ -62,7 +63,8 @@ kubectl create secret generic deploy-bot-receiver-secrets \
     "slack_app_token":      "xapp-...",
     "github_token":         "github_pat_...",
     "github_scanner_token": "github_pat_...",
-    "redis_addr":           "redis:6379"
+    "redis_addr":           "redis:6379",
+    "postgres_password":    "changeme"
   }'
 ```
 
@@ -80,7 +82,8 @@ aws secretsmanager create-secret \
     "slack_bot_token": "xoxb-...",
     "github_token":    "github_pat_...",
     "redis_addr":      "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
-    "redis_token":     "your-elasticache-auth-token"
+    "redis_token":     "your-elasticache-auth-token",
+    "postgres_password": "changeme"
   }'
 
 # Receiver secret (password auth)
@@ -92,7 +95,8 @@ aws secretsmanager create-secret \
     "github_token":         "github_pat_...",
     "github_scanner_token": "github_pat_...",
     "redis_addr":           "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
-    "redis_token":          "your-elasticache-auth-token"
+    "redis_token":          "your-elasticache-auth-token",
+    "postgres_password":    "changeme"
   }'
 ```
 
@@ -112,7 +116,8 @@ aws secretsmanager create-secret \
     "redis_addr":                   "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
     "redis_iam_auth":               true,
     "redis_user_id":                "deploy-bot-iam",
-    "redis_replication_group_id":   "deploy-bot"
+    "redis_replication_group_id":   "deploy-bot",
+    "postgres_password":            "changeme"
   }'
 
 # Receiver secret (IAM auth)
@@ -126,7 +131,8 @@ aws secretsmanager create-secret \
     "redis_addr":                   "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
     "redis_iam_auth":               true,
     "redis_user_id":                "deploy-bot-iam",
-    "redis_replication_group_id":   "deploy-bot"
+    "redis_replication_group_id":   "deploy-bot",
+    "postgres_password":            "changeme"
   }'
 ```
 
@@ -364,6 +370,11 @@ Operator-managed apps always take precedence. If an `(app, environment)` pair ex
     "poll_interval": "5m",
     "config_file": ".deploy-bot.json",
     "repo_prefix": ""
+  },
+  "postgres": {
+    "host": "postgres.deploy-bot.svc.cluster.local",
+    "database": "deploy_bot",
+    "user": "deploy_bot"
   },
   "apps": [
     {

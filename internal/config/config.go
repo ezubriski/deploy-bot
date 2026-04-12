@@ -34,7 +34,7 @@ type Config struct {
 	// stream, so existing deployments are unaffected.
 	ArgoCDNotifications ArgoCDNotificationsConfig `json:"argocd_notifications,omitempty"`
 	// Postgres configures the durable store for deploy history and
-	// in-flight pending deploys. Required on 2.0+ — the bot and
+	// in-flight pending deploys. Required on 3.0+ — the bot and
 	// receiver fail to start if this block is missing, invalid, or
 	// Postgres is unreachable. Changes to this section do NOT take
 	// effect on config hot-reload; the config watcher logs a warning

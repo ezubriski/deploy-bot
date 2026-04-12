@@ -1,6 +1,6 @@
 # Postgres Setup
 
-deploy-bot 2.0 requires Postgres for durable storage of deploy history
+deploy-bot 3.0 requires Postgres for durable storage of deploy history
 and in-flight pending deploys. Redis remains required for streams,
 caches, locks, and short-TTL coordination.
 
@@ -86,7 +86,7 @@ no-op migration check. The lock is session-scoped — if the winning
 replica crashes mid-migration, the server releases the lock when the
 connection drops.
 
-## 1.x → 2.0 data migration
+## 2.x → 3.0 data migration
 
 A standalone tool copies existing Redis data to Postgres:
 
@@ -111,7 +111,7 @@ The tool:
 1. Deploy Postgres (container or RDS).
 2. Add `postgres` block to config + secrets.
 3. Run `migrate-redis-to-postgres` once.
-4. Set `auto_migrate: true`, deploy 2.0 bot + receiver.
+4. Set `auto_migrate: true`, deploy 3.0 bot + receiver.
 5. Verify `/deploy history` shows migrated data.
 6. Set `auto_migrate: false` on next config push.
 7. (Optional) Turn off Redis AOF/RDB — Redis no longer needs to be

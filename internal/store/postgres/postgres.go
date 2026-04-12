@@ -1,5 +1,5 @@
 // Package postgres implements the durable-state backing store for
-// deploy-bot 2.0. It holds two tables — `history` (completed deploy
+// deploy-bot 3.0. It holds two tables — `history` (completed deploy
 // events) and `pending_deploys` (in-flight deploys awaiting approval,
 // merge, or expiration) — and provides the connection pool,
 // authentication, and migration invocation that other code in the

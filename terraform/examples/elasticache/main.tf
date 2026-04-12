@@ -5,6 +5,13 @@
 # failover. It is provided as an example only and is not actively
 # maintained. Copy it into your own infrastructure repository and adapt
 # as needed.
+#
+# 3.0+ note: Redis holds only ephemeral data (event streams, locks,
+# caches, dedupe markers). All durable state is in Postgres. The
+# settings here are tuned for AVAILABILITY (Multi-AZ, automatic
+# failover) not DURABILITY (snapshots disabled by default, no AOF).
+# A Redis restart or flush loses in-flight stream events — the bot's
+# dedupe layer and Slack's at-least-once retries handle re-delivery.
 
 terraform {
   required_providers {

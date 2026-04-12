@@ -1,12 +1,13 @@
 # Production Setup
 
-A step-by-step guide for deploying deploy-bot with production-grade infrastructure: IRSA, ElastiCache with IAM auth, WORM-compliant audit logging, encrypted secrets, ECR push-triggered deploys, and repo-sourced app discovery.
+A step-by-step guide for deploying deploy-bot with production-grade infrastructure: IRSA, Postgres (RDS with optional IAM auth), ElastiCache with IAM auth, WORM-compliant audit logging, encrypted secrets, ECR push-triggered deploys, and repo-sourced app discovery.
 
 If you're evaluating the bot, start with the [quickstart](quickstart.md) and come back here when you're ready to harden.
 
 ## Prerequisites
 
 - An EKS cluster with an OIDC provider configured
+- A Postgres instance (RDS, Aurora, or a container for non-prod). See [postgres-setup.md](postgres-setup.md)
 - Terraform, `kubectl`, and the AWS CLI
 - A GitHub organization with a gitops repo
 - Admin access to a Slack workspace
@@ -84,10 +85,16 @@ resource "random_password" "redis_default" {
 This creates an ElastiCache replication group with:
 - IAM authentication (no static passwords for the bot)
 - Encryption in transit (TLS) and at rest (KMS)
-- Multi-AZ automatic failover
-- Automatic snapshots with 7-day retention
+- Multi-AZ automatic failover (for availability — Redis data is ephemeral since 3.0)
+- Snapshots disabled by default (nothing worth snapshotting; all durable state is in Postgres)
 
-### 3b. deploy-bot module
+### 3b. RDS Postgres
+
+Provision an RDS or Aurora Postgres instance for the durable store. The bot needs a database, a user, and network reachability from the EKS pods. IAM auth is optional — password auth (stored in Secrets Manager) is the default.
+
+If using IAM auth, enable it on the RDS instance and note the **DBI resource ID** (visible in the RDS console as "Resource ID", e.g. `db-ABCDE12345FGHIJ67890`). The deploy-bot terraform module wires the `rds-db:connect` IAM permission from that ID.
+
+### 3c. deploy-bot module
 
 Grab your cluster's OIDC provider details:
 
@@ -128,6 +135,10 @@ module "deploy_bot" {
   elasticache_replication_group_arn = module.redis.replication_group_arn
   elasticache_user_arn             = module.redis.iam_user_arn
 
+  # RDS IAM auth (omit if using password auth for Postgres)
+  rds_resource_id = aws_db_instance.deploy_bot.resource_id  # e.g. "db-ABCDE12345"
+  rds_db_user     = "deploy_bot"
+
   tags = {
     Team        = "platform"
     Environment = "production"
@@ -151,7 +162,7 @@ terraform init && terraform apply
 | Resource | Purpose |
 |---|---|
 | 2 IAM roles (IRSA) | Least-privilege bot and receiver identities |
-| 2 managed IAM policies | SecretsManager, ECR, S3, SQS, ElastiCache, KMS |
+| 2 managed IAM policies | SecretsManager, ECR, S3, SQS, ElastiCache, RDS (conditional), KMS |
 | 2 Secrets Manager secrets | Bot and receiver credentials (CMK-encrypted) |
 | S3 audit bucket | WORM (Object Lock, compliance mode, 3-year retention) |
 | S3 access log bucket | Tracks access to the audit bucket |
@@ -174,7 +185,8 @@ aws secretsmanager put-secret-value \
     "redis_addr":                   "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
     "redis_iam_auth":               true,
     "redis_user_id":                "deploy-bot-iam",
-    "redis_replication_group_id":   "deploy-bot"
+    "redis_replication_group_id":   "deploy-bot",
+    "postgres_password":            "changeme"
   }'
 
 # Receiver secret
@@ -189,7 +201,8 @@ aws secretsmanager put-secret-value \
     "redis_addr":                   "deploy-bot.xxxxxx.ng.0001.use1.cache.amazonaws.com:6379",
     "redis_iam_auth":               true,
     "redis_user_id":                "deploy-bot-iam",
-    "redis_replication_group_id":   "deploy-bot"
+    "redis_replication_group_id":   "deploy-bot",
+    "postgres_password":            "changeme"
   }'
 ```
 
@@ -202,10 +215,11 @@ The `redis_user_id` must match the ElastiCache user configured with IAM authenti
 aws secretsmanager put-secret-value \
   --secret-id deploy-bot/bot-secrets \
   --secret-string '{
-    "slack_bot_token": "xoxb-...",
-    "github_token":    "github_pat_...",
-    "redis_addr":      "your-redis:6379",
-    "redis_token":     "your-auth-token"
+    "slack_bot_token":    "xoxb-...",
+    "github_token":       "github_pat_...",
+    "redis_addr":         "your-redis:6379",
+    "redis_token":        "your-auth-token",
+    "postgres_password":  "changeme"
   }'
 
 # Receiver secret
@@ -217,7 +231,8 @@ aws secretsmanager put-secret-value \
     "github_token":         "github_pat_...",
     "github_scanner_token": "github_pat_...",
     "redis_addr":           "your-redis:6379",
-    "redis_token":          "your-auth-token"
+    "redis_token":          "your-auth-token",
+    "postgres_password":    "changeme"
   }'
 ```
 
@@ -252,6 +267,11 @@ See [configuration.md](configuration.md) for all secret fields and auth combinat
   "ecr_auto_deploy": {
     "enabled": true,
     "sqs_queue_url": "<terraform sqs_queue_url output>"
+  },
+  "postgres": {
+    "host": "your-rds-endpoint.region.rds.amazonaws.com",
+    "database": "deploy_bot",
+    "user": "deploy_bot"
   },
   "repo_discovery": {
     "enabled": true,
@@ -348,6 +368,7 @@ kustomize build overlay/ | kubectl apply -f -
 ```
 /deploy help     — command help
 /deploy apps     — verify app config loaded
+/deploy history  — verify Postgres connectivity (empty list is fine on first run)
 ```
 
 Deploy something: `/deploy myapp-prod` → pick a tag → approve → watch the PR merge and Argo CD sync.
@@ -388,6 +409,10 @@ See [naming-conventions.md](naming-conventions.md) for path templates, exemption
 | Separate IAM roles for bot and receiver | Default behavior |
 | Secrets Manager (not env vars or configmaps) | `AWS_SECRET_NAME` set |
 | Secrets encrypted with CMK | `secrets_kms_key_arn` set |
+| Postgres IAM auth (no static database password) | `postgres_iam_auth: true` + `rds_resource_id` in terraform |
+| Postgres encryption in transit (TLS) | `sslmode: require` (default) or `verify-full` |
+| Postgres encryption at rest | RDS default (AES-256) or CMK |
+| History retention floor (390 days, audit compliance) | Enforced at config load; cannot be set lower |
 | ElastiCache IAM auth (no static Redis password) | `redis_iam_auth: true` |
 | ElastiCache encryption in transit (TLS) | Automatic with IAM auth |
 | ElastiCache encryption at rest (KMS) | Set in ElastiCache module |

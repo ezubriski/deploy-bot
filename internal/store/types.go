@@ -14,7 +14,7 @@ type PendingDeploy struct {
 	// key on the pending_deploys Postgres table, so the bot can manage
 	// apps across multiple gitops repos in a single instance without
 	// PR-number collisions. 1.x had a single-repo assumption baked
-	// into its `pending:<pr>` Redis key; 2.0 carries the org/repo on
+	// into its `pending:<pr>` Redis key; 3.0 carries the org/repo on
 	// every row.
 	//
 	// For deploys sourced from the operator `github` config section,
@@ -53,7 +53,7 @@ type PendingDeploy struct {
 type HistoryEntry struct {
 	// GitHubOrg and GitHubRepo identify the gitops repository the
 	// deploy targeted. Populated for every row inserted by 2.0+ code.
-	// The 1.x → 2.0 data migration populates them from the top-level
+	// The 2.x → 3.0 data migration populates them from the top-level
 	// `github` config section since 1.x is single-repo-by-definition.
 	// NULL-tolerant in the schema; required for display and for
 	// future cross-repo filtering.
@@ -67,7 +67,7 @@ type HistoryEntry struct {
 	PRURL       string `json:"pr_url"`
 	// ApproverID is the Slack user ID of whoever clicked Approve
 	// (for event_type='approved') or empty otherwise. 1.x did not
-	// record this field at all; 2.0 adds it because Postgres makes
+	// record this field at all; 3.0 adds it because Postgres makes
 	// structured queries worthwhile and audit consumers asked for it.
 	ApproverID  string    `json:"approver_id,omitempty"`
 	RequesterID string    `json:"requester_id"` // Slack user ID for @mention

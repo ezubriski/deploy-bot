@@ -138,7 +138,7 @@ func main() {
 	log.Info("redis connected")
 
 	// Postgres — durable store for history + pending deploys. Required
-	// on 2.0+; the bot won't start without a reachable instance.
+	// on 3.0+; the bot won't start without a reachable instance.
 	pgPool, err := pgstore.New(ctx, initialCfg.Postgres, secrets, log)
 	if err != nil {
 		log.Fatal("init postgres pool", zap.Error(err))
