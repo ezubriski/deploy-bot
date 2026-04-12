@@ -72,3 +72,8 @@ output "webhook_api_destination_arn" {
   description = "EventBridge API Destination ARN for ECR webhook (empty if webhook disabled)"
   value       = var.ecr_webhook_enabled ? aws_cloudwatch_event_api_destination.ecr_webhook[0].arn : ""
 }
+
+output "rds_connect_arn" {
+  description = "ARN used in the rds-db:connect IAM policy statement (empty if RDS IAM auth not configured). Useful for debugging permission issues."
+  value       = local.rds_connect_arn
+}

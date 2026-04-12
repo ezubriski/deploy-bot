@@ -116,6 +116,18 @@ variable "elasticache_user_arn" {
   default     = ""
 }
 
+variable "rds_resource_id" {
+  description = "DBI resource ID of the RDS instance or Aurora cluster for IAM auth (e.g. db-ABCDE12345 or cluster-ABCDE12345). Leave empty to skip RDS IAM permissions. When set, rds_db_user must also be set."
+  type        = string
+  default     = ""
+}
+
+variable "rds_db_user" {
+  description = "Database user name the bot authenticates as via RDS IAM auth. Required when rds_resource_id is set. Both the bot and receiver use the same DB user."
+  type        = string
+  default     = ""
+}
+
 variable "ecr_events_enabled" {
   description = "Enable EventBridge ECR push event pipeline (SQS queue + EventBridge rule)"
   type        = bool

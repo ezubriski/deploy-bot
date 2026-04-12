@@ -116,6 +116,15 @@ data "aws_iam_policy_document" "bot" {
       ]
     }
   }
+
+  dynamic "statement" {
+    for_each = local.rds_iam ? [1] : []
+    content {
+      sid       = "RDSIAMAuth"
+      actions   = ["rds-db:connect"]
+      resources = [local.rds_connect_arn]
+    }
+  }
 }
 
 resource "aws_iam_policy" "bot" {
