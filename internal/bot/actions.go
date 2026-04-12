@@ -597,6 +597,8 @@ func (b *Bot) handleDeploySubmit(ctx context.Context, callback slack.Interaction
 	expiresAt := time.Now().Add(staleDuration)
 
 	d := &store.PendingDeploy{
+		GitHubOrg:   cfg.GitHub.Org,
+		GitHubRepo:  cfg.GitHub.Repo,
 		App:         appVal,
 		Environment: env,
 		Tag:         tag,

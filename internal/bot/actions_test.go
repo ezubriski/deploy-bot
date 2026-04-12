@@ -323,6 +323,8 @@ func seedPendingDeploy(t *testing.T, st *store.Store, prNumber int) {
 	t.Helper()
 	ctx := context.Background()
 	d := &store.PendingDeploy{
+		GitHubOrg:      "org",
+		GitHubRepo:     "repo",
 		App:            "myapp-prod",
 		Environment:    "prod",
 		Tag:            "v2.0.0",

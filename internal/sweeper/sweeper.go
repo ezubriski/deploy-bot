@@ -184,6 +184,8 @@ func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 		}
 
 		d := &store.PendingDeploy{
+			GitHubOrg:   org,
+			GitHubRepo:  repo,
 			App:         meta.App,
 			Environment: meta.Environment,
 			Tag:         meta.Tag,

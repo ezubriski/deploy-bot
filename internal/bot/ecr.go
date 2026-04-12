@@ -248,6 +248,8 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	expiresAt := time.Now().Add(staleDuration)
 
 	d := &store.PendingDeploy{
+		GitHubOrg:   cfg.GitHub.Org,
+		GitHubRepo:  cfg.GitHub.Repo,
 		App:         evt.App,
 		Environment: env,
 		Tag:         evt.Tag,
