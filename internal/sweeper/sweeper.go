@@ -25,7 +25,7 @@ import (
 // display data after a Redis flush; entries will be missing requester IDs
 // and PR links since those are not derivable from commit messages alone.
 func (s *Sweeper) ReconstructHistory(ctx context.Context) {
-	existing, err := s.store.GetHistory(ctx, 1)
+	existing, err := s.store.GetHistory(ctx, "", 1)
 	if err != nil {
 		s.log.Error("reconstruct history: check existing", zap.Error(err))
 		return
@@ -153,11 +153,12 @@ func (s *Sweeper) ReconcileFromGitHub(ctx context.Context) {
 	staleDuration := cfg.StaleDuration()
 	now := time.Now()
 	recovered := 0
+	org, repo := cfg.GitHub.Org, cfg.GitHub.Repo
 
 	for _, issue := range allIssues {
 		prNumber := issue.GetNumber()
 
-		existing, err := s.store.Get(ctx, prNumber)
+		existing, err := s.store.Get(ctx, org, repo, prNumber)
 		if err != nil {
 			s.log.Error("reconcile: check store", zap.Int("pr", prNumber), zap.Error(err))
 			continue
@@ -290,7 +291,7 @@ func (s *Sweeper) RecoverStuck(ctx context.Context) {
 			}
 			s.warnIfErr("github: remove pending label", s.gh.RemoveLabel(ctx, d.PRNumber, s.cfg.Load().PendingLabel()), zap.Int("pr", d.PRNumber))
 			s.errIfErr("store: release lock", s.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
-			s.errIfErr("store: delete pending", s.store.Delete(ctx, d.PRNumber), zap.Int("pr", d.PRNumber))
+			s.errIfErr("store: delete pending", s.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, d.PRNumber), zap.Int("pr", d.PRNumber))
 			s.log.Info("recovered stuck deploy", zap.Int("pr", d.PRNumber))
 		}
 	}
@@ -337,7 +338,7 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		}()
 		go func() {
 			defer wg.Done()
-			s.errIfErr("store: delete pending", s.store.Delete(ctx, d.PRNumber), zap.Int("pr", d.PRNumber))
+			s.errIfErr("store: delete pending", s.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, d.PRNumber), zap.Int("pr", d.PRNumber))
 		}()
 		go func() {
 			defer wg.Done()

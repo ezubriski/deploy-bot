@@ -170,7 +170,7 @@ func (b *Bot) buildFilteredModalParams(ctx context.Context, cfg *config.Config, 
 
 		if isRollback {
 			// Rollback: source tags from deployment history with deployed dates.
-			entries, histErr := b.store.GetHistory(ctx, 100)
+			entries, histErr := b.store.GetHistory(ctx, fullName, 100)
 			cur, prev, ok := findRollbackEntries(entries, fullName)
 			if histErr == nil && ok {
 				params.RollbackCurrent = cur.Tag
@@ -321,7 +321,8 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 		return
 	}
 
-	d, err := b.store.Get(ctx, prNumber)
+	cfg := b.cfg.Load()
+	d, err := b.store.Get(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber)
 	if err != nil || d == nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Deployment #%d not found.", prNumber))
 		return
@@ -340,8 +341,6 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 			requesterGH = "slack:" + cmd.UserID
 		}
 	}
-
-	cfg := b.cfg.Load()
 
 	var wg sync.WaitGroup
 	wg.Add(8)
@@ -363,7 +362,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	}()
 	go func() {
 		defer wg.Done()
-		b.errIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+		b.errIfErr("store: delete pending", b.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, prNumber), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
@@ -420,14 +419,14 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 		return
 	}
 
-	d, err := b.store.Get(ctx, prNumber)
+	cfg := b.cfg.Load()
+	d, err := b.store.Get(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber)
 	if err != nil || d == nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Deployment #%d not found.", prNumber))
 		return
 	}
 
 	remaining := time.Until(d.ExpiresAt).Round(time.Minute)
-	cfg := b.cfg.Load()
 	approver := slackMention(d.ApproverID)
 	if d.ApproverID == "" {
 		approver = "team"
@@ -445,27 +444,11 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 
 func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilter string) {
 	const defaultLimit = 20
-	const filteredLimit = 100
 
-	limit := defaultLimit
-	if appFilter != "" {
-		limit = filteredLimit
-	}
-
-	entries, err := b.store.GetHistory(ctx, limit)
+	entries, err := b.store.GetHistory(ctx, appFilter, defaultLimit)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to fetch history: %v", err))
 		return
-	}
-
-	if appFilter != "" {
-		var filtered []store.HistoryEntry
-		for _, e := range entries {
-			if e.App == appFilter {
-				filtered = append(filtered, e)
-			}
-		}
-		entries = filtered
 	}
 
 	if len(entries) == 0 {
@@ -555,7 +538,7 @@ func (b *Bot) handleRollback(ctx context.Context, cmd slack.SlashCommand, appNam
 		}
 	}
 
-	entries, err := b.store.GetHistory(ctx, 100)
+	entries, err := b.store.GetHistory(ctx, appName, 100)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to fetch history: %v", err))
 		return

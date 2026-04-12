@@ -93,7 +93,7 @@ func TestPushHistory_OrderingNewestFirst(t *testing.T) {
 		}
 	}
 
-	entries, err := s.GetHistory(ctx, 20)
+	entries, err := s.GetHistory(ctx, "", 20)
 	if err != nil {
 		t.Fatalf("get history: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestGetHistory_Limit(t *testing.T) {
 		})
 	}
 
-	entries, err := s.GetHistory(ctx, 5)
+	entries, err := s.GetHistory(ctx, "", 5)
 	if err != nil {
 		t.Fatalf("get history: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestGetHistory_Empty(t *testing.T) {
 	s := storetest.NewStore(t)
 	ctx := context.Background()
 
-	entries, err := s.GetHistory(ctx, 20)
+	entries, err := s.GetHistory(ctx, "", 20)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestPendingDeploy_RoundTripPreservesSlackHandle(t *testing.T) {
 		t.Fatalf("set deploy: %v", err)
 	}
 
-	got, err := s.Get(ctx, 77)
+	got, err := s.Get(ctx, "org", "repo", 77)
 	if err != nil {
 		t.Fatalf("get deploy: %v", err)
 	}
@@ -218,15 +218,15 @@ func TestSetSlackHandle_PreservesOtherFieldsAndState(t *testing.T) {
 	}
 
 	// Simulate a concurrent approval transition before our write-back.
-	if err := s.UpdateState(ctx, 42, store.StateMerging); err != nil {
+	if err := s.UpdateState(ctx, "org", "repo", 42, store.StateMerging); err != nil {
 		t.Fatalf("concurrent state update: %v", err)
 	}
 
-	if err := s.SetSlackHandle(ctx, 42, "C_DEPLOY", "1700000000.999999"); err != nil {
+	if err := s.SetSlackHandle(ctx, "org", "repo", 42, "C_DEPLOY", "1700000000.999999"); err != nil {
 		t.Fatalf("set slack handle: %v", err)
 	}
 
-	got, err := s.Get(ctx, 42)
+	got, err := s.Get(ctx, "org", "repo", 42)
 	if err != nil || got == nil {
 		t.Fatalf("get deploy: got=%v err=%v", got, err)
 	}
@@ -250,7 +250,7 @@ func TestSetSlackHandle_PreservesOtherFieldsAndState(t *testing.T) {
 func TestSetSlackHandle_NoOpWhenRecordGone(t *testing.T) {
 	s := storetest.NewStore(t)
 	ctx := context.Background()
-	if err := s.SetSlackHandle(ctx, 999, "C_DEPLOY", "1700000000.000000"); err != nil {
+	if err := s.SetSlackHandle(ctx, "org", "repo", 999, "C_DEPLOY", "1700000000.000000"); err != nil {
 		t.Errorf("expected nil error for missing record, got %v", err)
 	}
 }
@@ -264,7 +264,7 @@ func TestUpdateState_NotFoundReturnsErr(t *testing.T) {
 	s := storetest.NewStore(t)
 	ctx := context.Background()
 
-	err := s.UpdateState(ctx, 12345, store.StateMerging)
+	err := s.UpdateState(ctx, "org", "repo", 12345, store.StateMerging)
 	if err == nil {
 		t.Fatal("expected error for missing pending row")
 	}
@@ -301,7 +301,7 @@ func TestHistoryEntry_RoundTripPreservesEnrichmentFields(t *testing.T) {
 		t.Fatalf("push history: %v", err)
 	}
 
-	entries, err := s.GetHistory(ctx, 10)
+	entries, err := s.GetHistory(ctx, "", 10)
 	if err != nil {
 		t.Fatalf("get history: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestPushHistory_AppFilter(t *testing.T) {
 		PRNumber: 3, RequesterID: "U1", CompletedAt: time.Now(),
 	})
 
-	all, err := s.GetHistory(ctx, 10)
+	all, err := s.GetHistory(ctx, "", 10)
 	if err != nil {
 		t.Fatalf("get history: %v", err)
 	}

@@ -106,7 +106,7 @@ func (b *Bot) postArgoCDRollbackPrompt(
 		return
 	}
 
-	history, err := b.store.GetHistory(ctx, 100)
+	history, err := b.store.GetHistory(ctx, entry.App, 100)
 	if err != nil {
 		// History lookup failures are non-fatal: the failure status
 		// message has already posted, and dropping the prompt is safer

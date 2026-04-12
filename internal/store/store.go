@@ -206,23 +206,20 @@ func (s *Store) Set(ctx context.Context, d *PendingDeploy, ttl time.Duration) er
 	return nil
 }
 
-// Get returns the pending deploy for prNumber, or (nil, nil) if no
-// row exists. Non-found is NOT surfaced as an error because the
-// interaction handlers frequently do existence-checks here as the
-// primary signal for "is this a live deploy?".
-func (s *Store) Get(ctx context.Context, prNumber int) (*PendingDeploy, error) {
+// Get returns the pending deploy for the given composite primary key
+// (org, repo, prNumber), or (nil, nil) if no row exists. Non-found
+// is NOT surfaced as an error because the interaction handlers
+// frequently do existence-checks here as the primary signal for "is
+// this a live deploy?".
+func (s *Store) Get(ctx context.Context, org, repo string, prNumber int) (*PendingDeploy, error) {
 	if s.pg == nil {
 		panic("store.Get: postgres pool is nil")
 	}
 	var d PendingDeploy
-	// Legacy single-repo callers don't thread the github_org/repo
-	// through; match on pr_number alone and return the single row
-	// if it exists. The multi-repo migration story is: each caller
-	// either already knows the org/repo (via config.GitHub.Org/Repo)
-	// or is willing to accept whatever row has that PR number, on
-	// the assumption that multi-repo tenancy is opt-in.
-	const q = `SELECT ` + pendingColumns + ` FROM pending_deploys WHERE pr_number = $1 LIMIT 1`
-	row := s.pg.QueryRow(ctx, q, prNumber)
+	const q = `SELECT ` + pendingColumns + `
+		FROM pending_deploys
+		WHERE github_org = $1 AND github_repo = $2 AND pr_number = $3`
+	row := s.pg.QueryRow(ctx, q, org, repo, prNumber)
 	if err := scanPending(row, &d); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -232,14 +229,15 @@ func (s *Store) Get(ctx context.Context, prNumber int) (*PendingDeploy, error) {
 	return &d, nil
 }
 
-// Delete removes the pending deploy row for prNumber. No-op and nil
-// error if the row no longer exists.
-func (s *Store) Delete(ctx context.Context, prNumber int) error {
+// Delete removes the pending deploy row for the given composite
+// primary key. No-op and nil error if the row no longer exists.
+func (s *Store) Delete(ctx context.Context, org, repo string, prNumber int) error {
 	if s.pg == nil {
 		panic("store.Delete: postgres pool is nil")
 	}
-	const q = `DELETE FROM pending_deploys WHERE pr_number = $1`
-	_, err := s.pg.Exec(ctx, q, prNumber)
+	const q = `DELETE FROM pending_deploys
+		WHERE github_org = $1 AND github_repo = $2 AND pr_number = $3`
+	_, err := s.pg.Exec(ctx, q, org, repo, prNumber)
 	if err != nil {
 		return fmt.Errorf("delete pending: %w", err)
 	}
@@ -247,20 +245,21 @@ func (s *Store) Delete(ctx context.Context, prNumber int) error {
 }
 
 // SetSlackHandle atomically stores the (channel, message timestamp)
-// pair on the pending deploy row for prNumber, preserving all other
-// fields. No-op if the row no longer exists (the deploy was already
-// approved/rejected/expired/cancelled by the time the Slack post
-// completed). Uses a row-level UPDATE so a concurrent writer
-// transitioning state is not clobbered — Postgres's MVCC guarantees
-// the two updates serialize cleanly and neither loses.
-func (s *Store) SetSlackHandle(ctx context.Context, prNumber int, channel, ts string) error {
+// pair on the pending deploy row identified by the composite primary
+// key, preserving all other fields. No-op if the row no longer
+// exists (the deploy was already approved/rejected/expired/cancelled
+// by the time the Slack post completed). Uses a row-level UPDATE so
+// a concurrent writer transitioning state is not clobbered —
+// Postgres's MVCC guarantees the two updates serialize cleanly and
+// neither loses.
+func (s *Store) SetSlackHandle(ctx context.Context, org, repo string, prNumber int, channel, ts string) error {
 	if s.pg == nil {
 		panic("store.SetSlackHandle: postgres pool is nil")
 	}
 	const q = `UPDATE pending_deploys
-	SET slack_channel = $2, slack_message_ts = $3
-	WHERE pr_number = $1`
-	_, err := s.pg.Exec(ctx, q, prNumber, channel, ts)
+	SET slack_channel = $4, slack_message_ts = $5
+	WHERE github_org = $1 AND github_repo = $2 AND pr_number = $3`
+	_, err := s.pg.Exec(ctx, q, org, repo, prNumber, channel, ts)
 	if err != nil {
 		return fmt.Errorf("set slack handle: %w", err)
 	}
@@ -272,12 +271,13 @@ func (s *Store) SetSlackHandle(ctx context.Context, prNumber int, channel, ts st
 // UpdateState transitions the pending deploy's state column. Returns
 // ErrPendingNotFound if the row doesn't exist, so callers can
 // distinguish "nothing to update" from infrastructure failure.
-func (s *Store) UpdateState(ctx context.Context, prNumber int, state string) error {
+func (s *Store) UpdateState(ctx context.Context, org, repo string, prNumber int, state string) error {
 	if s.pg == nil {
 		panic("store.UpdateState: postgres pool is nil")
 	}
-	const q = `UPDATE pending_deploys SET state = $2 WHERE pr_number = $1`
-	tag, err := s.pg.Exec(ctx, q, prNumber, state)
+	const q = `UPDATE pending_deploys SET state = $4
+		WHERE github_org = $1 AND github_repo = $2 AND pr_number = $3`
+	tag, err := s.pg.Exec(ctx, q, org, repo, prNumber, state)
 	if err != nil {
 		return fmt.Errorf("update state: %w", err)
 	}
@@ -455,21 +455,40 @@ func (s *Store) PushHistory(ctx context.Context, e HistoryEntry) error {
 	return nil
 }
 
-// GetHistory returns up to limit rows from history, newest first,
-// unfiltered by app. Backed by the history_completed_at_idx index.
+// GetHistory returns up to limit rows from history, newest first.
+// When appFilter is non-empty, only rows matching that app (the
+// composite FullName, e.g. "myapp-dev") are returned — backed by
+// history_app_env_completed_idx. When empty, all rows are returned
+// backed by history_completed_at_idx.
 // limit <= 0 falls back to DefaultHistoryLimit.
-func (s *Store) GetHistory(ctx context.Context, limit int) ([]HistoryEntry, error) {
+func (s *Store) GetHistory(ctx context.Context, appFilter string, limit int) ([]HistoryEntry, error) {
 	if s.pg == nil {
 		panic("store.GetHistory: postgres pool is nil")
 	}
 	if limit <= 0 {
 		limit = DefaultHistoryLimit
 	}
-	const q = `SELECT ` + historyColumns + `
-	FROM history
-	ORDER BY completed_at DESC
-	LIMIT $1`
-	rows, err := s.pg.Query(ctx, q, limit)
+
+	var (
+		q    string
+		args []interface{}
+	)
+	if appFilter != "" {
+		q = `SELECT ` + historyColumns + `
+		FROM history
+		WHERE app = $1
+		ORDER BY completed_at DESC
+		LIMIT $2`
+		args = []interface{}{appFilter, limit}
+	} else {
+		q = `SELECT ` + historyColumns + `
+		FROM history
+		ORDER BY completed_at DESC
+		LIMIT $1`
+		args = []interface{}{limit}
+	}
+
+	rows, err := s.pg.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("get history: %w", err)
 	}

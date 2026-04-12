@@ -316,7 +316,7 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	wg.Wait()
 
 	if slackTS != "" {
-		if err := b.store.SetSlackHandle(ctx, prNumber, slackChannel, slackTS); err != nil {
+		if err := b.store.SetSlackHandle(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber, slackChannel, slackTS); err != nil {
 			b.log.Warn("store: update deploy with slack handle", zap.Error(err))
 		}
 	}

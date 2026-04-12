@@ -444,7 +444,7 @@ func TestHandleApprove_ConflictAutoResolved(t *testing.T) {
 	b.handleApprove(context.Background(), approveCallback(), approveAction())
 
 	// Deploy completes: store entry deleted, lock released.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy deleted after successful merge")
 	}
@@ -485,7 +485,7 @@ func TestHandleApprove_ConflictUnresolvable(t *testing.T) {
 	b.handleApprove(context.Background(), approveCallback(), approveAction())
 
 	// State reset to pending; PR left open.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d == nil {
 		t.Fatal("expected pending deploy to remain after unresolvable conflict")
 	}
@@ -533,7 +533,7 @@ func TestHandleApprove_ConflictRebaseIsNoOp(t *testing.T) {
 	if !prClosed {
 		t.Error("expected PR closed when rebase reveals no-op")
 	}
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy removed after no-op close")
 	}
@@ -590,7 +590,7 @@ func TestHandleDeploySubmit_HappyPath(t *testing.T) {
 	b.handleDeploySubmit(context.Background(), deploySubmitCallback())
 
 	// Pending deploy stored.
-	d, err := st.Get(context.Background(), 1)
+	d, err := st.Get(context.Background(), "org", "repo", 1)
 	if err != nil || d == nil {
 		t.Fatal("expected pending deploy stored")
 	}
@@ -645,7 +645,7 @@ func TestHandleApprove_HappyPath(t *testing.T) {
 	b.handleApprove(context.Background(), approveCallback(), approveAction())
 
 	// Pending deploy deleted.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy deleted after merge")
 	}
@@ -681,7 +681,7 @@ func TestHandleApprove_HappyPath(t *testing.T) {
 	// SHA returned by stubGH.MergePR and the Slack handle seeded on the
 	// pending deploy must be threaded onto the history entry, since
 	// downstream ArgoCD correlation depends on both.
-	entries, _ := st.GetHistory(context.Background(), 10)
+	entries, _ := st.GetHistory(context.Background(), "", 10)
 	if len(entries) == 0 {
 		t.Fatal("expected history entry pushed")
 	}
@@ -738,7 +738,7 @@ func TestHandleRejectSubmit_HappyPath(t *testing.T) {
 	b.handleRejectSubmit(context.Background(), rejectCallback)
 
 	// Pending deploy deleted.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy deleted after reject")
 	}
@@ -774,7 +774,7 @@ func TestHandleRejectSubmit_HappyPath(t *testing.T) {
 	// empty, but the Slack handle seeded on the pending record should
 	// still be copied so a late ArgoCD failure notification can thread
 	// under the original request message.
-	entries, _ := st.GetHistory(context.Background(), 10)
+	entries, _ := st.GetHistory(context.Background(), "", 10)
 	if len(entries) == 0 {
 		t.Fatal("expected history entry pushed")
 	}
@@ -821,7 +821,7 @@ func TestHandleCancel_HappyPath(t *testing.T) {
 	b.handleCancel(context.Background(), cmd, "1")
 
 	// Pending deploy deleted.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy deleted after cancel")
 	}
@@ -854,7 +854,7 @@ func TestHandleCancel_HappyPath(t *testing.T) {
 	}
 
 	// History entry.
-	entries, _ := st.GetHistory(context.Background(), 10)
+	entries, _ := st.GetHistory(context.Background(), "", 10)
 	if len(entries) == 0 {
 		t.Error("expected history entry pushed")
 	} else if entries[0].EventType != audit.EventCancelled {

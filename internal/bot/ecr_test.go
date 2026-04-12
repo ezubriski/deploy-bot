@@ -122,7 +122,7 @@ func TestHandleECRPush_ApprovalRequired(t *testing.T) {
 	}
 
 	// PendingDeploy should be stored.
-	d, err := st.Get(context.Background(), 1)
+	d, err := st.Get(context.Background(), "org", "repo", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestHandleECRPush_ProdGuard(t *testing.T) {
 	}
 
 	// PendingDeploy should be stored (approval-required path).
-	d, err := st.Get(context.Background(), 1)
+	d, err := st.Get(context.Background(), "org", "repo", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestHandleECRPush_AutoDeploy_MergeConflict_RebaseSucceeds(t *testing.T) {
 		t.Errorf("expected 2 merge attempts, got %d", mergeAttempts)
 	}
 	// Should complete successfully — no pending deploy stored.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected no pending deploy after successful rebase+merge")
 	}
