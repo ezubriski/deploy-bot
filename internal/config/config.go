@@ -242,21 +242,17 @@ type PostgresConfig struct {
 	// days is the empirically-observed "audits are done by now"
 	// ceiling and dropping below it would risk deleting data an
 	// auditor was about to ask for.
+	//
+	// pending_deploys has no retention policy: rows are deleted by
+	// the bot on state transition to a terminal event (the matching
+	// record goes into history). Retention is a history-only concern.
 	RetentionHistory string `json:"retention_history,omitempty"`
 
-	// RetentionPendingTerminal is the maximum age of a terminal-
-	// state pending_deploys row (approved/rejected/expired/cancelled)
-	// before it's purged. Terminal rows are kept briefly for
-	// idempotency of late button clicks; 30 days is default, 1 hour
-	// minimum.
-	RetentionPendingTerminal string `json:"retention_pending_terminal,omitempty"`
-
-	// Parsed duration fields, populated by validateStructured() on
-	// success. The getters below return these directly instead of
-	// re-parsing the strings on every call. Unexported so JSON
+	// Parsed duration field populated by validateStructured() on
+	// success. The getter below returns this directly instead of
+	// re-parsing the string on every call. Unexported so JSON
 	// round-trips are unaffected.
-	historyRetention     time.Duration
-	pendingTermRetention time.Duration
+	historyRetention time.Duration
 }
 
 // Postgres retention and default constants. These are deliberately
@@ -275,15 +271,6 @@ const (
 	// they leave retention_history blank. 2 years — comfortably
 	// above the audit floor and cheap to store at deploy-bot scale.
 	defaultPostgresRetentionHistory = 2 * 365 * 24 * time.Hour
-
-	// minPostgresRetentionPendingTerminal is the hard floor on
-	// terminal pending row retention. Not compliance-driven; just
-	// needs to cover the idempotency window for late button clicks
-	// arriving after a state transition.
-	minPostgresRetentionPendingTerminal = time.Hour
-
-	// defaultPostgresRetentionPendingTerminal: 30 days.
-	defaultPostgresRetentionPendingTerminal = 30 * 24 * time.Hour
 
 	// defaultPostgresPort is the standard Postgres listen port.
 	defaultPostgresPort = 5432
@@ -343,20 +330,6 @@ func (p *PostgresConfig) validateStructured() []ValidationError {
 		}
 	}
 
-	p.pendingTermRetention = defaultPostgresRetentionPendingTerminal
-	if p.RetentionPendingTerminal != "" {
-		d, err := time.ParseDuration(p.RetentionPendingTerminal)
-		switch {
-		case err != nil:
-			add("retention_pending_terminal", fmt.Sprintf("invalid duration %q: %v", p.RetentionPendingTerminal, err))
-		case d < minPostgresRetentionPendingTerminal:
-			add("retention_pending_terminal", fmt.Sprintf("must be >= %s, got %s",
-				minPostgresRetentionPendingTerminal, d))
-		default:
-			p.pendingTermRetention = d
-		}
-	}
-
 	return errs
 }
 
@@ -403,16 +376,6 @@ func (p *PostgresConfig) HistoryRetentionDuration() time.Duration {
 		return p.historyRetention
 	}
 	return defaultPostgresRetentionHistory
-}
-
-// PendingTerminalRetentionDuration returns the parsed pending-terminal
-// retention. Populated by validateStructured(); falls back to the
-// default for unvalidated configs.
-func (p *PostgresConfig) PendingTerminalRetentionDuration() time.Duration {
-	if p.pendingTermRetention > 0 {
-		return p.pendingTermRetention
-	}
-	return defaultPostgresRetentionPendingTerminal
 }
 
 // PollIntervalDuration returns the parsed poll interval, defaulting to 30s.
