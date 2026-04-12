@@ -26,6 +26,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
+	pgstore "github.com/ezubriski/deploy-bot/internal/store/postgres"
 	"github.com/ezubriski/deploy-bot/internal/sweeper"
 	"github.com/ezubriski/deploy-bot/internal/validator"
 )
@@ -135,6 +136,33 @@ func main() {
 	}
 	hh.SetHealthy()
 	log.Info("redis connected")
+
+	// Postgres — durable store for history + pending deploys. Required
+	// on 2.0+; the bot won't start without a reachable instance.
+	pgPool, err := pgstore.New(ctx, initialCfg.Postgres, secrets, log)
+	if err != nil {
+		log.Fatal("init postgres pool", zap.Error(err))
+	}
+	defer pgPool.Close()
+	log.Info("waiting for postgres",
+		zap.String("host", initialCfg.Postgres.Host),
+		zap.Int("port", initialCfg.Postgres.PortValue()),
+		zap.String("database", initialCfg.Postgres.Database),
+	)
+	if err := pgPool.WaitFor(ctx, pgstore.DefaultWaitTimeout); err != nil {
+		log.Fatal("postgres not available", zap.Error(err))
+	}
+	log.Info("postgres connected")
+
+	// Migrations: only the bot runs them. Default off; operators flip
+	// auto_migrate on for the duration of an upgrade window that ships
+	// a new migration, then back off. Advisory-locked so only one
+	// replica wins during a rolling restart.
+	if err := pgPool.Migrate(ctx); err != nil {
+		log.Fatal("postgres migrate", zap.Error(err))
+	}
+
+	redisStore.WithPostgres(pgPool.Pool)
 
 	ghHTTP, err := secrets.GitHubHTTPClient(cfgHolder.Load().GitHub.Repo)
 	if err != nil {
@@ -246,6 +274,34 @@ func main() {
 				}
 				if acquired {
 					sw.RunOnce(ctx)
+				}
+			}
+		}
+	}()
+
+	// Retention ticker: purge expired history rows once per day.
+	// Gated by the same Redis sys-lock pattern as the sweeper so only
+	// one replica runs it in a multi-replica deployment.
+	retainer := pgstore.NewRetainer(
+		pgPool.Pool,
+		initialCfg.Postgres.HistoryRetentionDuration(),
+		log,
+	)
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				acquired, err := redisStore.TryLock(ctx, "retention", 25*time.Hour)
+				if err != nil {
+					log.Error("retention lock", zap.Error(err))
+					continue
+				}
+				if acquired {
+					retainer.RunOnce(ctx)
 				}
 			}
 		}
