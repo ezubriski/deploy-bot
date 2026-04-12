@@ -4,8 +4,10 @@ bin/
 /bot
 /receiver
 /deploy-bot-config
+/migrate-redis-to-postgres
 tests/integration/testdata/config.json
 tests/integration/cpu.prof
 .env.integration
 .venv/
 site/
+.claude/

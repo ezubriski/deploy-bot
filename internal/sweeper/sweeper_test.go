@@ -17,18 +17,17 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/config"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/storetest"
 )
 
 // --- helpers ---
 
 func newTestStore(t *testing.T) (*store.Store, *miniredis.Miniredis) {
 	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("start miniredis: %v", err)
-	}
-	t.Cleanup(mr.Close)
-	return store.New(mr.Addr(), ""), mr
+	// Hands back a Store with both in-process miniredis and a
+	// testcontainer-backed Postgres pool. Tests skip cleanly when
+	// no container runtime is available.
+	return storetest.NewStoreWithRedis(t)
 }
 
 func newTestCfgHolder() *config.Holder {
@@ -107,7 +106,7 @@ func TestReconcileFromGitHub_RehydratesUntrackedPRs(t *testing.T) {
 	sw.ReconcileFromGitHub(ctx)
 
 	// PR #2 should now be in Redis.
-	d, err := st.Get(ctx, 2)
+	d, err := st.Get(ctx, "org", "repo", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +126,7 @@ func TestReconcileFromGitHub_RehydratesUntrackedPRs(t *testing.T) {
 	}
 
 	// PR #1 should still be in Redis unchanged.
-	d1, _ := st.Get(ctx, 1)
+	d1, _ := st.Get(ctx, "org", "repo", 1)
 	if d1 == nil || d1.Tag != "v1.0.0" {
 		t.Error("PR #1 should be unchanged")
 	}
@@ -237,7 +236,7 @@ func TestReconstructHistory_PopulatesFromCommits(t *testing.T) {
 	sw := New(st, ghClient, nil, nil, nil, newTestCfgHolder(), zap.NewNop())
 	sw.ReconstructHistory(ctx)
 
-	entries, err := st.GetHistory(ctx, 10)
+	entries, err := st.GetHistory(ctx, "", 10)
 	if err != nil {
 		t.Fatalf("get history: %v", err)
 	}

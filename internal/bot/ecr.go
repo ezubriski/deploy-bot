@@ -248,6 +248,8 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	expiresAt := time.Now().Add(staleDuration)
 
 	d := &store.PendingDeploy{
+		GitHubOrg:   cfg.GitHub.Org,
+		GitHubRepo:  cfg.GitHub.Repo,
 		App:         evt.App,
 		Environment: env,
 		Tag:         evt.Tag,
@@ -316,7 +318,7 @@ func (b *Bot) handleECRApprovalRequest(ctx context.Context, evt queue.ECRPushEve
 	wg.Wait()
 
 	if slackTS != "" {
-		if err := b.store.SetSlackHandle(ctx, prNumber, slackChannel, slackTS); err != nil {
+		if err := b.store.SetSlackHandle(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber, slackChannel, slackTS); err != nil {
 			b.log.Warn("store: update deploy with slack handle", zap.Error(err))
 		}
 	}

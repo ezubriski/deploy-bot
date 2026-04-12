@@ -11,13 +11,14 @@ INTEG_RUN       ?=  # empty = run all; set to -run TestFoo to filter
 
 .DEFAULT_GOAL := build
 
-.PHONY: build build-linux bot receiver deploy-bot-config test test-unit test-pkg test-integ test-integ-single \
+.PHONY: build build-linux bot receiver deploy-bot-config migrate-redis-to-postgres \
+        test test-unit test-pkg test-integ test-integ-single \
         fmt fmt-check lint lint-actions check image push ecr-login release \
         docs-setup docs-serve docs-build docs-deploy clean help
 
 # --- build ---
 
-build: bot receiver deploy-bot-config ## Build all binaries to ./bin
+build: bot receiver deploy-bot-config migrate-redis-to-postgres ## Build all binaries to ./bin
 
 build-linux: ## Build all binaries for linux/amd64 to ./bin (used by image)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(MAKE) build
@@ -30,6 +31,9 @@ receiver: ## Build cmd/receiver -> bin/receiver
 
 deploy-bot-config: ## Build cmd/deploy-bot-config -> bin/deploy-bot-config
 	go build -trimpath -o bin/deploy-bot-config ./cmd/deploy-bot-config
+
+migrate-redis-to-postgres: ## Build 1.x->2.0 data migration tool -> bin/migrate-redis-to-postgres
+	go build -trimpath -o bin/migrate-redis-to-postgres ./cmd/migrate-redis-to-postgres
 
 # --- test ---
 

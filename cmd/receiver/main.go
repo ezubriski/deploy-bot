@@ -32,6 +32,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/reposcanner"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
 	"github.com/ezubriski/deploy-bot/internal/store"
+	pgstore "github.com/ezubriski/deploy-bot/internal/store/postgres"
 )
 
 const healthAddr = ":8080"
@@ -117,6 +118,30 @@ func main() {
 	}
 	hh.SetHealthy()
 	log.Info("redis connected")
+
+	// Postgres — durable store for history + pending deploys. The
+	// receiver needs a pool to read/write pending deploy rows (modal
+	// validation on submit). It does NOT run migrations — that's the
+	// bot's responsibility (see cmd/bot/main.go).
+	pgPool, err := pgstore.New(ctx, cfg.Postgres, secrets, log)
+	if err != nil {
+		log.Fatal("init postgres pool", zap.Error(err))
+	}
+	defer pgPool.Close()
+	log.Info("waiting for postgres",
+		zap.String("host", cfg.Postgres.Host),
+		zap.Int("port", cfg.Postgres.PortValue()),
+		zap.String("database", cfg.Postgres.Database),
+	)
+	if err := pgPool.WaitFor(ctx, pgstore.DefaultWaitTimeout); err != nil {
+		log.Fatal("postgres not available", zap.Error(err))
+	}
+	log.Info("postgres connected",
+		zap.Bool("auto_migrate", cfg.Postgres.AutoMigrate),
+		zap.String("note", "receiver never runs migrations; auto_migrate is logged for operator visibility only"),
+	)
+
+	redisStore.WithPostgres(pgPool.Pool)
 	rdb := redisStore.Redis()
 
 	slackClient := slack.New(secrets.SlackBotToken,

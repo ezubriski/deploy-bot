@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/socketmode"
 	"go.uber.org/zap"
@@ -20,6 +18,7 @@ import (
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/store"
+	"github.com/ezubriski/deploy-bot/internal/storetest"
 	"github.com/ezubriski/deploy-bot/internal/validator"
 )
 
@@ -286,21 +285,18 @@ func (t *trackingGH) MergePR(ctx context.Context, pr int, method string) (string
 
 func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("start miniredis: %v", err)
-	}
-	t.Cleanup(mr.Close)
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	// Construct a Store using its exported constructor with the miniredis addr.
-	s := store.New(mr.Addr(), "")
-	_ = rdb // rdb only used to verify; the store creates its own client
-	return s
+	// storetest.NewStore hands back a Store with both an in-process
+	// miniredis and a testcontainer-backed Postgres pool. Tests here
+	// skip cleanly when no container runtime is available, so
+	// `make test` on a Docker-less dev machine still runs the
+	// remaining in-process suites without failing.
+	return storetest.NewStore(t)
 }
 
 func newTestBot(t *testing.T, gh githubClient, sl *captureSlack, st *store.Store) *Bot {
 	t.Helper()
 	cfg := &config.Config{
+		GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 		Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 		Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 		Apps: []config.AppConfig{
@@ -328,6 +324,8 @@ func seedPendingDeploy(t *testing.T, st *store.Store, prNumber int) {
 	t.Helper()
 	ctx := context.Background()
 	d := &store.PendingDeploy{
+		GitHubOrg:      "org",
+		GitHubRepo:     "repo",
 		App:            "myapp-prod",
 		Environment:    "prod",
 		Tag:            "v2.0.0",
@@ -449,7 +447,7 @@ func TestHandleApprove_ConflictAutoResolved(t *testing.T) {
 	b.handleApprove(context.Background(), approveCallback(), approveAction())
 
 	// Deploy completes: store entry deleted, lock released.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy deleted after successful merge")
 	}
@@ -490,7 +488,7 @@ func TestHandleApprove_ConflictUnresolvable(t *testing.T) {
 	b.handleApprove(context.Background(), approveCallback(), approveAction())
 
 	// State reset to pending; PR left open.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d == nil {
 		t.Fatal("expected pending deploy to remain after unresolvable conflict")
 	}
@@ -538,7 +536,7 @@ func TestHandleApprove_ConflictRebaseIsNoOp(t *testing.T) {
 	if !prClosed {
 		t.Error("expected PR closed when rebase reveals no-op")
 	}
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy removed after no-op close")
 	}
@@ -585,6 +583,7 @@ func TestHandleDeploySubmit_HappyPath(t *testing.T) {
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
 		cfg: config.NewHolder(&config.Config{
+			GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -595,7 +594,7 @@ func TestHandleDeploySubmit_HappyPath(t *testing.T) {
 	b.handleDeploySubmit(context.Background(), deploySubmitCallback())
 
 	// Pending deploy stored.
-	d, err := st.Get(context.Background(), 1)
+	d, err := st.Get(context.Background(), "org", "repo", 1)
 	if err != nil || d == nil {
 		t.Fatal("expected pending deploy stored")
 	}
@@ -638,6 +637,7 @@ func TestHandleApprove_HappyPath(t *testing.T) {
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
 		cfg: config.NewHolder(&config.Config{
+			GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -650,7 +650,7 @@ func TestHandleApprove_HappyPath(t *testing.T) {
 	b.handleApprove(context.Background(), approveCallback(), approveAction())
 
 	// Pending deploy deleted.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy deleted after merge")
 	}
@@ -686,7 +686,7 @@ func TestHandleApprove_HappyPath(t *testing.T) {
 	// SHA returned by stubGH.MergePR and the Slack handle seeded on the
 	// pending deploy must be threaded onto the history entry, since
 	// downstream ArgoCD correlation depends on both.
-	entries, _ := st.GetHistory(context.Background(), 10)
+	entries, _ := st.GetHistory(context.Background(), "", 10)
 	if len(entries) == 0 {
 		t.Fatal("expected history entry pushed")
 	}
@@ -717,6 +717,7 @@ func TestHandleRejectSubmit_HappyPath(t *testing.T) {
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
 		cfg: config.NewHolder(&config.Config{
+			GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -743,7 +744,7 @@ func TestHandleRejectSubmit_HappyPath(t *testing.T) {
 	b.handleRejectSubmit(context.Background(), rejectCallback)
 
 	// Pending deploy deleted.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy deleted after reject")
 	}
@@ -779,7 +780,7 @@ func TestHandleRejectSubmit_HappyPath(t *testing.T) {
 	// empty, but the Slack handle seeded on the pending record should
 	// still be copied so a late ArgoCD failure notification can thread
 	// under the original request message.
-	entries, _ := st.GetHistory(context.Background(), 10)
+	entries, _ := st.GetHistory(context.Background(), "", 10)
 	if len(entries) == 0 {
 		t.Fatal("expected history entry pushed")
 	}
@@ -809,6 +810,7 @@ func TestHandleCancel_HappyPath(t *testing.T) {
 		ecrCache: stubECR{}, validator: stubValidator{}, auditLog: al,
 		metrics: metrics.New(prometheus.NewRegistry()),
 		cfg: config.NewHolder(&config.Config{
+			GitHub:     config.GitHubConfig{Org: "org", Repo: "repo"},
 			Slack:      config.SlackConfig{DeployChannel: "C_DEPLOY"},
 			Deployment: config.DeploymentConfig{MergeMethod: "squash", LockTTL: "5m", StaleDuration: "2h"},
 			Apps:       []config.AppConfig{{App: "myapp", Environment: "prod", KustomizePath: "apps/myapp/kustomization.yaml", TagPattern: ".*"}},
@@ -826,7 +828,7 @@ func TestHandleCancel_HappyPath(t *testing.T) {
 	b.handleCancel(context.Background(), cmd, "1")
 
 	// Pending deploy deleted.
-	d, _ := st.Get(context.Background(), 1)
+	d, _ := st.Get(context.Background(), "org", "repo", 1)
 	if d != nil {
 		t.Error("expected pending deploy deleted after cancel")
 	}
@@ -859,7 +861,7 @@ func TestHandleCancel_HappyPath(t *testing.T) {
 	}
 
 	// History entry.
-	entries, _ := st.GetHistory(context.Background(), 10)
+	entries, _ := st.GetHistory(context.Background(), "", 10)
 	if len(entries) == 0 {
 		t.Error("expected history entry pushed")
 	} else if entries[0].EventType != audit.EventCancelled {

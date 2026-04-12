@@ -32,6 +32,14 @@ func minimalConfig() *Config {
 			StaleDuration: "2h",
 			MergeMethod:   "squash",
 		},
+		// Required in 2.0+ so Load() (called by Holder.Reload) passes
+		// validation. Values are ignored by the holder tests; they
+		// only need to satisfy Validate().
+		Postgres: PostgresConfig{
+			Host:     "localhost",
+			Database: "d",
+			User:     "u",
+		},
 	}
 }
 

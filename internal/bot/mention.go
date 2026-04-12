@@ -177,20 +177,17 @@ func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent
 func (b *Bot) handleMentionHistory(ctx context.Context, evt queue.AppMentionEvent, appFilter string) {
 	const defaultLimit = 10
 
-	entries, err := b.store.GetHistory(ctx, 100)
+	entries, err := b.store.GetHistory(ctx, appFilter, 100)
 	if err != nil {
 		b.replyMention(ctx, evt, fmt.Sprintf("Failed to fetch history: %v", err))
 		return
 	}
 
-	// Filter and limit for channel display.
+	// Limit for channel display.
 	now := time.Now()
 	var lines []string
 	count := 0
 	for _, e := range entries {
-		if appFilter != "" && e.App != appFilter {
-			continue
-		}
 		age := now.Sub(e.CompletedAt).Round(time.Minute)
 		icon := eventIcon(e.EventType)
 		lines = append(lines, fmt.Sprintf(
@@ -291,7 +288,8 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 		return
 	}
 
-	d, err := b.store.Get(ctx, prNumber)
+	cfg := b.cfg.Load()
+	d, err := b.store.Get(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber)
 	if err != nil || d == nil {
 		b.replyMention(ctx, evt, fmt.Sprintf("Deployment #%d not found.", prNumber))
 		return
@@ -328,7 +326,7 @@ func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent
 	}()
 	go func() {
 		defer wg.Done()
-		b.errIfErr("store: delete pending", b.store.Delete(ctx, prNumber), zap.Int("pr", prNumber))
+		b.errIfErr("store: delete pending", b.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, prNumber), zap.Int("pr", prNumber))
 	}()
 	go func() {
 		defer wg.Done()
@@ -383,7 +381,8 @@ func (b *Bot) handleMentionNudge(ctx context.Context, evt queue.AppMentionEvent,
 		return
 	}
 
-	d, err := b.store.Get(ctx, prNumber)
+	cfg := b.cfg.Load()
+	d, err := b.store.Get(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber)
 	if err != nil || d == nil {
 		b.replyMention(ctx, evt, fmt.Sprintf("Deployment #%d not found.", prNumber))
 		return
@@ -520,6 +519,8 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 	expiresAt := time.Now().Add(staleDuration)
 
 	d := &store.PendingDeploy{
+		GitHubOrg:   cfg.GitHub.Org,
+		GitHubRepo:  cfg.GitHub.Repo,
 		App:         appName,
 		Environment: env,
 		Tag:         tag,
@@ -554,7 +555,7 @@ func (b *Bot) handleMentionDeploy(ctx context.Context, evt queue.AppMentionEvent
 		})...,
 	)
 	if slackTS != "" {
-		if err := b.store.SetSlackHandle(ctx, prNumber, slackChannel, slackTS); err != nil {
+		if err := b.store.SetSlackHandle(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber, slackChannel, slackTS); err != nil {
 			b.log.Warn("mention deploy: update deploy with slack handle", zap.Error(err))
 		}
 	}
@@ -595,7 +596,7 @@ func (b *Bot) handleMentionRollback(ctx context.Context, evt queue.AppMentionEve
 		return
 	}
 
-	entries, err := b.store.GetHistory(ctx, 100)
+	entries, err := b.store.GetHistory(ctx, appName, 100)
 	if err != nil {
 		b.replyMentionError(ctx, evt, fmt.Sprintf("Failed to fetch history: %v", err), "")
 		return

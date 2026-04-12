@@ -57,6 +57,26 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ github.actor == 'dependabot[bot]' && 'self-hosted' || 'ubuntu-latest' }}
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: deploy_bot_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d deploy_bot_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # When set, internal/storetest skips testcontainer startup and
+      # connects to this DSN directly — faster and avoids Docker-in-
+      # Docker. The service container above provisions the database;
+      # storetest applies goose migrations on first connect.
+      DEPLOYBOT_TEST_POSTGRES_DSN: "postgres://test:test@localhost:5432/deploy_bot_test?sslmode=disable"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6

@@ -93,6 +93,21 @@ release; they're tracked here so they don't get lost.
   urgent — the `isTransientRolloutDegraded` gate handles the
   observed failure mode for now.
 
+- [ ] **Drop modernc/sqlite from the bot binary.** `internal/store/postgres`
+  imports `github.com/pressly/goose/v3`, whose top-level package registers all
+  dialects via blank imports — which transitively pulls in `modernc.org/sqlite`
+  (a pure-Go sqlite implementation, ~7MB compiled) along with its supporting
+  libraries (`modernc.org/libc`, `mathutil`, `memory`, `remyoudompheng/bigfft`,
+  `dustin/go-humanize`, `mattn/go-isatty`, `ncruces/go-strftime`,
+  `golang.org/x/exp`). We only use the postgres dialect; everything else is
+  dead weight in the shipped binary. Fix: switch `Migrate()` from the global
+  `goose.SetDialect("postgres")` + `goose.UpContext(db, "migrations")` API to
+  `goose.NewProvider(database.DialectPostgres, sqlDB, migrationsFS)`, which
+  registers only the requested dialect and lets the linker drop the rest. The
+  refactor is local to `internal/store/postgres/postgres.go` and is a real
+  change to how migrations are invoked (provider-scoped, not package-global),
+  so it gets its own review pass rather than riding the postgres-2.0 branch.
+
 - [ ] **Disable self-approval by default.** Self-approval (requester == approver)
   should be disabled by default; it's useful for testing but questionable in
   production. When disabled: (1) filter the requesting user out of the approver
