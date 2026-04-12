@@ -13,15 +13,16 @@ to zero regardless of volume.
 
 | Component | Dev / Staging | Production |
 |---|---|---|
-| **RDS Postgres** | **$15** | **$50** |
+| **RDS Postgres** | **$15/mo** | **$50/mo** |
 | | db.t4g.micro, single-AZ, 20GB gp3 | db.t4g.small, Multi-AZ, 20GB gp3 |
-| **Redis** | **$0** | **$25** |
+| **Redis** | **$0** | **$25/mo** |
 | | In-cluster pod | cache.t4g.micro × 2, Multi-AZ |
-| Secrets Manager | $1 | $1 |
-| KMS | $1 | $1 |
-| SQS + EventBridge + S3 audit | < $1 | < $1 |
+| Secrets Manager | $1/mo | $1/mo |
+| KMS | $1/mo | $1/mo |
+| SQS + EventBridge + S3 audit | < $1/mo | < $1/mo |
 | | | |
-| **Total** | **~$17/mo** | **~$77/mo** |
+| **Monthly** | **~$17** | **~$77** |
+| **Annual** | **~$204** | **~$924** |
 
 ## Why volume doesn't matter
 
@@ -61,7 +62,7 @@ own. Included here so the full picture is visible when budgeting.
 
 ## The honest summary
 
-Deploy-bot's incremental AWS bill is **~$17/mo in dev, ~$77/mo in
-prod**. The cost is two small database instances. Everything else
-rounds to zero. The number doesn't meaningfully change whether you're
-doing 5 deploys/day or 500.
+Deploy-bot's incremental AWS bill is **~$204/yr in dev, ~$924/yr in
+prod** (~$17/mo and ~$77/mo respectively). The cost is two small
+database instances. Everything else rounds to zero. The number doesn't
+meaningfully change whether you're doing 5 deploys/day or 500.
