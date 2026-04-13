@@ -42,6 +42,7 @@ type Config struct {
 	// process. See docs/postgres-setup.md for deployment guidance.
 	Postgres      PostgresConfig      `json:"postgres"`
 	RepoDiscovery RepoDiscoveryConfig `json:"repo_discovery,omitempty"`
+	HealthCheck   HealthCheckConfig   `json:"health_check,omitempty"`
 	Apps          []AppConfig         `json:"apps"`
 	// LogLevel sets the minimum severity emitted by zap. Valid values are
 	// "debug", "info", "warn", "error". Defaults to "info" when empty. The
@@ -200,6 +201,79 @@ type ECRAutoDeployConfig struct {
 // reference ConfigMap patch.
 type ArgoCDNotificationsConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
+}
+
+// HealthCheckConfig holds provider-level settings for post-deploy health
+// monitoring. When a provider is configured and an app defines health_checks
+// entries, the bot polls the metrics provider after a successful merge and
+// reports results in the deploy Slack thread. Provider configs are keyed by
+// name; add new provider structs here to extend to Datadog, New Relic, etc.
+type HealthCheckConfig struct {
+	Dynatrace *DynatraceConfig `json:"dynatrace,omitempty"`
+	// PollInterval is the global default polling interval. Per-provider
+	// overrides take precedence. Defaults to "30s".
+	PollInterval string `json:"poll_interval,omitempty"`
+	// PollDuration is the global default monitoring window. Per-provider
+	// overrides take precedence. Defaults to "5m".
+	PollDuration string `json:"poll_duration,omitempty"`
+}
+
+// ConfiguredProviders returns the set of provider names that have a
+// non-nil config block. Used for validation.
+func (h *HealthCheckConfig) ConfiguredProviders() map[string]bool {
+	m := make(map[string]bool)
+	if h.Dynatrace != nil {
+		m[ProviderDynatrace] = true
+	}
+	return m
+}
+
+// PollIntervalDuration returns the global default poll interval.
+func (h *HealthCheckConfig) PollIntervalDuration() time.Duration {
+	if h.PollInterval != "" {
+		if dur, err := time.ParseDuration(h.PollInterval); err == nil && dur > 0 {
+			return dur
+		}
+	}
+	return 30 * time.Second
+}
+
+// PollDurationValue returns the global default poll duration.
+func (h *HealthCheckConfig) PollDurationValue() time.Duration {
+	if h.PollDuration != "" {
+		if dur, err := time.ParseDuration(h.PollDuration); err == nil && dur > 0 {
+			return dur
+		}
+	}
+	return 5 * time.Minute
+}
+
+// Provider name constants.
+const ProviderDynatrace = "dynatrace"
+
+// DynatraceConfig holds connection settings for the Dynatrace Grail
+// (DQL) metrics provider. OAuth2 client credentials (client ID/secret)
+// live in secrets; only the environment URL and auth settings are here.
+// Poll interval/duration are configured at the top-level health_check
+// block since they govern the shared monitoring loop, not a single provider.
+type DynatraceConfig struct {
+	// EnvironmentURL is the base URL of the Dynatrace environment,
+	// e.g. "https://abc12345.apps.dynatrace.com".
+	EnvironmentURL string `json:"environment_url"`
+	// TokenURL is the OAuth2 token endpoint for client credentials auth,
+	// e.g. "https://sso.dynatrace.com/sso/oauth2/token".
+	TokenURL string `json:"token_url"`
+	// Scopes are the OAuth2 scopes requested when fetching a token.
+	// Defaults to ["storage:metrics:read", "storage:events:read"].
+	Scopes []string `json:"scopes,omitempty"`
+}
+
+// EffectiveScopes returns the configured scopes or sensible defaults.
+func (d *DynatraceConfig) EffectiveScopes() []string {
+	if len(d.Scopes) > 0 {
+		return d.Scopes
+	}
+	return []string{"storage:metrics:read", "storage:events:read"}
 }
 
 // PostgresConfig holds connection and operational settings for the
@@ -512,11 +586,48 @@ type AppConfig struct {
 	// AllowProdAutoDeploy guard for production environments.
 	AutoDeploy bool `json:"auto_deploy,omitempty"`
 
+	// HealthChecks, when non-empty, enables post-merge health monitoring
+	// for this app. Each entry targets a configured metrics provider and
+	// specifies a query + threshold. All checks must pass (AND logic);
+	// if any fails at the end of the monitoring window, a rollback
+	// button is offered.
+	HealthChecks []AppHealthCheck `json:"health_checks,omitempty"`
+
 	// SourceRepo is set only for repo-discovered apps (e.g. "org/myapp").
 	// Empty for operator-managed apps. Not serialized to the primary config.
 	SourceRepo string `json:"-"`
 
 	compiledPattern *regexp.Regexp
+}
+
+// AppHealthCheck configures a single health check for an app. Each check
+// targets a specific metrics provider (identified by Provider) and defines
+// a query + threshold. The Provider field determines which top-level
+// provider config (and therefore which querier) is used at runtime.
+type AppHealthCheck struct {
+	// Provider identifies the metrics backend, e.g. "dynatrace".
+	// Must match a configured provider in health_check.providers.
+	Provider string `json:"provider"`
+	// Name is an optional human-readable label for this check, used in
+	// Slack status messages. Defaults to Provider if empty.
+	Name string `json:"name,omitempty"`
+	// Query is the provider-specific query string. For Dynatrace this is
+	// a DQL expression; for future providers it will be their native query
+	// language.
+	Query string `json:"query"`
+	// Threshold is a comparison expression applied to the first numeric
+	// value returned by the query. Supported operators: >, >=, <, <=, ==, !=.
+	// Examples: "> 0.95", "< 500", "== 0".
+	// The check is considered healthy when the expression evaluates to true.
+	Threshold string `json:"threshold"`
+}
+
+// EffectiveName returns Name if set, otherwise Provider.
+func (c *AppHealthCheck) EffectiveName() string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return c.Provider
 }
 
 // FullName returns the composite app name including the environment suffix
@@ -571,6 +682,13 @@ type Secrets struct {
 	// X-Deploybot-Secret header on inbound ArgoCD notification webhooks.
 	// Required (>= 32 chars) when ArgoCDNotifications.Enabled is true.
 	ArgoCDWebhookAPIKey string `json:"argocd_webhook_api_key,omitempty"`
+
+	// DynatraceClientID is the OAuth2 client ID for Dynatrace SSO
+	// authentication. Required when health_check.dynatrace is configured.
+	DynatraceClientID string `json:"dynatrace_client_id,omitempty"`
+	// DynatraceClientSecret is the OAuth2 client secret for Dynatrace
+	// SSO authentication. Required when health_check.dynatrace is configured.
+	DynatraceClientSecret string `json:"dynatrace_client_secret,omitempty"`
 
 	// PostgresPassword is used to authenticate to the durable store
 	// when PostgresIAMAuth is false (the default). Required in that
@@ -716,6 +834,24 @@ func Load(path string) (*Config, error) {
 	if err := cfg.Postgres.Validate(); err != nil {
 		return nil, fmt.Errorf("postgres config: %w", err)
 	}
+	if cfg.HealthCheck.PollInterval != "" {
+		if _, err := time.ParseDuration(cfg.HealthCheck.PollInterval); err != nil {
+			return nil, fmt.Errorf("invalid health_check.poll_interval %q: %w", cfg.HealthCheck.PollInterval, err)
+		}
+	}
+	if cfg.HealthCheck.PollDuration != "" {
+		if _, err := time.ParseDuration(cfg.HealthCheck.PollDuration); err != nil {
+			return nil, fmt.Errorf("invalid health_check.poll_duration %q: %w", cfg.HealthCheck.PollDuration, err)
+		}
+	}
+	if dt := cfg.HealthCheck.Dynatrace; dt != nil {
+		if strings.TrimSpace(dt.EnvironmentURL) == "" {
+			return nil, fmt.Errorf("health_check.dynatrace.environment_url is required")
+		}
+		if strings.TrimSpace(dt.TokenURL) == "" {
+			return nil, fmt.Errorf("health_check.dynatrace.token_url is required")
+		}
+	}
 	if cfg.LogLevel != "" {
 		if _, err := ParseLogLevel(cfg.LogLevel); err != nil {
 			return nil, fmt.Errorf("invalid log_level %q: %w", cfg.LogLevel, err)
@@ -734,6 +870,21 @@ func Load(path string) (*Config, error) {
 		if app.TagPattern != "" {
 			if _, err := regexp.Compile(app.TagPattern); err != nil {
 				return nil, fmt.Errorf("app %q has invalid tag_pattern: %w", app.App, err)
+			}
+		}
+		providers := cfg.HealthCheck.ConfiguredProviders()
+		for j, hc := range app.HealthChecks {
+			if strings.TrimSpace(hc.Provider) == "" {
+				return nil, fmt.Errorf("app %q health_checks[%d].provider is required", app.App, j)
+			}
+			if !providers[hc.Provider] {
+				return nil, fmt.Errorf("app %q health_checks[%d] references provider %q which is not configured in health_check", app.App, j, hc.Provider)
+			}
+			if strings.TrimSpace(hc.Query) == "" {
+				return nil, fmt.Errorf("app %q health_checks[%d].query is required", app.App, j)
+			}
+			if strings.TrimSpace(hc.Threshold) == "" {
+				return nil, fmt.Errorf("app %q health_checks[%d].threshold is required", app.App, j)
 			}
 		}
 		if app.KustomizePath != "" {

@@ -164,7 +164,7 @@ func TestMain(m *testing.M) {
 		fatalf("validator github client: %v", valErr)
 	}
 	val := validator.New(valHTTP, rawSlack, redisStore.Redis(), cfg, log)
-	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m2, cfgHolder, log)
+	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m2, cfgHolder, log, nil)
 
 	// Delete ALL event streams AND their consumer groups from any prior
 	// or concurrent usage. The group must be destroyed explicitly because

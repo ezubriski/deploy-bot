@@ -18,9 +18,11 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/audit"
 	"github.com/ezubriski/deploy-bot/internal/bot"
 	"github.com/ezubriski/deploy-bot/internal/config"
+	"github.com/ezubriski/deploy-bot/internal/dynatrace"
 	"github.com/ezubriski/deploy-bot/internal/ecr"
 	githubPkg "github.com/ezubriski/deploy-bot/internal/github"
 	"github.com/ezubriski/deploy-bot/internal/health"
+	"github.com/ezubriski/deploy-bot/internal/healthcheck"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/observability"
 	"github.com/ezubriski/deploy-bot/internal/queue"
@@ -206,7 +208,27 @@ func main() {
 	// Log prod auto-deploy guard status at startup.
 	logProdAutoDeployGuard(initialCfg, auditLog, log)
 
-	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m, cfgHolder, log)
+	var healthMon *healthcheck.Monitor
+	healthProviders := make(map[string]healthcheck.MetricsQuerier)
+	if dtCfg := initialCfg.HealthCheck.Dynatrace; dtCfg != nil {
+		if secrets.DynatraceClientID == "" || secrets.DynatraceClientSecret == "" {
+			log.Fatal("dynatrace_client_id and dynatrace_client_secret are required when health_check.dynatrace is configured")
+		}
+		dtClient := dynatrace.NewClient(
+			dtCfg.EnvironmentURL, dtCfg.TokenURL,
+			secrets.DynatraceClientID, secrets.DynatraceClientSecret,
+			dtCfg.EffectiveScopes(), log,
+		)
+		healthProviders[config.ProviderDynatrace] = &dynatraceAdapter{dt: dtClient}
+		log.Info("health check: dynatrace provider enabled",
+			zap.String("environment_url", dtCfg.EnvironmentURL),
+		)
+	}
+	if len(healthProviders) > 0 {
+		healthMon = healthcheck.NewMonitor(healthProviders, slackClient, log)
+	}
+
+	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m, cfgHolder, log, healthMon)
 	sw := sweeper.New(redisStore, ghClient, slackClient, auditLog, m, cfgHolder, log)
 
 	config.Watch(ctx, cfgHolder, 30*time.Second, func(newCfg *config.Config) {
@@ -352,4 +374,19 @@ func logProdAutoDeployGuard(cfg *config.Config, auditLog audit.Logger, log *zap.
 			log.Warn("audit log: startup notice", zap.Error(err))
 		}
 	}
+}
+
+// dynatraceAdapter adapts *dynatrace.Client to the healthcheck.MetricsQuerier
+// interface without coupling the two packages to each other.
+type dynatraceAdapter struct {
+	dt *dynatrace.Client
+}
+
+func (a *dynatraceAdapter) Query(ctx context.Context, query string) (*healthcheck.QueryResult, error) {
+	result, err := a.dt.QueryDQL(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	v, ok := result.FirstNumericValue()
+	return &healthcheck.QueryResult{Value: v, OK: ok}, nil
 }
