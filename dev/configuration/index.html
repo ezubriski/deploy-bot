@@ -631,6 +631,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#health-check-post-deploy-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health Check (post-deploy monitoring)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#apps" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1290,6 +1301,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#health-check-post-deploy-monitoring" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Health Check (post-deploy monitoring)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#apps" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1404,6 +1426,16 @@
 <td><code>redis_replication_group_id</code></td>
 <td>When IAM auth</td>
 <td>ElastiCache replication group ID (used to generate presigned auth tokens)</td>
+</tr>
+<tr>
+<td><code>dynatrace_client_id</code></td>
+<td>When Dynatrace configured</td>
+<td>OAuth2 client ID for Dynatrace SSO health checks</td>
+</tr>
+<tr>
+<td><code>dynatrace_client_secret</code></td>
+<td>When Dynatrace configured</td>
+<td>OAuth2 client secret for Dynatrace SSO health checks</td>
 </tr>
 </tbody>
 </table>
@@ -1845,6 +1877,44 @@ as long as the app is granted the <code>users:read.email</code> scope.</p>
 </tbody>
 </table>
 <p>See <a href="../repo-sourced-app-discovery/">repo-sourced-app-discovery.md</a> for the full design.</p>
+<h3 id="health-check-post-deploy-monitoring">Health Check (post-deploy monitoring)<a class="headerlink" href="#health-check-post-deploy-monitoring" title="Permanent link">&para;</a></h3>
+<p>Disabled by default. When a provider is configured and apps define <code>health_checks</code>, the bot polls the metrics provider after a successful merge and reports results in the deploy Slack thread. See <a href="../health-check-monitoring/">health-check-monitoring.md</a> for the full design.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>health_check.poll_interval</code></td>
+<td><code>"30s"</code></td>
+<td>How often to query providers during the monitoring window</td>
+</tr>
+<tr>
+<td><code>health_check.poll_duration</code></td>
+<td><code>"5m"</code></td>
+<td>Total monitoring window after merge</td>
+</tr>
+<tr>
+<td><code>health_check.dynatrace.environment_url</code></td>
+<td></td>
+<td>Base URL of the Dynatrace environment (e.g. <code>https://abc12345.apps.dynatrace.com</code>)</td>
+</tr>
+<tr>
+<td><code>health_check.dynatrace.token_url</code></td>
+<td></td>
+<td>OAuth2 token endpoint for client credentials (e.g. <code>https://sso.dynatrace.com/sso/oauth2/token</code>)</td>
+</tr>
+<tr>
+<td><code>health_check.dynatrace.scopes</code></td>
+<td><code>["storage:metrics:read", "storage:events:read"]</code></td>
+<td>OAuth2 scopes requested when fetching a token</td>
+</tr>
+</tbody>
+</table>
 <h3 id="apps">Apps<a class="headerlink" href="#apps" title="Permanent link">&para;</a></h3>
 <p>Each entry in the <code>apps[]</code> array defines one deployable application. The <code>app</code> field is the base name (e.g. <code>"myapp"</code>); the bot constructs the composite <code>app-environment</code> (e.g. <code>myapp-dev</code>, <code>myapp-prod</code>) internally via <code>FullName()</code>. Each <code>(app, environment)</code> pair must be unique.</p>
 <table>
@@ -1885,6 +1955,11 @@ as long as the app is granted the <code>users:read.email</code> scope.</p>
 <td><code>auto_deploy</code></td>
 <td><code>false</code></td>
 <td>When true, ECR push events for this app deploy automatically without human approval. Subject to <code>allow_prod_auto_deploy</code></td>
+</tr>
+<tr>
+<td><code>health_checks</code></td>
+<td><code>[]</code></td>
+<td>Array of health check definitions. Each entry has <code>provider</code> (required, e.g. <code>"dynatrace"</code>), <code>name</code> (optional label), <code>query</code> (required, provider-specific), and <code>threshold</code> (required, e.g. <code>"&lt; 500"</code>). All checks must pass (AND logic). See <a href="../health-check-monitoring/">health-check-monitoring.md</a></td>
 </tr>
 </tbody>
 </table>
@@ -1981,13 +2056,29 @@ as long as the app is granted the <code>users:read.email</code> scope.</p>
 <span class="w">    </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy_bot&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="nt">&quot;user&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;deploy_bot&quot;</span>
 <span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;health_check&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;poll_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;30s&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;poll_duration&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;5m&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;dynatrace&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;environment_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://abc12345.apps.dynatrace.com&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;token_url&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://sso.dynatrace.com/sso/oauth2/token&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">},</span>
 <span class="w">  </span><span class="nt">&quot;apps&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
 <span class="w">    </span><span class="p">{</span>
 <span class="w">      </span><span class="nt">&quot;app&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;environment&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;prod&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;kustomize_path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;apps/myapp/overlays/prod/kustomization.yaml&quot;</span><span class="p">,</span>
 <span class="w">      </span><span class="nt">&quot;ecr_repo&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;123456789.dkr.ecr.us-east-1.amazonaws.com/myapp&quot;</span><span class="p">,</span>
-<span class="w">      </span><span class="nt">&quot;tag_pattern&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^v[0-9]+\\.[0-9]+\\.[0-9]+$&quot;</span>
+<span class="w">      </span><span class="nt">&quot;tag_pattern&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;^v[0-9]+\\.[0-9]+\\.[0-9]+$&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;health_checks&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">          </span><span class="nt">&quot;provider&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;dynatrace&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;response time&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fetch dt.metrics | filter metric.key == \&quot;service.response.time\&quot; | filter entity.name == \&quot;myapp-prod\&quot; | summarize avg(value)&quot;</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">&quot;threshold&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt; 500&quot;</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">      </span><span class="p">]</span>
 <span class="w">    </span><span class="p">}</span>
 <span class="w">  </span><span class="p">]</span>
 <span class="p">}</span>
