@@ -14,6 +14,7 @@ import (
 
 	"github.com/ezubriski/deploy-bot/internal/audit"
 	githubPkg "github.com/ezubriski/deploy-bot/internal/github"
+	"github.com/ezubriski/deploy-bot/internal/healthcheck"
 	"github.com/ezubriski/deploy-bot/internal/sanitize"
 	"github.com/ezubriski/deploy-bot/internal/store"
 	"github.com/ezubriski/deploy-bot/internal/validator"
@@ -48,6 +49,8 @@ func (b *Bot) handleBlockAction(ctx context.Context, callback slack.InteractionC
 			return
 		case ActionArgoCDRollback:
 			b.handleArgoCDRollbackClick(ctx, callback, action)
+		case healthcheck.ActionHealthRollback:
+			b.handleHealthRollbackClick(ctx, callback, action)
 		case ActionArgoCDDismiss:
 			b.handleArgoCDDismissClick(ctx, callback, action)
 		}
@@ -353,6 +356,8 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	wg.Wait()
 	b.updatePendingGauge(ctx)
 	b.log.Info("deployment approved", zap.Int("pr", prNumber), zap.String("approver", approverIdent.String()))
+
+	b.maybeStartHealthCheck(ctx, cfg, d, prNumber)
 }
 
 // notifyConflictFailed posts to the deploy channel that the merge failed due

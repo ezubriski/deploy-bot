@@ -25,6 +25,8 @@ Set exactly one per component. If both are set, `SECRETS_PATH` takes precedence.
 | `redis_iam_auth` | No | Enable ElastiCache IAM authentication. Requires `redis_user_id` and `redis_replication_group_id`. When true, TLS is enabled automatically |
 | `redis_user_id` | When IAM auth | ElastiCache user ID for IAM authentication |
 | `redis_replication_group_id` | When IAM auth | ElastiCache replication group ID (used to generate presigned auth tokens) |
+| `dynatrace_client_id` | When Dynatrace configured | OAuth2 client ID for Dynatrace SSO health checks |
+| `dynatrace_client_secret` | When Dynatrace configured | OAuth2 client secret for Dynatrace SSO health checks |
 
 The bot does not need `slack_app_token` (Socket Mode is receiver-only) or `github_scanner_token` (repo scanning is receiver-only). Both `github_token` and `github_scanner_token` accept GitHub App installation tokens as a drop-in replacement for PATs -- see [GitHub App Authentication](github-app-auth.md).
 
@@ -254,6 +256,18 @@ Disabled by default. When enabled, the receiver scans GitHub repos for `.deploy-
 
 See [repo-sourced-app-discovery.md](repo-sourced-app-discovery.md) for the full design.
 
+### Health Check (post-deploy monitoring)
+
+Disabled by default. When a provider is configured and apps define `health_checks`, the bot polls the metrics provider after a successful merge and reports results in the deploy Slack thread. See [health-check-monitoring.md](health-check-monitoring.md) for the full design.
+
+| Field | Default | Description |
+|---|---|---|
+| `health_check.poll_interval` | `"30s"` | How often to query providers during the monitoring window |
+| `health_check.poll_duration` | `"5m"` | Total monitoring window after merge |
+| `health_check.dynatrace.environment_url` | | Base URL of the Dynatrace environment (e.g. `https://abc12345.apps.dynatrace.com`) |
+| `health_check.dynatrace.token_url` | | OAuth2 token endpoint for client credentials (e.g. `https://sso.dynatrace.com/sso/oauth2/token`) |
+| `health_check.dynatrace.scopes` | `["storage:metrics:read", "storage:events:read"]` | OAuth2 scopes requested when fetching a token |
+
 ### Apps
 
 Each entry in the `apps[]` array defines one deployable application. The `app` field is the base name (e.g. `"myapp"`); the bot constructs the composite `app-environment` (e.g. `myapp-dev`, `myapp-prod`) internally via `FullName()`. Each `(app, environment)` pair must be unique.
@@ -266,6 +280,7 @@ Each entry in the `apps[]` array defines one deployable application. The `app` f
 | `ecr_repo` | | Full ECR repository URI (e.g. `123456789.dkr.ecr.us-east-1.amazonaws.com/myapp`) |
 | `tag_pattern` | | Regex pattern for valid tags. Tags not matching are rejected by the modal and filtered by the ECR poller |
 | `auto_deploy` | `false` | When true, ECR push events for this app deploy automatically without human approval. Subject to `allow_prod_auto_deploy` |
+| `health_checks` | `[]` | Array of health check definitions. Each entry has `provider` (required, e.g. `"dynatrace"`), `name` (optional label), `query` (required, provider-specific), and `threshold` (required, e.g. `"< 500"`). All checks must pass (AND logic). See [health-check-monitoring.md](health-check-monitoring.md) |
 
 Example:
 
@@ -376,13 +391,29 @@ Operator-managed apps always take precedence. If an `(app, environment)` pair ex
     "database": "deploy_bot",
     "user": "deploy_bot"
   },
+  "health_check": {
+    "poll_interval": "30s",
+    "poll_duration": "5m",
+    "dynatrace": {
+      "environment_url": "https://abc12345.apps.dynatrace.com",
+      "token_url": "https://sso.dynatrace.com/sso/oauth2/token"
+    }
+  },
   "apps": [
     {
       "app": "myapp",
       "environment": "prod",
       "kustomize_path": "apps/myapp/overlays/prod/kustomization.yaml",
       "ecr_repo": "123456789.dkr.ecr.us-east-1.amazonaws.com/myapp",
-      "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+      "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "health_checks": [
+        {
+          "provider": "dynatrace",
+          "name": "response time",
+          "query": "fetch dt.metrics | filter metric.key == \"service.response.time\" | filter entity.name == \"myapp-prod\" | summarize avg(value)",
+          "threshold": "< 500"
+        }
+      ]
     }
   ]
 }

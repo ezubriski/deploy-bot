@@ -10,6 +10,7 @@ import (
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/ecr"
 	githubpkg "github.com/ezubriski/deploy-bot/internal/github"
+	"github.com/ezubriski/deploy-bot/internal/healthcheck"
 	"github.com/ezubriski/deploy-bot/internal/metrics"
 	"github.com/ezubriski/deploy-bot/internal/queue"
 	"github.com/ezubriski/deploy-bot/internal/slackclient"
@@ -52,16 +53,22 @@ type tagCache interface {
 	Tags(app string, n int) []string
 }
 
+// healthMonitor is the subset of *healthcheck.Monitor used by the bot.
+type healthMonitor interface {
+	Run(ctx context.Context, p healthcheck.Params)
+}
+
 type Bot struct {
-	slack     slackclient.Poster
-	store     *store.Store
-	gh        githubClient
-	ecrCache  tagCache
-	validator deployValidator
-	auditLog  audit.Logger
-	metrics   *metrics.Metrics
-	cfg       *config.Holder
-	log       *zap.Logger
+	slack         slackclient.Poster
+	store         *store.Store
+	gh            githubClient
+	ecrCache      tagCache
+	validator     deployValidator
+	auditLog      audit.Logger
+	metrics       *metrics.Metrics
+	cfg           *config.Holder
+	log           *zap.Logger
+	healthMonitor healthMonitor // nil when health checks are not configured
 }
 
 func New(
@@ -74,17 +81,19 @@ func New(
 	m *metrics.Metrics,
 	cfg *config.Holder,
 	log *zap.Logger,
+	healthMon healthMonitor,
 ) *Bot {
 	return &Bot{
-		slack:     slackClient,
-		store:     store,
-		gh:        gh,
-		ecrCache:  ecrCache,
-		validator: validator,
-		auditLog:  auditLog,
-		metrics:   m,
-		cfg:       cfg,
-		log:       log,
+		slack:         slackClient,
+		store:         store,
+		gh:            gh,
+		ecrCache:      ecrCache,
+		validator:     validator,
+		auditLog:      auditLog,
+		metrics:       m,
+		cfg:           cfg,
+		log:           log,
+		healthMonitor: healthMon,
 	}
 }
 

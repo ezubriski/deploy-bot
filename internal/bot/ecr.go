@@ -236,6 +236,15 @@ func (b *Bot) handleECRAutoDeploy(ctx context.Context, evt queue.ECRPushEvent, a
 	wg.Wait()
 	b.updatePendingGauge(ctx)
 	b.log.Info("ecr auto-deploy complete", zap.String("app", evt.App), zap.String("tag", evt.Tag), zap.Int("pr", prNumber))
+
+	// For ECR auto-deploys, synthesize a minimal PendingDeploy to pass
+	// to the health check launcher. SlackChannel/SlackMessageTS are empty
+	// so the health check posts flat to the deploy channel.
+	b.maybeStartHealthCheck(ctx, cfg, &store.PendingDeploy{
+		App:         evt.App,
+		Environment: env,
+		Tag:         evt.Tag,
+	}, prNumber)
 }
 
 // handleECRApprovalRequest stores the pending deploy and posts an approval
