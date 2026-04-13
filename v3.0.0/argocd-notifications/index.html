@@ -1,0 +1,1492 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Approval-gated Kubernetes deployments from Slack">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>ArgoCD Notifications Integration - deploy-bot</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#argocd-notifications-integration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="deploy-bot" class="md-header__button md-logo" aria-label="deploy-bot" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            deploy-bot
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              ArgoCD Notifications Integration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ezubriski/deploy-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ezubriski/deploy-bot
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="deploy-bot" class="md-nav__button md-logo" aria-label="deploy-bot" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    deploy-bot
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ezubriski/deploy-bot" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ezubriski/deploy-bot
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../production-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Production Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ecr-push-triggered-deploys/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ECR Push-Triggered Deploys
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../repo-sourced-app-discovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Repo-Sourced App Discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../naming-conventions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Naming Conventions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../github-app-auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub App Authentication
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../redis-resilience/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Redis Resilience
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../merge-conflict-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Merge Conflict Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../no-op-deploy-handling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    No-Op Deploy Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../integration-test-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Integration Test Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#correlation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Correlation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#late-arriving-notifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Late-arriving notifications
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rollback-prompt-phase-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rollback prompt (phase 4)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#resource-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resource detail
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dedupe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dedupe
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#configjson" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        config.json
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#argocd-side-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ArgoCD-side setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="ArgoCD-side setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#subscribing-an-application" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subscribing an Application
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#webhook-payload-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Webhook payload shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Future work
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gotchas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gotchas
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Gotchas">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#one-template-per-trigger" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        One template per trigger
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#retrywaitmin-retrywaitmax-crash-the-controller" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        retryWaitMin / retryWaitMax crash the controller
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="argocd-notifications-integration">ArgoCD Notifications Integration<a class="headerlink" href="#argocd-notifications-integration" title="Permanent link">&para;</a></h1>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>deploy-bot can optionally subscribe to lifecycle notifications from
+<a href="https://argo-cd.readthedocs.io/en/stable/operator-manual/notifications/">Argo CD's notifications controller</a>
+for the apps it manages. The goal is <strong>not</strong> to be a generic ArgoCD message
+forwarder — it's to surface deploy outcomes that should change human
+behaviour, and to suggest actions (rollback) where the bot can help.</p>
+<p>The current scope:</p>
+<table>
+<thead>
+<tr>
+<th>Argo trigger</th>
+<th>What the bot does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>on-sync-succeeded</code></td>
+<td>Quiet threaded reply under the original deploy message: "synced and healthy"</td>
+</tr>
+<tr>
+<td><code>on-sync-failed</code></td>
+<td><strong>Top-level alarming message</strong> with failing-resource detail, plus a separate rollback-prompt message with <code>[Roll back]</code> / <code>[Dismiss]</code> buttons</td>
+</tr>
+<tr>
+<td><code>on-health-degraded</code></td>
+<td>Same as <code>on-sync-failed</code></td>
+</tr>
+<tr>
+<td><code>on-sync-running</code></td>
+<td><em>Subscribed but currently dropped.</em> See "Future work" below</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><strong>Phase 4 status (this commit):</strong> alongside every phase-3 failure status
+message, the bot now posts a <strong>separate top-level "suggested action"
+message</strong> carrying <code>[Roll back]</code> and <code>[Dismiss]</code> buttons. The rollback
+target is the previous known-good tag for the same app/env, resolved
+from deploy history at post time and baked into the button payload so
+clicks stay deterministic. Late-arriving failures (deploy &gt; 2h old) and
+first-ever deploys (no prior approved history entry) suppress the
+prompt entirely — the status message still lands.</p>
+<p><strong>Buttons:</strong></p>
+<ul>
+<li><code>[Roll back]</code> opens the standard deploy approval modal in rollback
+  mode with the app, environment, and previous tag pre-filled. The
+  submission goes through the normal approval flow, so the usual
+  per-app lock, tag validation, and approver authorization apply.</li>
+<li><code>[Dismiss]</code> replaces the prompt buttons in place with a
+  ":no_entry_sign: <em>Dismissed</em> by @user" line. Only members of the
+  authorized team can dismiss — other users get an ephemeral refusal
+  and the prompt stays clickable.</li>
+</ul>
+</blockquote>
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>ArgoCD app  ─►  argocd-notifications-controller  ─►  POST /v1/webhooks/argocd
+                                                              │
+                                                              ▼
+                                                       receiver (auth,
+                                                       parse, dedupe)
+                                                              │
+                                                              ▼
+                                                   argocd:events Redis stream
+                                                              │
+                                                              ▼
+                                                   worker (correlate by
+                                                   gitops SHA, post Slack)
+</code></pre></div>
+<p>The receiver endpoint is mounted on the existing health-server mux at
+<code>:8080/v1/webhooks/argocd</code>. It mirrors the ECR webhook in shape: shared-secret
+header auth, 1 MiB body limit, fail-closed on Redis dedupe errors, fail-soft
+on stream-write errors (the in-memory buffer absorbs them).</p>
+<h3 id="correlation">Correlation<a class="headerlink" href="#correlation" title="Permanent link">&para;</a></h3>
+<p>ArgoCD's notification carries the <strong>gitops repo commit SHA</strong>
+(<code>.app.status.operationState.syncResult.revision</code>). deploy-bot persists the
+same SHA on every <code>HistoryEntry</code> (since #47 / phase 1) when it merges a deploy
+PR. The worker matches on that SHA via <code>store.FindHistoryBySHA</code> to find the
+originating deploy and the Slack message it posted, so follow-up
+notifications can post in the right context.</p>
+<p>No annotation or naming convention on the ArgoCD <code>Application</code> is required —
+correlation is purely by SHA. If a notification arrives for a SHA the bot has
+no history entry for (e.g. a deploy made via another tool, or an entry that
+has aged out of the 100-entry retained window), it is logged at info level
+and dropped. The whole value proposition of the handler is "deploy-bot
+knows who deployed what" — without a matching history entry there's nothing
+actionable to say.</p>
+<h3 id="late-arriving-notifications">Late-arriving notifications<a class="headerlink" href="#late-arriving-notifications" title="Permanent link">&para;</a></h3>
+<p>If the matched history entry's <code>CompletedAt</code> is more than <strong>2 hours</strong> ago
+when a <code>sync-failed</code> or <code>health-degraded</code> notification arrives, the handler
+re-frames the message: no siren emojis, no ALL-CAPS banner, and an
+":information_source: <em>This deploy is more than 2 hours old. The current
+failure may not be caused by this deploy — investigate before rolling back.</em>"
+note. The rationale (from the planning discussion): a sync that was healthy
+for hours and then degrades is almost certainly a runtime issue, not a
+bad deploy, and rolling back a hours-old stable deploy is rarely the right
+first response.</p>
+<h3 id="rollback-prompt-phase-4">Rollback prompt (phase 4)<a class="headerlink" href="#rollback-prompt-phase-4" title="Permanent link">&para;</a></h3>
+<p>The rollback target is resolved from deploy history at prompt-post time,
+not at click time. The handler scans history newest-first for the most
+recent <code>approved</code> entry for the same composite <code>app-env</code> FullName whose
+<code>CompletedAt</code> is <strong>strictly before</strong> the failing deploy's <code>CompletedAt</code>,
+and embeds the resulting tag in the button's JSON payload. This handles
+the race where a newer deploy has already completed by the time an
+ArgoCD notification arrives: we still want to roll back past the
+failing deploy, not past an unrelated newer one.</p>
+<p>Suppression conditions (logged at info level, no prompt posted):</p>
+<ul>
+<li><strong>Late arrival</strong> (failing deploy &gt; <code>lateArrivalThreshold</code>, default 2h).
+  A hours-old deploy that has been healthy for hours is almost never
+  the right thing to roll back.</li>
+<li><strong>No prior approved history entry</strong> for this app/env. This is the
+  first-ever deploy, so there is no known-good tag to offer.</li>
+<li><strong>History lookup failure</strong>. Redis blip during the notification
+  handler — the status message has already posted, and dropping the
+  prompt is safer than offering a <code>[Roll back]</code> button that can't
+  resolve its target.</li>
+</ul>
+<p>Authorization:</p>
+<ul>
+<li><strong><code>[Roll back]</code></strong> requires the clicker to be a member of the
+  authorized team (same bar as <code>/deploy rollback</code>). On click, the
+  standard deploy modal opens in rollback mode — the subsequent
+  submit, approval, and merge all go through the normal flow.</li>
+<li><strong><code>[Dismiss]</code></strong> also requires team membership. On click the prompt
+  message is updated in place: buttons are replaced with a
+  ":no_entry_sign: <em>Dismissed</em> by @user" line. The underlying failure
+  status message is left untouched.</li>
+</ul>
+<h3 id="resource-detail">Resource detail<a class="headerlink" href="#resource-detail" title="Permanent link">&para;</a></h3>
+<p>The webhook template includes <code>.app.status.resources</code> as a JSON array in the
+payload. On <code>sync-failed</code> / <code>health-degraded</code> the handler parses this,
+filters to entries with a non-empty non-<code>Healthy</code> <code>healthStatus</code>, and
+renders the first 10 as a bullet list in the alert. Resources with no
+health status (ConfigMaps, Secrets, Services) are filtered out — they
+don't report health and would just be visual noise. Overflow beyond 10
+renders as "<em>…and N more</em>".</p>
+<h3 id="dedupe">Dedupe<a class="headerlink" href="#dedupe" title="Permanent link">&para;</a></h3>
+<p>Each <code>(argocd_app, gitops_sha, trigger)</code> tuple is deduped through a Redis
+<code>SET NX</code> with a 24h TTL. This handles three sources of duplication:</p>
+<ol>
+<li><strong>ArgoCD controller restart</strong>: notification state is in-process, so a
+   pod restart can replay recent events.</li>
+<li><strong>Our own at-least-once stream semantics</strong>: <code>XAUTOCLAIM</code> reclaims stuck
+   messages and would otherwise re-deliver them.</li>
+<li><strong>Multi-replica receivers</strong>: a future HA receiver pair would otherwise
+   double-process if the upstream balanced them.</li>
+</ol>
+<p>A 24h marker is long enough to absorb all three without growing the dedupe
+key set unboundedly (the entries naturally TTL out).</p>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<h3 id="configjson"><code>config.json</code><a class="headerlink" href="#configjson" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;argocd_notifications&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>That's the entire config surface for now. When <code>enabled</code> is <code>false</code> (the
+default), the receiver mounts no handler and consumes no Redis stream — the
+behaviour is identical to a standard install.</p>
+<h3 id="secrets">Secrets<a class="headerlink" href="#secrets" title="Permanent link">&para;</a></h3>
+<p>Add to the receiver's secrets file (or AWS secret) when enabling the feature:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;argocd_webhook_api_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;32+ character random string&gt;&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The receiver fails fast at startup if the key is shorter than 32 characters
+when <code>argocd_notifications.enabled</code> is <code>true</code>.</p>
+<h2 id="argocd-side-setup">ArgoCD-side setup<a class="headerlink" href="#argocd-side-setup" title="Permanent link">&para;</a></h2>
+<p>The receiver expects the
+<a href="https://argo-cd.readthedocs.io/en/stable/operator-manual/notifications/services/webhook/"><code>webhook</code> service</a>
+in argocd-notifications, configured to POST a JSON body in deploy-bot's
+expected shape with the shared secret in the <code>X-Deploybot-Secret</code> header.</p>
+<p>A reference <code>ConfigMap</code>/<code>Secret</code> patch is committed at
+<a href="../deploy/argocd-notifications/templates.yaml"><code>deploy/argocd-notifications/templates.yaml</code></a>.
+Apply it to your <code>argocd</code> namespace alongside the rest of the
+<code>argocd-notifications-cm</code> config. It defines:</p>
+<ul>
+<li>A custom <code>service.webhook.deploybot</code> pointing at the receiver URL with the
+  <code>X-Deploybot-Secret</code> header sourced from <code>argocd-notifications-secret</code>.</li>
+<li>Three custom templates — <code>template.deploybot-sync-succeeded</code>,
+  <code>template.deploybot-sync-failed</code>, and <code>template.deploybot-health-degraded</code>
+  — each of which renders deploy-bot's expected JSON shape with the
+  matching trigger name hardcoded in the body. See the
+  <a href="#one-template-per-trigger">one-template-per-trigger gotcha</a> below for
+  why this is structured as three templates rather than one shared one.</li>
+<li>A wiring section pointing each trigger at its matching template.</li>
+</ul>
+<h3 id="subscribing-an-application">Subscribing an Application<a class="headerlink" href="#subscribing-an-application" title="Permanent link">&para;</a></h3>
+<p>On any <code>Application</code> you want deploy-bot to receive notifications for, add:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">annotations</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">notifications.argoproj.io/subscribe.on-sync-succeeded.deploybot</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">notifications.argoproj.io/subscribe.on-sync-failed.deploybot</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+<span class="w">    </span><span class="nt">notifications.argoproj.io/subscribe.on-health-degraded.deploybot</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&quot;</span>
+</code></pre></div>
+<p>The <code>deploybot</code> segment matches the <code>service.webhook.deploybot</code> name in the
+ConfigMap. No deploy-bot–specific annotations are needed.</p>
+<p>You can also subscribe at the <code>AppProject</code> level to apply to every
+Application in the project, or use the global <code>subscriptions:</code> selector form
+in <code>argocd-notifications-cm</code> to label-select multiple apps at once.</p>
+<h2 id="webhook-payload-shape">Webhook payload shape<a class="headerlink" href="#webhook-payload-shape" title="Permanent link">&para;</a></h2>
+<p>The full payload schema is in
+<a href="../internal/argocd/payload.go"><code>internal/argocd/payload.go</code></a> — the receiver
+ignores unknown fields, so additive changes to the upstream template are
+backwards compatible. The minimum a recognized payload must carry is:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;trigger&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;on-sync-succeeded&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;argocdApp&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-prod&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;syncResultRevision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;abc123def456...&quot;</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>A degraded notification with the resource detail block looks like:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;trigger&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;on-health-degraded&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;argocdApp&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp-prod&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;namespace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;argocd&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;repoURL&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://github.com/org/gitops&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;syncResultRevision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;abc123def456...&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;syncStatus&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Synced&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;healthStatus&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Degraded&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;phase&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Succeeded&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Health check failed&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;finishedAt&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2026-04-11T12:34:56Z&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;resources&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">&quot;kind&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Deployment&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;myapp&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;namespace&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;default&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;syncStatus&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Synced&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;healthStatus&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Degraded&quot;</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">&quot;healthMessage&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ReplicaSet \&quot;myapp-7d4...\&quot; has timed out progressing&quot;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>The <code>resources</code> array is preserved verbatim through the receiver — phase 3
+will render it on degraded/failed messages without re-parsing in the
+correlation layer.</p>
+<h2 id="compatibility">Compatibility<a class="headerlink" href="#compatibility" title="Permanent link">&para;</a></h2>
+<p>The reference template is developed against <strong>Argo CD v3.3.6</strong> (the current
+stable release). The default trigger catalog (<code>on-sync-succeeded</code>,
+<code>on-sync-failed</code>, <code>on-health-degraded</code>, <code>on-sync-running</code>) has been stable
+since early v2.x, so the wiring should work on older versions. Confirmation
+against older releases will land once the homelab cluster upgrades.</p>
+<h2 id="future-work">Future work<a class="headerlink" href="#future-work" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong><code>on-sync-running</code> watchdog</strong>: rather than echoing every "sync started"
+  notification (low signal), use the absence of a <code>sync-succeeded</code> within
+  N minutes of a merge to detect stuck ArgoCD or unsubscribed apps. Tracked
+  separately from this feature.</li>
+<li><strong>Recovery detection</strong>: post a green "recovered to healthy" reply under
+  the original failure when a degraded app self-heals. Requires a custom
+  <code>on-app-healthy</code> trigger whose <code>oncePer</code> semantics need empirical
+  verification against v3.3.6 — gated on the homelab cluster upgrade.</li>
+</ul>
+<h2 id="gotchas">Gotchas<a class="headerlink" href="#gotchas" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Delivery is best-effort.</strong> ArgoCD's webhook service retries 3x on 5xx
+  and network errors only. 4xx is <strong>not</strong> retried, and there is no DLQ.
+  Return 2xx fast and absorb infrastructure failures internally — that is
+  why this handler returns 200 even when it dropped a notification as
+  unrecognized or deduped.</li>
+<li><strong>Controller in-memory state.</strong> Notification state lives in the
+  argocd-notifications controller process. A pod restart can re-deliver
+  recent events. The receiver dedupe window (24h) is sized to cover this.</li>
+<li><strong>Annotation typos are silent.</strong> If <code>notifications.argoproj.io/subscribe.&lt;trigger&gt;.deploybot</code>
+  doesn't match the <code>service.webhook.&lt;name&gt;</code> in the ConfigMap exactly, the
+  controller silently delivers nothing. Check
+  <code>kubectl logs deploy/argocd-notifications-controller</code> for <code>notification
+  service ... not found</code> if you expected events and aren't seeing them.</li>
+<li><strong>No HMAC.</strong> The argocd-notifications template engine cannot compute HMAC,
+  so authentication is shared-secret-in-header. Terminate at an internal
+  ingress that adds mTLS if you need stronger transport security.</li>
+<li><strong>Transient health-degraded during healthy rollouts.</strong> During a
+  rollout (including rollbacks), argocd briefly reports
+  <code>.status.health.status = Degraded</code> at the app level <em>before</em> its
+  resource-health reconciler has had a chance to re-run on the new
+  revision. If the <code>on-health-degraded</code> notification fires during that
+  tick, the payload's per-resource <code>healthStatus</code>/<code>healthMessage</code>
+  fields will all be empty, because argocd hasn't computed them yet.
+  The worker treats this pattern as a reconciler roll-up artifact and
+  <strong>drops</strong> the notification instead of alarming a freshly-healthy
+  deploy: if the matched history entry's <code>CompletedAt</code> is within
+  <code>transientGraceWindow</code> (10m, not currently config-driven) <em>and</em> the
+  payload carries zero entries with a non-empty, non-<code>Healthy</code> health
+  status, the handler records a <code>transient_rollout_skipped</code> result on
+  <code>deploybot_argocd_notifications_total</code> and returns without posting.
+  Outside the window, or when any sub-resource reports an actual
+  Degraded health with a populated <code>healthMessage</code>, the alert posts as
+  usual. If you see the suppression metric firing on <em>real</em> failures,
+  the reference template is probably missing the <code>.health.message</code>
+  rendering under <code>.app.status.resources[]</code> — re-check
+  <code>deploy/argocd-notifications/templates.yaml</code>. A longer-term fix that
+  sources the "workload is stuck" signal directly from
+  <code>kube_deployment_status_condition{reason="ProgressDeadlineExceeded"}</code>
+  via AlertManager is tracked in <code>TODO.md</code>.</li>
+</ul>
+<h3 id="one-template-per-trigger">One template per trigger<a class="headerlink" href="#one-template-per-trigger" title="Permanent link">&para;</a></h3>
+<p>argocd-notifications does not expose the current trigger name inside a
+template. There is no <code>{{.trigger}}</code>, and <code>{{.context.eventType}}</code> is only
+populated if the operator explicitly defines it under a top-level
+<code>context:</code> key in <code>argocd-notifications-cm</code> (Go templates render a missing
+map key as the literal string <code>&lt;no value&gt;</code>). That literal string slips
+past the receiver's non-empty-trigger check and then fails its
+recognized-trigger gate, so every notification silently drops with
+<code>recognized:false, enqueued:false</code> even though the HTTP hop returns 200.</p>
+<p>The only reliable way to ship the trigger name into the body is to
+hardcode it per template — hence the three distinct <code>template.deploybot-*</code>
+definitions in the reference patch, and the <code>send:</code> list on each trigger
+pointing at exactly one of them. If you find yourself wanting a shared
+template, you'll hit this bug.</p>
+<h3 id="retrywaitmin-retrywaitmax-crash-the-controller"><code>retryWaitMin</code> / <code>retryWaitMax</code> crash the controller<a class="headerlink" href="#retrywaitmin-retrywaitmax-crash-the-controller" title="Permanent link">&para;</a></h3>
+<p>Do not add <code>retryWaitMin</code> / <code>retryWaitMax</code> to the webhook service
+definition, even though the upstream argocd-notifications service
+examples sometimes show them. Those fields are modeled as bare
+<code>time.Duration</code> on <code>WebhookOptions</code>, and the controller decodes the
+service config with stdlib JSON, which refuses to unmarshal <code>"1s"</code> /
+<code>"10s"</code> strings into <code>Duration</code>. The resulting error is fatal for the
+whole controller — not just the misconfigured service — because it
+fires on every api-context fetch:</p>
+<div class="highlight"><pre><span></span><code>Failed to get api: errors getting apis: [json: cannot unmarshal string
+into Go struct field WebhookOptions.retryWaitMax of type time.Duration]
+</code></pre></div>
+<p>…which blocks delivery for every subscribed Application. The reference
+patch sets only <code>retryMax: 3</code> and leaves the wait intervals to the
+controller's internal defaults. This has been reported upstream but is
+not fixed as of Argo CD v3.3.6.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
