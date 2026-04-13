@@ -50,6 +50,12 @@ Integration tests require `.env.integration` with `AWS_SECRET_NAME`,
 `INTEGRATION_REQUESTER_ID`, `INTEGRATION_REQUESTER_USERNAME`, `INTEGRATION_APPROVER_ID`,
 `INTEGRATION_APP`, and optionally `CONFIG_PATH` (defaults to `testdata/config.json`).
 
+**Critical: stop all other workers before running integration tests.** The test harness starts its own queue worker. If another worker is running — a deploy-bot pod in the k8s cluster, a local `bin/bot` process, or a leftover `go test` — it will race the test worker for Redis stream messages, causing tests to hang or fail intermittently in ways that look like code bugs but aren't. Before running integration tests:
+
+1. Scale down (or verify already scaled down) any deploy-bot worker deployments in the cluster: `kubectl scale deploy deploy-bot-worker -n deploy-bot --replicas=0`
+2. Kill any local bot/receiver processes (`pgrep -f 'bin/bot|bin/receiver|go test.*integration'`)
+3. If tests are failing with unexplained timeouts or "message not delivered" errors after you've verified the code is correct, suspect a stray worker. Restarting the cluster and local machine is a last resort but has resolved this before.
+
 ## Architecture
 
 deploy-bot is a Go Slack bot that provides approval-gated deployments. The flow is:

@@ -166,12 +166,16 @@ func TestMain(m *testing.M) {
 	val := validator.New(valHTTP, rawSlack, redisStore.Redis(), cfg, log)
 	b := bot.New(slackClient, redisStore, ghClient, ecrCache, val, auditLog, m2, cfgHolder, log)
 
-	// Delete ALL event streams from any prior or concurrent usage. When
-	// running against a shared Redis (e.g. the homelab cluster), the ECR
-	// and ArgoCD streams may contain live events from the production bot.
-	// The test worker would consume those and get stuck processing stale
-	// ECR push events instead of the injected test events.
+	// Delete ALL event streams AND their consumer groups from any prior
+	// or concurrent usage. The group must be destroyed explicitly because
+	// Init's XGROUP CREATE with BUSYGROUP handling silently keeps a stale
+	// group whose last-delivered-id has already advanced past messages
+	// that a previous test run consumed. Without the destroy, the new
+	// worker calls XReadGroup but Redis thinks the message was already
+	// delivered, so it never returns it.
 	for _, streamKey := range queue.AllStreams {
+		// Destroy group first (ignores errors if the group doesn't exist).
+		redisStore.Redis().XGroupDestroy(ctx, streamKey, queue.ConsumerGroup)
 		if err := redisStore.Redis().Del(ctx, streamKey).Err(); err != nil {
 			fatalf("flush event stream %s: %v", streamKey, err)
 		}
