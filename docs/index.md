@@ -35,6 +35,7 @@ The net effect: deploys stop being a context switch. They're a sentence in a cha
 - **Batteries included.** Terraform module, Kustomize base, Slack app manifest, GitHub Action and CLI for config validation.
 - **Simple app configuration.** Define apps in `config.json` and the bot picks them up on the next hot-reload. For self-service, optional [repo-sourced discovery](repo-sourced-app-discovery.md) lets app teams drop a `.deploy-bot.json` in their repo.
 - **Convention over configuration.** With [enforced naming conventions](naming-conventions.md), app names and kustomize paths are derived from repository names. Onboarding a new app takes two lines of JSON.
+- **Post-deploy health monitoring.** After a deploy merges, optionally poll metrics providers (Dynatrace, with an extensible interface for others) to verify the app is healthy. Results are reported in the deploy Slack thread; a rollback button is offered on failure. See [health-check-monitoring](health-check-monitoring.md).
 - **Built for resilience.** Redis Streams consumer groups, in-memory buffer with backpressure, sweeper for expired deploys, automatic rebase on merge conflicts, GitHub reconciliation after data loss.
 - **OpenTelemetry instrumented.** GitHub, Slack, AWS, and Redis I/O is observed via OTEL contrib libraries; metrics export to Prometheus by default, with standard OTEL env vars for routing to a collector. See [observability](observability.md).
 - **Horizontal scaling.** Receiver and worker scale independently. Consumer groups ensure each event processes once.
