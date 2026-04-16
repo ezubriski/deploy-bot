@@ -47,6 +47,24 @@ type PendingDeploy struct {
 	SlackMessageTS string `json:"slack_message_ts,omitempty"`
 }
 
+// HistoryFromPending creates a HistoryEntry from a PendingDeploy, copying
+// the fields that are always transferred. The caller sets EventType and any
+// additional fields (e.g. GitopsCommitSHA for merges) on the returned value.
+func HistoryFromPending(d *PendingDeploy, eventType string) HistoryEntry {
+	return HistoryEntry{
+		EventType:      eventType,
+		App:            d.App,
+		Environment:    d.Environment,
+		Tag:            d.Tag,
+		PRNumber:       d.PRNumber,
+		PRURL:          d.PRURL,
+		RequesterID:    d.RequesterID,
+		CompletedAt:    time.Now(),
+		SlackChannel:   d.SlackChannel,
+		SlackMessageTS: d.SlackMessageTS,
+	}
+}
+
 // HistoryEntry is an immutable record of a completed deployment event,
 // stored in the `history` Postgres table for /deploy history queries,
 // rollback-target resolution, and ArgoCD notification correlation.

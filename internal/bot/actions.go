@@ -163,91 +163,50 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 
 	deployChannel := cfg.Slack.DeployChannel
 
-	// First merge attempt. mergeSHA is captured here and on each retry path
-	// so it can be persisted on the resulting HistoryEntry. Downstream
-	// signals (e.g. ArgoCD notifications carrying a synced revision) use
-	// this SHA to correlate back to the deploy that produced it.
-	mergeSHA, mergeErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
+	appCfg, ok := cfg.AppByName(d.App)
+	if !ok {
+		b.log.Error("app config not found for merge", zap.String("app", d.App))
+		b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
+		b.notifyConflictFailed(ctx, d, prNumber, approverID)
+		return
+	}
+
+	result, mergeErr := b.mergeWithRetry(ctx, prNumber, githubPkg.CreatePRParams{
+		App:           d.App,
+		Environment:   d.Environment,
+		Tag:           d.Tag,
+		KustomizePath: appCfg.KustomizePath,
+	}, cfg.Deployment.MergeMethod)
+
 	if mergeErr != nil {
+		resetToPending := func() {
+			b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
+		}
+
 		switch {
 		case errors.Is(mergeErr, githubPkg.ErrMergeConflict):
-			// Attempt to rebase the deploy branch onto current HEAD and retry.
-			appCfg, ok := cfg.AppByName(d.App)
-			if !ok {
-				b.log.Error("app config not found for rebase", zap.String("app", d.App))
-				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
-				b.notifyConflictFailed(ctx, d, prNumber, approverID)
-				return
-			}
-			baseBranch, err := b.gh.GetDefaultBranch(ctx)
-			if err != nil {
-				b.log.Error("get default branch for rebase", zap.Error(err))
-				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
-				b.notifyConflictFailed(ctx, d, prNumber, approverID)
-				return
-			}
-			rebaseErr := b.gh.RebaseDeployBranch(ctx, githubPkg.CreatePRParams{
-				App:           d.App,
-				Environment:   d.Environment,
-				Tag:           d.Tag,
-				KustomizePath: appCfg.KustomizePath,
-				BaseBranch:    baseBranch,
-			})
-			if rebaseErr != nil {
-				if errors.Is(rebaseErr, githubPkg.ErrNoChange) {
-					// Tag is already on the default branch; the deploy happened via
-					// another path. Close this PR as a no-op.
-					b.closeNoOpPR(ctx, d, prNumber)
-					return
-				}
-				b.log.Error("rebase deploy branch", zap.Int("pr", prNumber), zap.Error(rebaseErr))
-				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
-				b.notifyConflictFailed(ctx, d, prNumber, approverID)
-				return
-			}
-
-			// Give GitHub a moment to recalculate mergeability after the force-push.
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(3 * time.Second):
-			}
-
-			// Retry merge once.
-			retrySHA, retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
-			if retryErr != nil {
-				b.log.Error("merge PR after rebase", zap.Int("pr", prNumber), zap.Error(retryErr))
-				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
-				b.notifyConflictFailed(ctx, d, prNumber, approverID)
-				return
-			}
-			mergeSHA = retrySHA
-			// Merge succeeded after rebase — fall through to completion.
+			resetToPending()
+			b.notifyConflictFailed(ctx, d, prNumber, approverID)
 
 		case errors.Is(mergeErr, githubPkg.ErrCINotPassed):
-			// CI is blocking — leave the PR open so CI can finish, then re-approve.
 			b.log.Warn("merge blocked by CI", zap.Int("pr", prNumber))
-			b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
+			resetToPending()
 			b.postSlack(ctx, deployChannel, "notice",
 				slack.MsgOptionText(fmt.Sprintf(
 					"<@%s> — merge of <%s|PR #%d> (*%s* %s `%s`) is blocked by a required status check. Re-approve once CI is green.",
 					approverID, d.PRURL, prNumber, d.App, d.Environment, d.Tag,
 				), false),
 			)
-			return
 
 		case errors.Is(mergeErr, githubPkg.ErrDraftPR):
-			// Shouldn't normally happen (drafts can't be selected in the modal),
-			// but handle gracefully.
 			b.log.Warn("merge blocked: PR is a draft", zap.Int("pr", prNumber))
-			b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
+			resetToPending()
 			b.postSlack(ctx, deployChannel, "notice",
 				slack.MsgOptionText(fmt.Sprintf(
 					"%s — <%s|PR #%d> (*%s* %s `%s`) is in draft state and cannot be merged. Ask %s to mark it ready for review.",
 					slackMention(approverID), d.PRURL, prNumber, d.App, d.Environment, d.Tag, slackMention(d.RequesterID),
 				), false),
 			)
-			return
 
 		case errors.Is(mergeErr, githubPkg.ErrHeadModified):
 			// Race: head was updated between mergeability check and merge attempt.
@@ -261,7 +220,7 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 			retrySHA, retryErr := b.gh.MergePR(ctx, prNumber, cfg.Deployment.MergeMethod)
 			if retryErr != nil {
 				b.log.Error("merge PR after head-modified retry", zap.Int("pr", prNumber), zap.Error(retryErr))
-				b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
+				resetToPending()
 				b.postSlack(ctx, deployChannel, "notice",
 					slack.MsgOptionText(fmt.Sprintf(
 						"<@%s> — <%s|PR #%d> (*%s* %s `%s`) could not be merged after a concurrent branch update. Please try approving again.",
@@ -270,12 +229,11 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 				)
 				return
 			}
-			mergeSHA = retrySHA
-			// Merge succeeded — fall through to completion.
+			result.SHA = retrySHA
 
 		default:
 			b.log.Error("merge PR", zap.Int("pr", prNumber), zap.Error(mergeErr))
-			b.warnIfErr("store: reset to pending", b.store.UpdateState(ctx, d.GitHubOrg, d.GitHubRepo, prNumber, store.StatePending), zap.Int("pr", prNumber))
+			resetToPending()
 			var msg string
 			if errors.Is(mergeErr, githubPkg.ErrRateLimited) {
 				msg = fmt.Sprintf("<@%s> — GitHub rate limit reached. <%s|PR #%d> (*%s* %s `%s`) is still open — please try approving again in a few minutes.",
@@ -285,9 +243,18 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 					approverID, d.PRURL, prNumber, d.App, d.Environment, d.Tag, mergeErr)
 			}
 			b.postSlack(ctx, deployChannel, "approve flow notice", slack.MsgOptionText(msg, false))
+		}
+		if !errors.Is(mergeErr, githubPkg.ErrHeadModified) || result.SHA == "" {
 			return
 		}
 	}
+
+	if result.NoOp {
+		b.closeNoOpPR(ctx, d, prNumber)
+		return
+	}
+
+	mergeSHA := result.SHA
 
 	var wg sync.WaitGroup
 	wg.Add(7)
@@ -336,19 +303,9 @@ func (b *Bot) handleApprove(ctx context.Context, callback slack.InteractionCallb
 	}()
 	go func() {
 		defer wg.Done()
-		if err := b.store.PushHistory(ctx, store.HistoryEntry{
-			EventType:       audit.EventApproved,
-			App:             d.App,
-			Environment:     d.Environment,
-			Tag:             d.Tag,
-			PRNumber:        prNumber,
-			PRURL:           d.PRURL,
-			RequesterID:     d.RequesterID,
-			CompletedAt:     time.Now(),
-			GitopsCommitSHA: mergeSHA,
-			SlackChannel:    d.SlackChannel,
-			SlackMessageTS:  d.SlackMessageTS,
-		}); err != nil {
+		h := store.HistoryFromPending(d, audit.EventApproved)
+		h.GitopsCommitSHA = mergeSHA
+		if err := b.store.PushHistory(ctx, h); err != nil {
 			b.log.Warn("store: push history", zap.Error(err))
 		}
 	}()
@@ -775,18 +732,7 @@ func (b *Bot) handleRejectSubmit(ctx context.Context, callback slack.Interaction
 	}()
 	go func() {
 		defer wg.Done()
-		if err := b.store.PushHistory(ctx, store.HistoryEntry{
-			EventType:      audit.EventRejected,
-			App:            d.App,
-			Environment:    d.Environment,
-			Tag:            d.Tag,
-			PRNumber:       prNumber,
-			PRURL:          d.PRURL,
-			RequesterID:    d.RequesterID,
-			CompletedAt:    time.Now(),
-			SlackChannel:   d.SlackChannel,
-			SlackMessageTS: d.SlackMessageTS,
-		}); err != nil {
+		if err := b.store.PushHistory(ctx, store.HistoryFromPending(d, audit.EventRejected)); err != nil {
 			b.log.Warn("store: push history", zap.Error(err))
 		}
 	}()
