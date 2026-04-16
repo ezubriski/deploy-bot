@@ -481,3 +481,31 @@ func TestBuildFilteredModalParams_RollbackTagOptionsDeduped(t *testing.T) {
 		t.Errorf("expected 3 unique tags, got %d", len(params.TagOptions))
 	}
 }
+
+func TestParseHistoryArgs(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantFilter string
+		wantLimit  int
+	}{
+		{"no args", nil, "", 10},
+		{"app only", []string{"myapp-dev"}, "myapp-dev", 10},
+		{"count only", []string{"20"}, "", 20},
+		{"app and count", []string{"myapp-dev", "50"}, "myapp-dev", 50},
+		{"count capped", []string{"999"}, "", 100},
+		{"negative ignored", []string{"-5"}, "-5", 10},
+		{"zero ignored", []string{"0"}, "0", 10},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			filter, limit := parseHistoryArgs(tc.args)
+			if filter != tc.wantFilter {
+				t.Errorf("filter = %q, want %q", filter, tc.wantFilter)
+			}
+			if limit != tc.wantLimit {
+				t.Errorf("limit = %d, want %d", limit, tc.wantLimit)
+			}
+		})
+	}
+}

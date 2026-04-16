@@ -58,11 +58,8 @@ func (b *Bot) handleMention(ctx context.Context, evt queue.AppMentionEvent) {
 		}
 		b.handleMentionStatus(ctx, evt, envFilter, appFilter)
 	case "history":
-		appFilter := ""
-		if len(parts) >= 2 {
-			appFilter = parts[1]
-		}
-		b.handleMentionHistory(ctx, evt, appFilter)
+		appFilter, limit := parseHistoryArgs(parts[1:])
+		b.handleMentionHistory(ctx, evt, appFilter, limit)
 	case "apps":
 		b.handleMentionApps(ctx, evt)
 	case "conflicts":
@@ -164,8 +161,8 @@ func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent
 	b.replyMention(ctx, evt, formatStatus(deploys))
 }
 
-func (b *Bot) handleMentionHistory(ctx context.Context, evt queue.AppMentionEvent, appFilter string) {
-	entries, err := b.store.GetHistory(ctx, appFilter, 10)
+func (b *Bot) handleMentionHistory(ctx context.Context, evt queue.AppMentionEvent, appFilter string, limit int) {
+	entries, err := b.store.GetHistory(ctx, appFilter, limit)
 	if err != nil {
 		b.replyMention(ctx, evt, fmt.Sprintf("Failed to fetch history: %v", err))
 		return
@@ -476,7 +473,7 @@ App names include the environment suffix (e.g. ` + "`myapp-dev`" + `, ` + "`myap
 
 • ` + "`deploy <app-env> <tag> [@approver] [reason]`" + `  — create a deploy PR
 • ` + "`list`" + `  — list pending deployments (alias: ` + "`status`" + `)
-• ` + "`history [app-env]`" + `  — show recent completed deploys
+• ` + "`history [app-env] [count]`" + `  — show recent completed deploys (default 10)
 • ` + "`apps`" + `  — list all configured apps and their source
 • ` + "`conflicts`" + `  — list repo-sourced apps blocked by operator config
 • ` + "`tags <app-env>`" + `  — list recent ECR tags

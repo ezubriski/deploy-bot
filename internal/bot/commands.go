@@ -38,11 +38,8 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 		}
 		b.handleStatus(ctx, cmd, envFilter, appFilter)
 	case parts[0] == "history":
-		appFilter := ""
-		if len(parts) >= 2 {
-			appFilter = parts[1]
-		}
-		b.handleHistory(ctx, cmd, appFilter)
+		appFilter, limit := parseHistoryArgs(parts[1:])
+		b.handleHistory(ctx, cmd, appFilter, limit)
 	case parts[0] == "tags" && len(parts) >= 2:
 		if len(parts) >= 3 {
 			b.handleTagVerify(ctx, cmd, parts[1], parts[2])
@@ -336,8 +333,8 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	}
 }
 
-func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilter string) {
-	entries, err := b.store.GetHistory(ctx, appFilter, 20)
+func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilter string, limit int) {
+	entries, err := b.store.GetHistory(ctx, appFilter, limit)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to fetch history: %v", err))
 		return
@@ -470,7 +467,7 @@ func (b *Bot) handleTagList(ctx context.Context, cmd slack.SlashCommand, appName
 		b.postEphemeralCommand(ctx, cmd, b.unknownAppMessage(appName))
 		return
 	}
-	b.postEphemeralCommand(ctx, cmd, formatTagList(appName, b.ecrCache.Tags(appName, 20)))
+	b.postEphemeralCommand(ctx, cmd, formatTagList(appName, b.ecrCache.Tags(appName, 10)))
 }
 
 func (b *Bot) handleTagVerify(ctx context.Context, cmd slack.SlashCommand, appName, tag string) {
@@ -526,7 +523,7 @@ App names include the environment suffix (e.g. `+"`myapp-dev`"+`, `+"`myapp-prod
 • `+"`%s`"+`  — open the deploy modal
 • `+"`%s <app-env>`"+`  — open the deploy modal pre-selected to an app
 • `+"`%s list`"+`  — list pending deployments (alias: `+"`status`"+`)
-• `+"`%s history [app-env]`"+`  — show recent completed deploys
+• `+"`%s history [app-env] [count]`"+`  — show recent completed deploys (default 10)
 • `+"`%s apps`"+`  — list all configured apps and their source
 • `+"`%s conflicts`"+`  — list repo-sourced apps blocked by operator config
 • `+"`%s tags <app-env>`"+`  — list recent ECR tags

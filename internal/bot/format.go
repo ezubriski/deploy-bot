@@ -2,12 +2,47 @@ package bot
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ezubriski/deploy-bot/internal/config"
 	"github.com/ezubriski/deploy-bot/internal/store"
 )
+
+const (
+	defaultHistoryDisplay = 10
+	maxHistoryDisplay     = 100
+)
+
+// parseHistoryArgs extracts an optional app filter and display limit from
+// the args after "history". If the last arg parses as a positive integer,
+// it's treated as the limit; otherwise everything is an app filter.
+//
+//	history              → ("", 10)
+//	history myapp-dev    → ("myapp-dev", 10)
+//	history 20           → ("", 20)
+//	history myapp-dev 20 → ("myapp-dev", 20)
+func parseHistoryArgs(args []string) (appFilter string, limit int) {
+	limit = defaultHistoryDisplay
+	if len(args) == 0 {
+		return "", limit
+	}
+
+	// Check if the last arg is a numeric limit.
+	if n, err := strconv.Atoi(args[len(args)-1]); err == nil && n > 0 {
+		if n > maxHistoryDisplay {
+			n = maxHistoryDisplay
+		}
+		limit = n
+		args = args[:len(args)-1]
+	}
+
+	if len(args) > 0 {
+		appFilter = args[0]
+	}
+	return appFilter, limit
+}
 
 // formatHistory renders deployment history entries as a Slack message.
 // Returns ("", nil) when entries is empty so callers can handle the
