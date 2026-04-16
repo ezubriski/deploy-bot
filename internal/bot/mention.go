@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -282,85 +281,13 @@ func (b *Bot) handleMentionTags(ctx context.Context, evt queue.AppMentionEvent, 
 }
 
 func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent, prArg string) {
-	prNumber, err := strconv.Atoi(prArg)
-	if err != nil {
-		b.replyMention(ctx, evt, "Invalid PR number.")
-		return
-	}
-
-	cfg := b.cfg.Load()
-	d, err := b.store.Get(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber)
-	if err != nil || d == nil {
-		b.replyMention(ctx, evt, fmt.Sprintf("Deployment #%d not found.", prNumber))
-		return
-	}
-
-	if d.RequesterID != evt.UserID {
-		b.replyMention(ctx, evt, "You can only cancel your own deployments.")
-		return
-	}
-
-	cancellerIdent, err := b.validator.ResolveIdentity(ctx, evt.UserID)
-	requesterGH := cancellerIdent.GitHubLogin
-	if err != nil || requesterGH == "" {
-		requesterGH = "slack:" + evt.UserID
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(8)
-	go func() {
-		defer wg.Done()
-		b.warnIfErr("github: comment cancelled", b.gh.CommentCancelled(ctx, prNumber, requesterGH), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		b.warnIfErr("github: remove pending label", b.gh.RemoveLabel(ctx, prNumber, b.cfg.Load().PendingLabel()), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
-	}()
-	go func() {
-		defer wg.Done()
-		b.errIfErr("store: delete pending", b.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, prNumber), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		if err := b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:   audit.EventCancelled,
-			Trigger:     audit.TriggerMention,
-			App:         d.App,
-			Environment: d.Environment,
-			Tag:         d.Tag,
-			PRNumber:    prNumber,
-			PRURL:       d.PRURL,
-			ActorEmail:  cancellerIdent.Email,
-			ActorName:   cancellerIdent.Name,
-		}); err != nil {
-			b.log.Error("audit log", zap.Error(err))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		if err := b.store.PushHistory(ctx, store.HistoryFromPending(d, audit.EventCancelled)); err != nil {
-			b.log.Warn("store: push history", zap.Error(err))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		b.replyMention(ctx, evt, fmt.Sprintf(
-			"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *cancelled* by <@%s>.",
-			d.App, d.Environment, d.Tag, d.PRURL, prNumber, evt.UserID,
-		))
-	}()
-	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
-	wg.Wait()
-	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled via mention", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.String()))
+	reply := func(msg string) { b.replyMention(ctx, evt, msg) }
+	b.doCancelDeploy(ctx, prArg, cancelParams{
+		userID:       evt.UserID,
+		trigger:      audit.TriggerMention,
+		replyError:   reply,
+		replySuccess: reply,
+	})
 }
 
 func (b *Bot) handleMentionNudge(ctx context.Context, evt queue.AppMentionEvent, prArg string) {

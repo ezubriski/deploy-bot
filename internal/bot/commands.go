@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -315,90 +314,20 @@ func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand, envFilte
 }
 
 func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg string) {
-	prNumber, err := strconv.Atoi(prArg)
-	if err != nil {
-		b.postEphemeralCommand(ctx, cmd, "Invalid PR number.")
-		return
-	}
-
-	cfg := b.cfg.Load()
-	d, err := b.store.Get(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber)
-	if err != nil || d == nil {
-		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Deployment #%d not found.", prNumber))
-		return
-	}
-
-	if d.RequesterID != cmd.UserID && d.RequesterID != "" {
-		b.postEphemeralCommand(ctx, cmd, "You can only cancel your own deployments.")
-		return
-	}
-
-	cancellerIdent, err := b.validator.ResolveIdentity(ctx, cmd.UserID)
-	requesterGH := cancellerIdent.GitHubLogin
-	if err != nil || requesterGH == "" {
-		requesterGH = cmd.UserName
-		if requesterGH == "" {
-			requesterGH = "slack:" + cmd.UserID
-		}
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(8)
-	go func() {
-		defer wg.Done()
-		b.warnIfErr("github: comment cancelled", b.gh.CommentCancelled(ctx, prNumber, requesterGH), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		b.warnIfErr("github: remove pending label", b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
-	}()
-	go func() {
-		defer wg.Done()
-		b.errIfErr("store: delete pending", b.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, prNumber), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		if err := b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:   audit.EventCancelled,
-			Trigger:     audit.TriggerSlashCommand,
-			App:         d.App,
-			Environment: d.Environment,
-			Tag:         d.Tag,
-			PRNumber:    prNumber,
-			PRURL:       d.PRURL,
-			ActorEmail:  cancellerIdent.Email,
-			ActorName:   cancellerIdent.Name,
-		}); err != nil {
-			b.log.Error("audit log", zap.Error(err))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		if err := b.store.PushHistory(ctx, store.HistoryFromPending(d, audit.EventCancelled)); err != nil {
-			b.log.Warn("store: push history", zap.Error(err))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		b.postSlack(ctx, cfg.Slack.DeployChannel, "notice",
-			slack.MsgOptionText(fmt.Sprintf(
-				"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *cancelled* by <@%s>.",
-				d.App, d.Environment, d.Tag, d.PRURL, prNumber, cmd.UserID,
-			), false),
-		)
-	}()
-	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
-	wg.Wait()
-	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.String()))
+	b.doCancelDeploy(ctx, prArg, cancelParams{
+		userID:   cmd.UserID,
+		userName: cmd.UserName,
+		trigger:  audit.TriggerSlashCommand,
+		allowECR: true,
+		replyError: func(msg string) {
+			b.postEphemeralCommand(ctx, cmd, msg)
+		},
+		replySuccess: func(msg string) {
+			b.postSlack(ctx, b.cfg.Load().Slack.DeployChannel, "notice",
+				slack.MsgOptionText(msg, false),
+			)
+		},
+	})
 }
 
 func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg string) {
