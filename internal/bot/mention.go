@@ -170,7 +170,7 @@ func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent
 			d.App, d.Environment, d.Tag, d.PRURL, d.PRNumber, slackMention(d.RequesterID), age, d.State,
 		))
 	}
-	b.replyMention(ctx, evt, "*Pending Deployments:*\n"+strings.Join(lines, "\n"))
+	b.replyMention(ctx, evt, "*Pending Deployments*\n"+strings.Join(lines, "\n"))
 }
 
 func (b *Bot) handleMentionHistory(ctx context.Context, evt queue.AppMentionEvent, appFilter string) {
@@ -228,9 +228,13 @@ func (b *Bot) handleMentionNudge(ctx context.Context, evt queue.AppMentionEvent,
 	}
 
 	remaining := time.Until(d.ExpiresAt).Round(time.Minute)
+	approver := slackMention(d.ApproverID)
+	if d.ApproverID == "" {
+		approver = "team"
+	}
 	b.replyMention(ctx, evt, fmt.Sprintf(
-		"%s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for your approval. Expires in *%s*. <%s|PR #%d>",
-		slackMention(d.ApproverID), d.App, d.Environment, d.Tag, slackMention(d.RequesterID), remaining, d.PRURL, d.PRNumber,
+		":bell: %s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for your approval. Expires in *%s*. <%s|PR #%d>",
+		approver, d.App, d.Environment, d.Tag, slackMention(d.RequesterID), remaining, d.PRURL, d.PRNumber,
 	))
 }
 

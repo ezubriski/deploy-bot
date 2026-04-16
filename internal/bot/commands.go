@@ -351,7 +351,7 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	}
 	_, _, err = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel,
 		slack.MsgOptionText(fmt.Sprintf(
-			":bell: %s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for approval. Expires in *%s*. <%s|PR #%d>",
+			":bell: %s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for your approval. Expires in *%s*. <%s|PR #%d>",
 			approver, d.App, d.Environment, d.Tag, slackMention(d.RequesterID), remaining, d.PRURL, d.PRNumber,
 		), false),
 	)
