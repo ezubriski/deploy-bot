@@ -382,18 +382,7 @@ func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg st
 	}()
 	go func() {
 		defer wg.Done()
-		if err := b.store.PushHistory(ctx, store.HistoryEntry{
-			EventType:      audit.EventCancelled,
-			App:            d.App,
-			Environment:    d.Environment,
-			Tag:            d.Tag,
-			PRNumber:       prNumber,
-			PRURL:          d.PRURL,
-			RequesterID:    d.RequesterID,
-			CompletedAt:    time.Now(),
-			SlackChannel:   d.SlackChannel,
-			SlackMessageTS: d.SlackMessageTS,
-		}); err != nil {
+		if err := b.store.PushHistory(ctx, store.HistoryFromPending(d, audit.EventCancelled)); err != nil {
 			b.log.Warn("store: push history", zap.Error(err))
 		}
 	}()

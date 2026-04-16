@@ -279,6 +279,7 @@ func (s *Sweeper) RecoverStuck(ctx context.Context) {
 		s.log.Error("sweeper: get all deploys", zap.Error(err))
 		return
 	}
+	cfg := s.cfg.Load()
 	for _, d := range deploys {
 		if d.State == store.StateMerging {
 			s.log.Warn("recovering stuck deploy", zap.Int("pr", d.PRNumber), zap.String("app", d.App))
@@ -287,11 +288,11 @@ func (s *Sweeper) RecoverStuck(ctx context.Context) {
 			// goroutines for normal merges. A recovered deploy is logged
 			// but does not produce a history entry, so there is nothing to
 			// correlate ArgoCD signals against from this path.
-			if _, err := s.gh.MergePR(ctx, d.PRNumber, s.cfg.Load().Deployment.MergeMethod); err != nil {
+			if _, err := s.gh.MergePR(ctx, d.PRNumber, cfg.Deployment.MergeMethod); err != nil {
 				s.log.Error("recover merge failed", zap.Int("pr", d.PRNumber), zap.Error(err))
 				continue
 			}
-			s.warnIfErr("github: remove pending label", s.gh.RemoveLabel(ctx, d.PRNumber, s.cfg.Load().PendingLabel()), zap.Int("pr", d.PRNumber))
+			s.warnIfErr("github: remove pending label", s.gh.RemoveLabel(ctx, d.PRNumber, cfg.PendingLabel()), zap.Int("pr", d.PRNumber))
 			s.errIfErr("store: release lock", s.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
 			s.errIfErr("store: delete pending", s.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, d.PRNumber), zap.Int("pr", d.PRNumber))
 			s.log.Info("recovered stuck deploy", zap.Int("pr", d.PRNumber))
@@ -308,10 +309,9 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 		return
 	}
 
-	staleDuration := s.cfg.Load().StaleDuration()
-	staleDurationStr := fmt.Sprintf("%v", staleDuration)
-
 	cfg := s.cfg.Load()
+	staleDuration := cfg.StaleDuration()
+	staleDurationStr := fmt.Sprintf("%v", staleDuration)
 	for _, d := range expired {
 		s.log.Info("expiring deployment", zap.Int("pr", d.PRNumber), zap.String("app", d.App))
 
@@ -369,18 +369,7 @@ func (s *Sweeper) RunOnce(ctx context.Context) {
 			}
 		}()
 		s.metrics.RecordDeploy(d.App, audit.EventExpired)
-		if err := s.store.PushHistory(ctx, store.HistoryEntry{
-			EventType:      audit.EventExpired,
-			App:            d.App,
-			Environment:    d.Environment,
-			Tag:            d.Tag,
-			PRNumber:       d.PRNumber,
-			PRURL:          d.PRURL,
-			RequesterID:    d.RequesterID,
-			CompletedAt:    time.Now(),
-			SlackChannel:   d.SlackChannel,
-			SlackMessageTS: d.SlackMessageTS,
-		}); err != nil {
+		if err := s.store.PushHistory(ctx, store.HistoryFromPending(d, audit.EventExpired)); err != nil {
 			s.log.Warn("store: push history", zap.Error(err))
 		}
 		wg.Wait()
