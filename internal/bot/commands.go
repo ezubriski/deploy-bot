@@ -361,39 +361,12 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 }
 
 func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilter string) {
-	const defaultLimit = 20
-
-	entries, err := b.store.GetHistory(ctx, appFilter, defaultLimit)
+	entries, err := b.store.GetHistory(ctx, appFilter, 20)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to fetch history: %v", err))
 		return
 	}
-
-	if len(entries) == 0 {
-		msg := "No deployment history."
-		if appFilter != "" {
-			msg = fmt.Sprintf("No deployment history for *%s*.", appFilter)
-		}
-		b.postEphemeralCommand(ctx, cmd, msg)
-		return
-	}
-
-	now := time.Now()
-	var lines []string
-	for _, e := range entries {
-		age := now.Sub(e.CompletedAt).Round(time.Minute)
-		icon := eventIcon(e.EventType)
-		lines = append(lines, fmt.Sprintf(
-			"%s *%s* (%s) `%s` — <%s|#%d> — %s — %s ago",
-			icon, e.App, e.Environment, e.Tag, e.PRURL, e.PRNumber, slackMention(e.RequesterID), age,
-		))
-	}
-
-	header := "*Recent Deployments:*"
-	if appFilter != "" {
-		header = fmt.Sprintf("*Deployments for %s:*", appFilter)
-	}
-	b.postEphemeralCommand(ctx, cmd, header+"\n"+strings.Join(lines, "\n"))
+	b.postEphemeralCommand(ctx, cmd, formatHistory(entries, appFilter))
 }
 
 // findRollbackEntries scans entries (newest-first) for the two most recent
@@ -521,18 +494,7 @@ func (b *Bot) handleTagList(ctx context.Context, cmd slack.SlashCommand, appName
 		b.postEphemeralCommand(ctx, cmd, b.unknownAppMessage(appName))
 		return
 	}
-	tags := b.ecrCache.Tags(appName, 20)
-	if len(tags) == 0 {
-		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("No tags found for *%s* (cache may still be warming up).", appName))
-		return
-	}
-	lines := make([]string, len(tags))
-	for i, t := range tags {
-		lines[i] = fmt.Sprintf("• `%s`", t)
-	}
-	b.postEphemeralCommand(ctx, cmd,
-		fmt.Sprintf("*Recent tags for %s:*\n%s", appName, strings.Join(lines, "\n")),
-	)
+	b.postEphemeralCommand(ctx, cmd, formatTagList(appName, b.ecrCache.Tags(appName, 20)))
 }
 
 func (b *Bot) handleTagVerify(ctx context.Context, cmd slack.SlashCommand, appName, tag string) {
@@ -553,53 +515,16 @@ func (b *Bot) handleTagVerify(ctx context.Context, cmd slack.SlashCommand, appNa
 }
 
 func (b *Bot) handleApps(ctx context.Context, cmd slack.SlashCommand) {
-	cfg := b.cfg.Load()
-	if len(cfg.Apps) == 0 {
-		b.postEphemeralCommand(ctx, cmd, "No apps configured.")
-		return
-	}
-
-	var lines []string
-	for _, app := range cfg.Apps {
-		source := "operator"
-		if app.SourceRepo != "" {
-			source = app.SourceRepo
-		}
-		line := fmt.Sprintf("• *%s* (`%s`) — source: `%s`", app.FullName(), app.Environment, source)
-		if app.AutoDeploy {
-			line += " — auto-deploy"
-		}
-		lines = append(lines, line)
-	}
-
-	b.postEphemeralCommand(ctx, cmd, "*Configured Apps:*\n"+strings.Join(lines, "\n"))
+	b.postEphemeralCommand(ctx, cmd, formatApps(b.cfg.Load()))
 }
 
 func (b *Bot) handleConflicts(ctx context.Context, cmd slack.SlashCommand) {
-	h := b.cfg
-	conflicts, err := config.LoadConflicts(h.Path(), h.DiscoveredPath())
+	conflicts, err := config.LoadConflicts(b.cfg.Path(), b.cfg.DiscoveredPath())
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to check conflicts: %v", err))
 		return
 	}
-
-	if len(conflicts) == 0 {
-		b.postEphemeralCommand(ctx, cmd, "No config conflicts.")
-		return
-	}
-
-	var lines []string
-	for _, c := range conflicts {
-		lines = append(lines, fmt.Sprintf(
-			"• `%s` (`%s`) — repo `%s` blocked by operator config",
-			c.App, c.Env, c.SourceRepo,
-		))
-	}
-	b.postEphemeralCommand(ctx, cmd,
-		"*Config Conflicts:*\nThe following repo-sourced apps are blocked by operator config. "+
-			"Remove them from operator config for the repo definitions to take effect.\n"+
-			strings.Join(lines, "\n"),
-	)
+	b.postEphemeralCommand(ctx, cmd, formatConflicts(conflicts))
 }
 
 func (b *Bot) handleSlashHelp(ctx context.Context, cmd slack.SlashCommand) {

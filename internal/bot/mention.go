@@ -174,91 +174,25 @@ func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent
 }
 
 func (b *Bot) handleMentionHistory(ctx context.Context, evt queue.AppMentionEvent, appFilter string) {
-	const defaultLimit = 10
-
-	entries, err := b.store.GetHistory(ctx, appFilter, 100)
+	entries, err := b.store.GetHistory(ctx, appFilter, 10)
 	if err != nil {
 		b.replyMention(ctx, evt, fmt.Sprintf("Failed to fetch history: %v", err))
 		return
 	}
-
-	// Limit for channel display.
-	now := time.Now()
-	var lines []string
-	count := 0
-	for _, e := range entries {
-		age := now.Sub(e.CompletedAt).Round(time.Minute)
-		icon := eventIcon(e.EventType)
-		lines = append(lines, fmt.Sprintf(
-			"%s *%s* (%s) `%s` — <%s|#%d> — %s — %s ago",
-			icon, e.App, e.Environment, e.Tag, e.PRURL, e.PRNumber, slackMention(e.RequesterID), age,
-		))
-		count++
-		if count >= defaultLimit {
-			break
-		}
-	}
-
-	if len(lines) == 0 {
-		msg := "No deployment history."
-		if appFilter != "" {
-			msg = fmt.Sprintf("No deployment history for *%s*.", appFilter)
-		}
-		b.replyMention(ctx, evt, msg)
-		return
-	}
-
-	header := "*Recent Deployments:*"
-	if appFilter != "" {
-		header = fmt.Sprintf("*Deployments for %s:*", appFilter)
-	}
-	b.replyMention(ctx, evt, header+"\n"+strings.Join(lines, "\n"))
+	b.replyMention(ctx, evt, formatHistory(entries, appFilter))
 }
 
 func (b *Bot) handleMentionApps(ctx context.Context, evt queue.AppMentionEvent) {
-	cfg := b.cfg.Load()
-	if len(cfg.Apps) == 0 {
-		b.replyMention(ctx, evt, "No apps configured.")
-		return
-	}
-	var lines []string
-	for _, app := range cfg.Apps {
-		source := "operator"
-		if app.SourceRepo != "" {
-			source = app.SourceRepo
-		}
-		line := fmt.Sprintf("• *%s* (`%s`) — source: `%s`", app.FullName(), app.Environment, source)
-		if app.AutoDeploy {
-			line += " — auto-deploy"
-		}
-		lines = append(lines, line)
-	}
-	b.replyMention(ctx, evt, "*Configured Apps:*\n"+strings.Join(lines, "\n"))
+	b.replyMention(ctx, evt, formatApps(b.cfg.Load()))
 }
 
 func (b *Bot) handleMentionConflicts(ctx context.Context, evt queue.AppMentionEvent) {
-	h := b.cfg
-	conflicts, err := config.LoadConflicts(h.Path(), h.DiscoveredPath())
+	conflicts, err := config.LoadConflicts(b.cfg.Path(), b.cfg.DiscoveredPath())
 	if err != nil {
 		b.replyMention(ctx, evt, fmt.Sprintf("Failed to check conflicts: %v", err))
 		return
 	}
-	if len(conflicts) == 0 {
-		b.replyMention(ctx, evt, "No config conflicts.")
-		return
-	}
-	var lines []string
-	for _, c := range conflicts {
-		lines = append(lines, fmt.Sprintf(
-			"• `%s` (`%s`) — repo `%s` blocked by operator config",
-			c.App, c.Env, c.SourceRepo,
-		))
-	}
-	b.replyMention(ctx, evt,
-		"*Config Conflicts:*\nThe following repo-sourced apps are blocked by operator config. "+
-			"Remove them from operator config for the repo definitions to take effect.\n"+
-			strings.Join(lines, "\n"),
-	)
+	b.replyMention(ctx, evt, formatConflicts(conflicts))
 }
 
 func (b *Bot) handleMentionTags(ctx context.Context, evt queue.AppMentionEvent, appName string) {
@@ -266,18 +200,7 @@ func (b *Bot) handleMentionTags(ctx context.Context, evt queue.AppMentionEvent, 
 		b.replyMention(ctx, evt, b.unknownAppMessage(appName))
 		return
 	}
-	tags := b.ecrCache.Tags(appName, 10)
-	if len(tags) == 0 {
-		b.replyMention(ctx, evt, fmt.Sprintf("No tags found for *%s* (cache may still be warming up).", appName))
-		return
-	}
-	lines := make([]string, len(tags))
-	for i, t := range tags {
-		lines[i] = fmt.Sprintf("• `%s`", t)
-	}
-	b.replyMention(ctx, evt,
-		fmt.Sprintf("*Recent tags for %s:*\n%s", appName, strings.Join(lines, "\n")),
-	)
+	b.replyMention(ctx, evt, formatTagList(appName, b.ecrCache.Tags(appName, 10)))
 }
 
 func (b *Bot) handleMentionCancel(ctx context.Context, evt queue.AppMentionEvent, prArg string) {
