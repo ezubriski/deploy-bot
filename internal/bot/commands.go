@@ -286,31 +286,7 @@ func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand, envFilte
 		return
 	}
 
-	// Group by environment, preserving order of first appearance.
-	now := time.Now()
-	envOrder := []string{}
-	byEnv := map[string][]string{}
-	for _, d := range deploys {
-		age := now.Sub(d.RequestedAt).Round(time.Minute)
-		requester := slackMention(d.RequesterID)
-		line := fmt.Sprintf("• *%s* `%s` — <%s|PR #%d> — %s — %s old — _%s_",
-			d.App, d.Tag, d.PRURL, d.PRNumber, requester, age, d.State,
-		)
-		if _, ok := byEnv[d.Environment]; !ok {
-			envOrder = append(envOrder, d.Environment)
-		}
-		byEnv[d.Environment] = append(byEnv[d.Environment], line)
-	}
-
-	var sections []string
-	for _, env := range envOrder {
-		lines := byEnv[env]
-		header := fmt.Sprintf("*%s* (%d pending)", env, len(lines))
-		sections = append(sections, header+"\n"+strings.Join(lines, "\n"))
-	}
-
-	text := "*Pending Deployments*\n\n" + strings.Join(sections, "\n\n")
-	b.postEphemeralCommand(ctx, cmd, text)
+	b.postEphemeralCommand(ctx, cmd, formatStatus(deploys))
 }
 
 func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg string) {

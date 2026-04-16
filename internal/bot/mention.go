@@ -161,16 +161,7 @@ func (b *Bot) handleMentionStatus(ctx context.Context, evt queue.AppMentionEvent
 		return
 	}
 
-	now := time.Now()
-	var lines []string
-	for _, d := range deploys {
-		age := now.Sub(d.RequestedAt).Round(time.Minute)
-		lines = append(lines, fmt.Sprintf(
-			"• *%s* (%s) `%s` — PR <%s|#%d> — %s — %s old — _%s_",
-			d.App, d.Environment, d.Tag, d.PRURL, d.PRNumber, slackMention(d.RequesterID), age, d.State,
-		))
-	}
-	b.replyMention(ctx, evt, "*Pending Deployments*\n"+strings.Join(lines, "\n"))
+	b.replyMention(ctx, evt, formatStatus(deploys))
 }
 
 func (b *Bot) handleMentionHistory(ctx context.Context, evt queue.AppMentionEvent, appFilter string) {

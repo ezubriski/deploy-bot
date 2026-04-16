@@ -75,6 +75,37 @@ func formatConflicts(conflicts []config.Conflict) string {
 		strings.Join(lines, "\n")
 }
 
+// formatStatus renders pending deploys as a flat list ordered by
+// environment (preserving first-appearance order).
+func formatStatus(deploys []*store.PendingDeploy) string {
+	if len(deploys) == 0 {
+		return "" // caller handles the empty/filtered message
+	}
+
+	// Order by environment (first-appearance), flat list with env inline.
+	now := time.Now()
+	envOrder := []string{}
+	byEnv := map[string][]*store.PendingDeploy{}
+	for _, d := range deploys {
+		if _, ok := byEnv[d.Environment]; !ok {
+			envOrder = append(envOrder, d.Environment)
+		}
+		byEnv[d.Environment] = append(byEnv[d.Environment], d)
+	}
+
+	var lines []string
+	for _, env := range envOrder {
+		for _, d := range byEnv[env] {
+			age := now.Sub(d.RequestedAt).Round(time.Minute)
+			lines = append(lines, fmt.Sprintf(
+				"• *%s* (%s) `%s` — <%s|PR #%d> — %s — %s old — _%s_",
+				d.App, d.Environment, d.Tag, d.PRURL, d.PRNumber, slackMention(d.RequesterID), age, d.State,
+			))
+		}
+	}
+	return "*Pending Deployments*\n" + strings.Join(lines, "\n")
+}
+
 // formatTagList renders a tag list as a Slack message. Returns empty
 // string when no tags are available so the caller can handle it.
 func formatTagList(appName string, tags []string) string {
