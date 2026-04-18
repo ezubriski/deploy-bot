@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/slack-go/slack"
@@ -39,11 +38,8 @@ func (b *Bot) handleSlashCommand(ctx context.Context, evt socketmode.Event) {
 		}
 		b.handleStatus(ctx, cmd, envFilter, appFilter)
 	case parts[0] == "history":
-		appFilter := ""
-		if len(parts) >= 2 {
-			appFilter = parts[1]
-		}
-		b.handleHistory(ctx, cmd, appFilter)
+		appFilter, limit := parseHistoryArgs(parts[1:])
+		b.handleHistory(ctx, cmd, appFilter, limit)
 	case parts[0] == "tags" && len(parts) >= 2:
 		if len(parts) >= 3 {
 			b.handleTagVerify(ctx, cmd, parts[1], parts[2])
@@ -287,118 +283,24 @@ func (b *Bot) handleStatus(ctx context.Context, cmd slack.SlashCommand, envFilte
 		return
 	}
 
-	// Group by environment, preserving order of first appearance.
-	now := time.Now()
-	envOrder := []string{}
-	byEnv := map[string][]string{}
-	for _, d := range deploys {
-		age := now.Sub(d.RequestedAt).Round(time.Minute)
-		requester := slackMention(d.RequesterID)
-		line := fmt.Sprintf("• *%s* `%s` — <%s|PR #%d> — %s — %s old — _%s_",
-			d.App, d.Tag, d.PRURL, d.PRNumber, requester, age, d.State,
-		)
-		if _, ok := byEnv[d.Environment]; !ok {
-			envOrder = append(envOrder, d.Environment)
-		}
-		byEnv[d.Environment] = append(byEnv[d.Environment], line)
-	}
-
-	var sections []string
-	for _, env := range envOrder {
-		lines := byEnv[env]
-		header := fmt.Sprintf("*%s* (%d pending)", env, len(lines))
-		sections = append(sections, header+"\n"+strings.Join(lines, "\n"))
-	}
-
-	text := "*Pending Deployments*\n\n" + strings.Join(sections, "\n\n")
-	b.postEphemeralCommand(ctx, cmd, text)
+	b.postEphemeralCommand(ctx, cmd, formatStatus(deploys))
 }
 
 func (b *Bot) handleCancel(ctx context.Context, cmd slack.SlashCommand, prArg string) {
-	prNumber, err := strconv.Atoi(prArg)
-	if err != nil {
-		b.postEphemeralCommand(ctx, cmd, "Invalid PR number.")
-		return
-	}
-
-	cfg := b.cfg.Load()
-	d, err := b.store.Get(ctx, cfg.GitHub.Org, cfg.GitHub.Repo, prNumber)
-	if err != nil || d == nil {
-		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Deployment #%d not found.", prNumber))
-		return
-	}
-
-	if d.RequesterID != cmd.UserID && d.RequesterID != "" {
-		b.postEphemeralCommand(ctx, cmd, "You can only cancel your own deployments.")
-		return
-	}
-
-	cancellerIdent, err := b.validator.ResolveIdentity(ctx, cmd.UserID)
-	requesterGH := cancellerIdent.GitHubLogin
-	if err != nil || requesterGH == "" {
-		requesterGH = cmd.UserName
-		if requesterGH == "" {
-			requesterGH = "slack:" + cmd.UserID
-		}
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(8)
-	go func() {
-		defer wg.Done()
-		b.warnIfErr("github: comment cancelled", b.gh.CommentCancelled(ctx, prNumber, requesterGH), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		b.warnIfErr("github: close PR", b.gh.ClosePR(ctx, prNumber), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		b.warnIfErr("github: remove pending label", b.gh.RemoveLabel(ctx, prNumber, cfg.PendingLabel()), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		b.errIfErr("store: release lock", b.store.ReleaseLock(ctx, d.Environment, d.App), zap.String("env", d.Environment), zap.String("app", d.App))
-	}()
-	go func() {
-		defer wg.Done()
-		b.errIfErr("store: delete pending", b.store.Delete(ctx, d.GitHubOrg, d.GitHubRepo, prNumber), zap.Int("pr", prNumber))
-	}()
-	go func() {
-		defer wg.Done()
-		if err := b.auditLog.Log(ctx, audit.AuditEvent{
-			EventType:   audit.EventCancelled,
-			Trigger:     audit.TriggerSlashCommand,
-			App:         d.App,
-			Environment: d.Environment,
-			Tag:         d.Tag,
-			PRNumber:    prNumber,
-			PRURL:       d.PRURL,
-			ActorEmail:  cancellerIdent.Email,
-			ActorName:   cancellerIdent.Name,
-		}); err != nil {
-			b.log.Error("audit log", zap.Error(err))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		if err := b.store.PushHistory(ctx, store.HistoryFromPending(d, audit.EventCancelled)); err != nil {
-			b.log.Warn("store: push history", zap.Error(err))
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		b.postSlack(ctx, cfg.Slack.DeployChannel, "notice",
-			slack.MsgOptionText(fmt.Sprintf(
-				"Deployment of *%s* (%s) `%s` (<%s|PR #%d>) *cancelled* by <@%s>.",
-				d.App, d.Environment, d.Tag, d.PRURL, prNumber, cmd.UserID,
-			), false),
-		)
-	}()
-	b.metrics.RecordDeploy(d.App, audit.EventCancelled)
-	wg.Wait()
-	b.updatePendingGauge(ctx)
-	b.log.Info("deployment cancelled", zap.Int("pr", prNumber), zap.String("user", cancellerIdent.String()))
+	b.doCancelDeploy(ctx, prArg, cancelParams{
+		userID:   cmd.UserID,
+		userName: cmd.UserName,
+		trigger:  audit.TriggerSlashCommand,
+		allowECR: true,
+		replyError: func(msg string) {
+			b.postEphemeralCommand(ctx, cmd, msg)
+		},
+		replySuccess: func(msg string) {
+			b.postSlack(ctx, b.cfg.Load().Slack.DeployChannel, "notice",
+				slack.MsgOptionText(msg, false),
+			)
+		},
+	})
 }
 
 func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg string) {
@@ -422,7 +324,7 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	}
 	_, _, err = b.slack.PostMessageContext(ctx, cfg.Slack.DeployChannel,
 		slack.MsgOptionText(fmt.Sprintf(
-			":bell: %s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for approval. Expires in *%s*. <%s|PR #%d>",
+			":bell: %s — reminder: deployment of *%s* (%s) `%s` by %s is waiting for your approval. Expires in *%s*. <%s|PR #%d>",
 			approver, d.App, d.Environment, d.Tag, slackMention(d.RequesterID), remaining, d.PRURL, d.PRNumber,
 		), false),
 	)
@@ -431,40 +333,13 @@ func (b *Bot) handleNudge(ctx context.Context, cmd slack.SlashCommand, prArg str
 	}
 }
 
-func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilter string) {
-	const defaultLimit = 20
-
-	entries, err := b.store.GetHistory(ctx, appFilter, defaultLimit)
+func (b *Bot) handleHistory(ctx context.Context, cmd slack.SlashCommand, appFilter string, limit int) {
+	entries, err := b.store.GetHistory(ctx, appFilter, limit)
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to fetch history: %v", err))
 		return
 	}
-
-	if len(entries) == 0 {
-		msg := "No deployment history."
-		if appFilter != "" {
-			msg = fmt.Sprintf("No deployment history for *%s*.", appFilter)
-		}
-		b.postEphemeralCommand(ctx, cmd, msg)
-		return
-	}
-
-	now := time.Now()
-	var lines []string
-	for _, e := range entries {
-		age := now.Sub(e.CompletedAt).Round(time.Minute)
-		icon := eventIcon(e.EventType)
-		lines = append(lines, fmt.Sprintf(
-			"%s *%s* (%s) `%s` — <%s|#%d> — %s — %s ago",
-			icon, e.App, e.Environment, e.Tag, e.PRURL, e.PRNumber, slackMention(e.RequesterID), age,
-		))
-	}
-
-	header := "*Recent Deployments:*"
-	if appFilter != "" {
-		header = fmt.Sprintf("*Deployments for %s:*", appFilter)
-	}
-	b.postEphemeralCommand(ctx, cmd, header+"\n"+strings.Join(lines, "\n"))
+	b.postEphemeralCommand(ctx, cmd, formatHistory(entries, appFilter))
 }
 
 // findRollbackEntries scans entries (newest-first) for the two most recent
@@ -592,18 +467,7 @@ func (b *Bot) handleTagList(ctx context.Context, cmd slack.SlashCommand, appName
 		b.postEphemeralCommand(ctx, cmd, b.unknownAppMessage(appName))
 		return
 	}
-	tags := b.ecrCache.Tags(appName, 20)
-	if len(tags) == 0 {
-		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("No tags found for *%s* (cache may still be warming up).", appName))
-		return
-	}
-	lines := make([]string, len(tags))
-	for i, t := range tags {
-		lines[i] = fmt.Sprintf("• `%s`", t)
-	}
-	b.postEphemeralCommand(ctx, cmd,
-		fmt.Sprintf("*Recent tags for %s:*\n%s", appName, strings.Join(lines, "\n")),
-	)
+	b.postEphemeralCommand(ctx, cmd, formatTagList(appName, b.ecrCache.Tags(appName, 10)))
 }
 
 func (b *Bot) handleTagVerify(ctx context.Context, cmd slack.SlashCommand, appName, tag string) {
@@ -624,53 +488,16 @@ func (b *Bot) handleTagVerify(ctx context.Context, cmd slack.SlashCommand, appNa
 }
 
 func (b *Bot) handleApps(ctx context.Context, cmd slack.SlashCommand) {
-	cfg := b.cfg.Load()
-	if len(cfg.Apps) == 0 {
-		b.postEphemeralCommand(ctx, cmd, "No apps configured.")
-		return
-	}
-
-	var lines []string
-	for _, app := range cfg.Apps {
-		source := "operator"
-		if app.SourceRepo != "" {
-			source = app.SourceRepo
-		}
-		line := fmt.Sprintf("• *%s* (`%s`) — source: `%s`", app.FullName(), app.Environment, source)
-		if app.AutoDeploy {
-			line += " — auto-deploy"
-		}
-		lines = append(lines, line)
-	}
-
-	b.postEphemeralCommand(ctx, cmd, "*Configured Apps:*\n"+strings.Join(lines, "\n"))
+	b.postEphemeralCommand(ctx, cmd, formatApps(b.cfg.Load()))
 }
 
 func (b *Bot) handleConflicts(ctx context.Context, cmd slack.SlashCommand) {
-	h := b.cfg
-	conflicts, err := config.LoadConflicts(h.Path(), h.DiscoveredPath())
+	conflicts, err := config.LoadConflicts(b.cfg.Path(), b.cfg.DiscoveredPath())
 	if err != nil {
 		b.postEphemeralCommand(ctx, cmd, fmt.Sprintf("Failed to check conflicts: %v", err))
 		return
 	}
-
-	if len(conflicts) == 0 {
-		b.postEphemeralCommand(ctx, cmd, "No config conflicts.")
-		return
-	}
-
-	var lines []string
-	for _, c := range conflicts {
-		lines = append(lines, fmt.Sprintf(
-			"• `%s` (`%s`) — repo `%s` blocked by operator config",
-			c.App, c.Env, c.SourceRepo,
-		))
-	}
-	b.postEphemeralCommand(ctx, cmd,
-		"*Config Conflicts:*\nThe following repo-sourced apps are blocked by operator config. "+
-			"Remove them from operator config for the repo definitions to take effect.\n"+
-			strings.Join(lines, "\n"),
-	)
+	b.postEphemeralCommand(ctx, cmd, formatConflicts(conflicts))
 }
 
 func (b *Bot) handleSlashHelp(ctx context.Context, cmd slack.SlashCommand) {
@@ -696,7 +523,7 @@ App names include the environment suffix (e.g. `+"`myapp-dev`"+`, `+"`myapp-prod
 • `+"`%s`"+`  — open the deploy modal
 • `+"`%s <app-env>`"+`  — open the deploy modal pre-selected to an app
 • `+"`%s list`"+`  — list pending deployments (alias: `+"`status`"+`)
-• `+"`%s history [app-env]`"+`  — show recent completed deploys
+• `+"`%s history [app-env] [count]`"+`  — show recent completed deploys (default 10)
 • `+"`%s apps`"+`  — list all configured apps and their source
 • `+"`%s conflicts`"+`  — list repo-sourced apps blocked by operator config
 • `+"`%s tags <app-env>`"+`  — list recent ECR tags
